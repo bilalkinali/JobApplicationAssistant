@@ -17,6 +17,14 @@ The app will let the user maintain contact details, tone preferences, and struct
 
 V1 uses a fake AI provider first for deterministic development and stable workflow testing, with Ollama available behind the same backend-owned provider abstraction. OpenAI is intentionally out of scope for V1.
 
+## Milestone 2 PRD Update
+
+Goal: Improve the CRUD foundation into a more usable job application workflow, including better application state, profile fact management, and basic UI separation.
+
+Milestone 2 should turn the initial profile and application CRUD screens into a workflow base that can support later AI-assisted evidence matching and draft generation. The user should be able to maintain manually curated profile facts, manage application sessions with clearer status and metadata, and move through the app using separated areas for profile evidence, application list, and application detail work.
+
+This milestone should remain manual and non-AI. It should not implement job analysis, evidence matching, generation, claim audit, Ollama integration, or export behavior.
+
 ## User Stories
 
 1. As a job applicant, I want to maintain my contact information, so that generated application documents include accurate personal details.

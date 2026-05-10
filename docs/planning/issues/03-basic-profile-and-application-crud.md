@@ -1,6 +1,6 @@
 # Basic Profile and Application CRUD
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,14 +15,14 @@ This slice is intentionally limited to basic CRUD. It should not implement manua
 
 ## Acceptance criteria
 
-- [ ] The backend supports reading and updating the single profile record.
-- [ ] The backend supports listing, creating, reading, updating, and deleting application sessions.
-- [ ] Application sessions can store company name, role title, application URL, deadline, status, job posting text, detected language, and selected language.
-- [ ] The frontend includes a simple profile area for viewing and editing contact information and tone/language preferences.
-- [ ] The frontend includes a simple applications area for creating, listing, opening, editing, and deleting application sessions.
-- [ ] Basic validation prevents saving obviously invalid profile or application payloads.
-- [ ] API errors are returned in a plain, predictable shape suitable for later UI error handling.
-- [ ] The implementation remains compatible with later profile facts, AI workflow, generated draft, and export slices.
+- [x] The backend supports reading and updating the single profile record.
+- [x] The backend supports listing, creating, reading, updating, and deleting application sessions.
+- [x] Application sessions can store company name, role title, application URL, deadline, status, job posting text, detected language, and selected language.
+- [x] The frontend includes a simple profile area for viewing and editing contact information and tone/language preferences.
+- [x] The frontend includes a simple applications area for creating, listing, opening, editing, and deleting application sessions.
+- [x] Basic validation prevents saving obviously invalid profile or application payloads.
+- [x] API errors are returned in a plain, predictable shape suitable for later UI error handling.
+- [x] The implementation remains compatible with later profile facts, AI workflow, generated draft, and export slices.
 
 ## Blocked by
 

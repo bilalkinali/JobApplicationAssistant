@@ -7,6 +7,8 @@ namespace JobApplicationAssistant.Api.Endpoints;
 
 public static class ApplicationEndpoints
 {
+    private static readonly string[] ValidStatuses = ["Draft", "PostingCaptured", "ReadyForReview", "Applied", "Archived"];
+
     public static IEndpointRouteBuilder MapApplicationEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/applications");
@@ -37,7 +39,7 @@ public static class ApplicationEndpoints
                 RoleTitle = request.RoleTitle.Trim(),
                 ApplicationUrl = NormalizeOptional(request.ApplicationUrl),
                 Deadline = request.Deadline,
-                Status = request.Status.Trim(),
+                Status = NormalizeStatus(request.Status),
                 JobPostingText = request.JobPostingText.Trim(),
                 DetectedLanguage = NormalizeOptional(request.DetectedLanguage),
                 SelectedLanguage = NormalizeOptional(request.SelectedLanguage),
@@ -80,7 +82,7 @@ public static class ApplicationEndpoints
             application.RoleTitle = request.RoleTitle.Trim();
             application.ApplicationUrl = NormalizeOptional(request.ApplicationUrl);
             application.Deadline = request.Deadline;
-            application.Status = request.Status.Trim();
+            application.Status = NormalizeStatus(request.Status);
             application.JobPostingText = request.JobPostingText.Trim();
             application.DetectedLanguage = NormalizeOptional(request.DetectedLanguage);
             application.SelectedLanguage = NormalizeOptional(request.SelectedLanguage);
@@ -139,6 +141,12 @@ public static class ApplicationEndpoints
             errors[nameof(request.ApplicationUrl)] = ["Application URL must be an absolute URL."];
         }
 
+        if (!string.IsNullOrWhiteSpace(request.Status) &&
+            !ValidStatuses.Contains(request.Status.Trim(), StringComparer.OrdinalIgnoreCase))
+        {
+            errors[nameof(request.Status)] = ["Status must be Draft, PostingCaptured, ReadyForReview, Applied, or Archived."];
+        }
+
         return errors;
     }
 
@@ -163,4 +171,7 @@ public static class ApplicationEndpoints
 
     private static string? NormalizeOptional(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string NormalizeStatus(string status) =>
+        ValidStatuses.First(validStatus => string.Equals(validStatus, status.Trim(), StringComparison.OrdinalIgnoreCase));
 }

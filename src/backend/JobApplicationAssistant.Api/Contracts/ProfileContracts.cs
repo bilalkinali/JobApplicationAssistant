@@ -26,3 +26,26 @@ public sealed record ProfileResponse(
     string? EnglishTone,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
+
+public sealed record ProfileFactRequest(
+    string? Type,
+    string? Title,
+    string? Summary,
+    string? Status,
+    string? FactItems,
+    string? Technologies,
+    string? AllowedClaims,
+    string? ForbiddenClaims);
+
+public sealed record ProfileFactResponse(
+    Guid Id,
+    string Type,
+    string Title,
+    string Summary,
+    string Status,
+    string FactItems,
+    string Technologies,
+    string AllowedClaims,
+    string ForbiddenClaims,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);

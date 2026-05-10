@@ -2,6 +2,7 @@ using JobApplicationAssistant.Api.Contracts;
 using JobApplicationAssistant.Api.Data;
 using JobApplicationAssistant.Api.Domain;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace JobApplicationAssistant.Api.Endpoints;
 
@@ -60,6 +61,92 @@ public static class ProfileEndpoints
             return Results.Ok(ToResponse(profile));
         });
 
+        group.MapGet("/facts", async (ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var facts = await db.ProfileFacts
+                .OrderBy(fact => fact.Status)
+                .ThenByDescending(fact => fact.UpdatedAt)
+                .Select(fact => ToResponse(fact))
+                .ToListAsync(ct);
+
+            return Results.Ok(facts);
+        });
+
+        group.MapPost("/facts", async Task<IResult> (ProfileFactRequest request, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var errors = Validate(request);
+            if (errors.Count > 0)
+            {
+                return Results.BadRequest(ApiError.Validation(errors));
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var fact = new ProfileFact
+            {
+                Id = Guid.NewGuid(),
+                Type = request.Type!.Trim(),
+                Title = request.Title!.Trim(),
+                Summary = request.Summary!.Trim(),
+                Status = ParseStatus(request.Status!),
+                FactItems = NormalizeJsonArray(request.FactItems),
+                Technologies = NormalizeJsonArray(request.Technologies),
+                AllowedClaims = NormalizeJsonArray(request.AllowedClaims),
+                ForbiddenClaims = NormalizeJsonArray(request.ForbiddenClaims),
+                ManuallyEdited = true,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+
+            db.ProfileFacts.Add(fact);
+            await db.SaveChangesAsync(ct);
+
+            return Results.Created($"/api/profile/facts/{fact.Id}", ToResponse(fact));
+        });
+
+        group.MapPut("/facts/{id:guid}", async Task<IResult> (Guid id, ProfileFactRequest request, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var errors = Validate(request);
+            if (errors.Count > 0)
+            {
+                return Results.BadRequest(ApiError.Validation(errors));
+            }
+
+            var fact = await db.ProfileFacts.FindAsync([id], ct);
+            if (fact is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Profile fact was not found."));
+            }
+
+            fact.Type = request.Type!.Trim();
+            fact.Title = request.Title!.Trim();
+            fact.Summary = request.Summary!.Trim();
+            fact.Status = ParseStatus(request.Status!);
+            fact.FactItems = NormalizeJsonArray(request.FactItems);
+            fact.Technologies = NormalizeJsonArray(request.Technologies);
+            fact.AllowedClaims = NormalizeJsonArray(request.AllowedClaims);
+            fact.ForbiddenClaims = NormalizeJsonArray(request.ForbiddenClaims);
+            fact.ManuallyEdited = true;
+            fact.UpdatedAt = DateTimeOffset.UtcNow;
+
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(ToResponse(fact));
+        });
+
+        group.MapDelete("/facts/{id:guid}", async Task<IResult> (Guid id, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var fact = await db.ProfileFacts.FindAsync([id], ct);
+            if (fact is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Profile fact was not found."));
+            }
+
+            db.ProfileFacts.Remove(fact);
+            await db.SaveChangesAsync(ct);
+
+            return Results.NoContent();
+        });
+
         return app;
     }
 
@@ -95,6 +182,20 @@ public static class ProfileEndpoints
             profile.CreatedAt,
             profile.UpdatedAt);
 
+    private static ProfileFactResponse ToResponse(ProfileFact fact) =>
+        new(
+            fact.Id,
+            fact.Type,
+            fact.Title,
+            fact.Summary,
+            fact.Status.ToString(),
+            fact.FactItems,
+            fact.Technologies,
+            fact.AllowedClaims,
+            fact.ForbiddenClaims,
+            fact.CreatedAt,
+            fact.UpdatedAt);
+
     private static Dictionary<string, string[]> Validate(ProfileRequest request)
     {
         var errors = new Dictionary<string, string[]>();
@@ -122,7 +223,28 @@ public static class ProfileEndpoints
         return errors;
     }
 
-    private static void AddRequired(Dictionary<string, string[]> errors, string field, string value, int maxLength)
+    private static Dictionary<string, string[]> Validate(ProfileFactRequest request)
+    {
+        var errors = new Dictionary<string, string[]>();
+
+        AddRequired(errors, nameof(request.Type), request.Type, 80);
+        AddRequired(errors, nameof(request.Title), request.Title, 200);
+        AddRequired(errors, nameof(request.Summary), request.Summary, 4000);
+
+        if (!Enum.TryParse<ProfileFactStatus>(request.Status, ignoreCase: true, out _))
+        {
+            errors[nameof(request.Status)] = ["Status must be Draft, Approved, or Archived."];
+        }
+
+        AddJsonArrayError(errors, nameof(request.FactItems), request.FactItems);
+        AddJsonArrayError(errors, nameof(request.Technologies), request.Technologies);
+        AddJsonArrayError(errors, nameof(request.AllowedClaims), request.AllowedClaims);
+        AddJsonArrayError(errors, nameof(request.ForbiddenClaims), request.ForbiddenClaims);
+
+        return errors;
+    }
+
+    private static void AddRequired(Dictionary<string, string[]> errors, string field, string? value, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -149,6 +271,38 @@ public static class ProfileEndpoints
         }
     }
 
+    private static void AddJsonArrayError(Dictionary<string, string[]> errors, string field, string? value)
+    {
+        if (!IsJsonArray(value))
+        {
+            errors[field] = [$"{field} must be a JSON array."];
+        }
+    }
+
     private static string? NormalizeOptional(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static ProfileFactStatus ParseStatus(string status) =>
+        Enum.Parse<ProfileFactStatus>(status, ignoreCase: true);
+
+    private static string NormalizeJsonArray(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "[]" : value.Trim();
+
+    private static bool IsJsonArray(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(value);
+            return document.RootElement.ValueKind == JsonValueKind.Array;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
 }

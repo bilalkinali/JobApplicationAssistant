@@ -20,6 +20,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -64,7 +65,8 @@ button {
 .brand h1,
 .workspace-header h2,
 .panel h3,
-.list-header h3 {
+.list-header h3,
+.section-heading h3 {
   margin: 0;
   letter-spacing: 0;
 }
@@ -207,6 +209,7 @@ button {
 }
 
 .field input,
+.field select,
 .field textarea {
   width: 100%;
   border: 1px solid #cbd3d9;
@@ -215,7 +218,8 @@ button {
   background: #ffffff;
 }
 
-.field input {
+.field input,
+.field select {
   height: 42px;
   padding: 0 12px;
 }
@@ -256,9 +260,79 @@ button {
   background: #fff5f3;
 }
 
+.profile-layout {
+  display: grid;
+  gap: 22px;
+}
+
+.panel-form,
+.profile-facts-panel {
+  max-width: none;
+  padding: 18px;
+  border: 1px solid #d9d7d0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.section-heading {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 6px;
+}
+
+.section-heading p {
+  margin: 0;
+  color: #64717c;
+  line-height: 1.45;
+}
+
+.profile-facts-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.fact-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.fact-card {
+  display: grid;
+  gap: 5px;
+  min-height: 82px;
+  padding: 12px;
+  border: 1px solid #d7dde2;
+  border-radius: 8px;
+  color: #1b1f24;
+  background: #ffffff;
+  text-align: left;
+}
+
+.fact-card:hover,
+.fact-card.active {
+  border-color: #7da996;
+  background: #edf5f2;
+}
+
+.fact-card.archived {
+  color: #5f6872;
+  background: #f3f3f0;
+}
+
+.fact-card span {
+  color: #64717c;
+  font-size: 0.88rem;
+}
+
+.fact-editor {
+  max-width: none;
+  padding-top: 8px;
+}
+
 .applications-layout {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: 380px minmax(0, 1fr);
   gap: 18px;
 }
 
@@ -278,6 +352,13 @@ button {
 
 .session-list {
   display: grid;
+}
+
+.filters {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e1e1dc;
 }
 
 .session {
@@ -300,6 +381,12 @@ button {
 .session span {
   color: #64717c;
   font-size: 0.9rem;
+}
+
+.session small {
+  color: #77828c;
+  font-size: 0.78rem;
+  line-height: 1.35;
 }
 
 .empty-state {

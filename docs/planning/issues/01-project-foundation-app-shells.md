@@ -1,6 +1,6 @@
 # Project Foundation: App Shells
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,13 +15,13 @@ This issue covers the project foundation only. It should not implement AI behavi
 
 ## Acceptance criteria
 
-- [ ] A new ASP.NET Core Minimal API backend project exists for the V1 app.
-- [ ] A new React + Vite + TypeScript frontend project exists for the V1 app.
-- [ ] The backend exposes a minimal health or root endpoint that confirms the API project is reachable.
-- [ ] The frontend has a minimal desktop-first app shell that can later host Home, Profile, Applications, and Settings areas.
-- [ ] Project naming and folder structure make it clear which code belongs to backend and frontend.
-- [ ] No OpenAI dependency or configuration is introduced.
-- [ ] No AI workflow behavior is implemented in this slice.
+- [x] A new ASP.NET Core Minimal API backend project exists for the V1 app.
+- [x] A new React + Vite + TypeScript frontend project exists for the V1 app.
+- [x] The backend exposes a minimal health or root endpoint that confirms the API project is reachable.
+- [x] The frontend has a minimal desktop-first app shell that can later host Home, Profile, Applications, and Settings areas.
+- [x] Project naming and folder structure make it clear which code belongs to backend and frontend.
+- [x] No OpenAI dependency or configuration is introduced.
+- [x] No AI workflow behavior is implemented in this slice.
 
 ## Blocked by
 
