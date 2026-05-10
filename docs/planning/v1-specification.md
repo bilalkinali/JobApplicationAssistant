@@ -103,6 +103,14 @@ ProfileFact
 - UpdatedAt
 ```
 
+Profile fact status values:
+
+```text
+Draft
+Approved
+Archived
+```
+
 For v1, `SourceDocumentIds` and `OriginalImportedSnapshot` can exist but remain mostly unused until CV import is added.
 
 ```text
@@ -120,10 +128,34 @@ JobApplication
 - EvidenceMatches jsonb
 - UnmatchedRequirements jsonb
 - ApprovedEvidence jsonb
+- CustomFacts jsonb
+- CreatedAt
+- UpdatedAt
+```
+
+Job-local custom facts are stored on the application as latest-state JSON:
+
+```json
+[
+  {
+    "id": "string",
+    "title": "string",
+    "summary": "string",
+    "technologies": ["string"],
+    "allowedClaims": ["string"],
+    "status": "PendingConfirmation | Approved | Rejected"
+  }
+]
+```
+
+```text
+GeneratedDraft
+- Id
+- JobApplicationId
 - CoverLetterText
 - ShortMotivationText
 - ClaimAudit jsonb
-- GeneratedAt nullable
+- GeneratedAt
 - LastEditedAt nullable
 - AuditUpdatedAt nullable
 - CreatedAt
@@ -323,7 +355,7 @@ Warnings instead of rigid setup blocking.
 Block only when:
 
 - no job posting text
-- no approved evidence/custom evidence
+- no approved profile facts or approved custom facts
 - AI provider unavailable for AI action
 
 **Backend Endpoints**
