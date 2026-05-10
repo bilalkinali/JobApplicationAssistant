@@ -80,6 +80,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             entity.Property(draft => draft.CoverLetterText).HasColumnType("text");
             entity.Property(draft => draft.ShortMotivationText).HasColumnType("text");
             entity.Property(draft => draft.ClaimAudit).HasColumnType("jsonb");
+            entity.Property(draft => draft.IsClaimAuditStale).HasDefaultValue(false);
 
             entity.HasOne(draft => draft.JobApplication)
                 .WithOne(application => application.GeneratedDraft)

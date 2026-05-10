@@ -1,6 +1,6 @@
 # Claim Audit
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -17,20 +17,20 @@ This slice should not add Ollama, diagnostics, strict JSON validation, repair at
 
 ## Acceptance criteria
 
-- [ ] The AI provider abstraction supports claim audit.
-- [ ] The fake provider produces deterministic claim audit results.
-- [ ] The public API supports manually running claim audit for the current generated draft.
-- [ ] Claim audit is blocked with a plain validation error when no generated draft exists.
-- [ ] Claim audit compares draft text against approved evidence.
-- [ ] Claim audit results can classify claims as supported.
-- [ ] Claim audit results can classify claims as unsupported.
-- [ ] Claim audit results can classify claims as needs-review.
-- [ ] Supported audit results reference approved evidence where possible.
-- [ ] Claim audit results are stored as structured JSON on `GeneratedDraft`.
-- [ ] Running claim audit updates the audit timestamp.
-- [ ] Running claim audit after manual edits clears the stale state for the current draft text.
-- [ ] Backend tests cover supported, unsupported, needs-review, persisted audit JSON, audit timestamp updates, and clearing stale audit state after rerun.
-- [ ] No Ollama, diagnostics, strict JSON validation, repair attempts, export, or draft history is introduced.
+- [x] The AI provider abstraction supports claim audit.
+- [x] The fake provider produces deterministic claim audit results.
+- [x] The public API supports manually running claim audit for the current generated draft.
+- [x] Claim audit is blocked with a plain validation error when no generated draft exists.
+- [x] Claim audit compares draft text against approved evidence.
+- [x] Claim audit results can classify claims as supported.
+- [x] Claim audit results can classify claims as unsupported.
+- [x] Claim audit results can classify claims as needs-review.
+- [x] Supported audit results reference approved evidence where possible.
+- [x] Claim audit results are stored as structured JSON on `GeneratedDraft`.
+- [x] Running claim audit updates the audit timestamp.
+- [x] Running claim audit after manual edits clears the stale state for the current draft text.
+- [x] Backend tests cover supported, unsupported, needs-review, persisted audit JSON, audit timestamp updates, and clearing stale audit state after rerun.
+- [x] No Ollama, diagnostics, strict JSON validation, repair attempts, export, or draft history is introduced.
 
 ## Blocked by
 

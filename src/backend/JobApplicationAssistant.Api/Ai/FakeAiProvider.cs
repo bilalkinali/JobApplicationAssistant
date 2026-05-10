@@ -147,6 +147,30 @@ public sealed partial class FakeAiProvider : IAiProvider
         return Task.FromResult(new DraftGenerationResult(coverLetter, shortMotivation));
     }
 
+    public Task<ClaimAuditResult> AuditClaimsAsync(ClaimAuditInput input, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var evidence = input.ApprovedEvidence.ToList();
+        var claims = SplitClaims(input.CoverLetterText, input.ShortMotivationText)
+            .Select((claim, index) =>
+            {
+                var evidenceIds = evidence
+                    .Where(match => ClaimSupportedByEvidence(claim, match))
+                    .Select(match => match.Id)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var status = evidenceIds.Count > 0
+                    ? "Supported"
+                    : ClaimNeedsReview(claim) ? "NeedsReview" : "Unsupported";
+
+                return new ClaimAuditClaim($"claim-{index + 1}", claim, status, evidenceIds);
+            })
+            .ToList();
+
+        return Task.FromResult(new ClaimAuditResult(claims));
+    }
+
     private static bool ContainsAny(string text, IReadOnlyList<string> keywords) =>
         keywords.Any(keyword => ContainsTerm(text, keyword));
 
@@ -163,6 +187,45 @@ public sealed partial class FakeAiProvider : IAiProvider
 
         return ContainsTerm(haystack, keyword);
     }
+
+    private static IReadOnlyList<string> SplitClaims(params string[] texts) =>
+        texts
+            .Where(text => !string.IsNullOrWhiteSpace(text))
+            .SelectMany(text => text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Select(claim => claim.Trim())
+            .Where(claim => !string.IsNullOrWhiteSpace(claim))
+            .Select(claim => claim.EndsWith(".", StringComparison.Ordinal) ? claim : $"{claim}.")
+            .ToList();
+
+    private static bool ClaimSupportedByEvidence(string claim, EvidenceMatch evidence)
+    {
+        var evidenceText = string.Join(' ', [
+            evidence.Signal,
+            evidence.ProfileFactTitle,
+            evidence.Summary,
+            string.Join(' ', evidence.MatchedTerms)
+        ]);
+
+        return ContainsMeaningfulWords(claim, evidenceText) || ContainsMeaningfulWords(evidence.Summary, claim);
+    }
+
+    private static bool ContainsMeaningfulWords(string expectedWords, string text)
+    {
+        var words = Regex.Matches(expectedWords, @"\b[\w\-.#]+\b")
+            .Select(match => match.Value)
+            .Where(word => word.Length >= 4)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return words.Count > 0 && words.All(word => ContainsTerm(text, word));
+    }
+
+    private static bool ClaimNeedsReview(string claim) =>
+        ContainsTerm(claim, "may") ||
+        ContainsTerm(claim, "might") ||
+        ContainsTerm(claim, "interested") ||
+        ContainsTerm(claim, "learn") ||
+        ContainsTerm(claim, "fit");
 
     private static bool ContainsTerm(string text, string keyword)
     {

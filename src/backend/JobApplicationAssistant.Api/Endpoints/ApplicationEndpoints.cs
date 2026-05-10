@@ -58,7 +58,9 @@ public static class ApplicationEndpoints
 
         group.MapGet("/{id:guid}", async Task<IResult> (Guid id, ApplicationDbContext db, CancellationToken ct) =>
         {
-            var application = await db.JobApplications.FindAsync([id], ct);
+            var application = await db.JobApplications
+                .Include(application => application.GeneratedDraft)
+                .FirstOrDefaultAsync(application => application.Id == id, ct);
             if (application is null)
             {
                 return Results.NotFound(ApiError.NotFound("Application session was not found."));
@@ -278,6 +280,77 @@ public static class ApplicationEndpoints
             draft.GeneratedAt = now;
             draft.LastEditedAt = null;
             draft.AuditUpdatedAt = null;
+            draft.IsClaimAuditStale = false;
+            draft.UpdatedAt = now;
+            application.UpdatedAt = now;
+
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(ToResponse(draft));
+        });
+
+        group.MapPut("/{id:guid}/generated-draft", async Task<IResult> (Guid id, GeneratedDraftEditRequest request, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var application = await db.JobApplications
+                .Include(application => application.GeneratedDraft)
+                .FirstOrDefaultAsync(application => application.Id == id, ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            if (application.GeneratedDraft is null)
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(ApplicationResponse.GeneratedDraft)] = ["Generate a draft before saving manual draft edits."]
+                }));
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var draft = application.GeneratedDraft;
+            draft.CoverLetterText = request.CoverLetterText;
+            draft.ShortMotivationText = request.ShortMotivationText;
+            draft.LastEditedAt = now;
+            draft.IsClaimAuditStale = draft.AuditUpdatedAt is not null || draft.ClaimAudit != "{}";
+            draft.UpdatedAt = now;
+            application.UpdatedAt = now;
+
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(ToResponse(draft));
+        });
+
+        group.MapPost("/{id:guid}/audit-claims", async Task<IResult> (Guid id, ApplicationDbContext db, IAiProvider aiProvider, CancellationToken ct) =>
+        {
+            var application = await db.JobApplications
+                .Include(application => application.GeneratedDraft)
+                .FirstOrDefaultAsync(application => application.Id == id, ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            if (application.GeneratedDraft is null)
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(ApplicationResponse.GeneratedDraft)] = ["Generate a draft before running claim audit."]
+                }));
+            }
+
+            var draft = application.GeneratedDraft;
+            var result = await aiProvider.AuditClaimsAsync(
+                new ClaimAuditInput(
+                    draft.CoverLetterText,
+                    draft.ShortMotivationText,
+                    ReadEvidenceMatches(application.ApprovedEvidence)),
+                ct);
+            var now = DateTimeOffset.UtcNow;
+
+            draft.ClaimAudit = JsonSerializer.Serialize(result, JsonOptions);
+            draft.AuditUpdatedAt = now;
+            draft.IsClaimAuditStale = false;
             draft.UpdatedAt = now;
             application.UpdatedAt = now;
 
@@ -305,7 +378,8 @@ public static class ApplicationEndpoints
             application.UnmatchedRequirements,
             application.ApprovedEvidence,
             application.CreatedAt,
-            application.UpdatedAt);
+            application.UpdatedAt,
+            application.GeneratedDraft is null ? null : ToResponse(application.GeneratedDraft));
 
     private static GeneratedDraftResponse ToResponse(GeneratedDraft draft) =>
         new(
@@ -318,7 +392,8 @@ public static class ApplicationEndpoints
             draft.LastEditedAt,
             draft.AuditUpdatedAt,
             draft.CreatedAt,
-            draft.UpdatedAt);
+            draft.UpdatedAt,
+            draft.IsClaimAuditStale);
 
     private static Dictionary<string, string[]> Validate(ApplicationRequest request)
     {

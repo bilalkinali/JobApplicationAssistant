@@ -20,6 +20,8 @@ public sealed class GeneratedDraft
 
     public DateTimeOffset? AuditUpdatedAt { get; set; }
 
+    public bool IsClaimAuditStale { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }

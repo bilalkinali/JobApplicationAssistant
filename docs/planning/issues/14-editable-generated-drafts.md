@@ -1,6 +1,6 @@
 # Editable Generated Drafts
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -17,17 +17,17 @@ This slice should not add claim audit execution, Ollama, diagnostics, export, or
 
 ## Acceptance criteria
 
-- [ ] The application detail API response includes the current generated draft when one exists.
-- [ ] The public API supports saving manual edits to the current generated draft.
-- [ ] The cover letter text can be manually edited and saved.
-- [ ] The short motivation text can be manually edited and saved.
-- [ ] Manual draft edits update edit and updated timestamps.
-- [ ] Manual draft edits preserve generated timestamps.
-- [ ] Manual draft edits mark existing audit data stale.
-- [ ] Reopening an application session shows the latest saved draft text.
-- [ ] Saving edits fails plainly when no generated draft exists for the application.
-- [ ] Backend tests cover reading the current generated draft, saving manual edits, timestamp behavior, and stale audit marking.
-- [ ] No claim audit execution, Ollama, diagnostics, export, or draft history is introduced.
+- [x] The application detail API response includes the current generated draft when one exists.
+- [x] The public API supports saving manual edits to the current generated draft.
+- [x] The cover letter text can be manually edited and saved.
+- [x] The short motivation text can be manually edited and saved.
+- [x] Manual draft edits update edit and updated timestamps.
+- [x] Manual draft edits preserve generated timestamps.
+- [x] Manual draft edits mark existing audit data stale.
+- [x] Reopening an application session shows the latest saved draft text.
+- [x] Saving edits fails plainly when no generated draft exists for the application.
+- [x] Backend tests cover reading the current generated draft, saving manual edits, timestamp behavior, and stale audit marking.
+- [x] No claim audit execution, Ollama, diagnostics, export, or draft history is introduced.
 
 ## Blocked by
 

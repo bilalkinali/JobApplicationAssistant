@@ -9,6 +9,8 @@ public interface IAiProvider
     Task<EvidenceMatchResult> MatchEvidenceAsync(EvidenceMatchInput input, CancellationToken ct);
 
     Task<DraftGenerationResult> GenerateDraftAsync(DraftGenerationInput input, CancellationToken ct);
+
+    Task<ClaimAuditResult> AuditClaimsAsync(ClaimAuditInput input, CancellationToken ct);
 }
 
 public sealed record JobAnalysisInput(
@@ -44,6 +46,20 @@ public sealed record DraftGenerationInput(
 public sealed record DraftGenerationResult(
     string CoverLetterText,
     string ShortMotivationText);
+
+public sealed record ClaimAuditInput(
+    string CoverLetterText,
+    string ShortMotivationText,
+    IReadOnlyList<EvidenceMatch> ApprovedEvidence);
+
+public sealed record ClaimAuditResult(
+    IReadOnlyList<ClaimAuditClaim> Claims);
+
+public sealed record ClaimAuditClaim(
+    string Id,
+    string Text,
+    string Status,
+    IReadOnlyList<string> EvidenceIds);
 
 public sealed record JobSignalsDocument(
     string Provider,
