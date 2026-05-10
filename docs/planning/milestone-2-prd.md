@@ -1,7 +1,9 @@
 # Milestone 2 Product Requirements Document
 
-Status: ready-for-agent
+Status: done
 Source: docs/planning/v1-prd.md
+
+Completion note: Child issues 04 through 08 are marked done, and the implemented backend/frontend surface now supports the manual profile fact and application workflow base described here.
 
 ## Goal
 

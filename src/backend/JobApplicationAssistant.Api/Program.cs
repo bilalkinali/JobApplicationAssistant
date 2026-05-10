@@ -45,3 +45,5 @@ app.MapProfileEndpoints();
 app.MapApplicationEndpoints();
 
 app.Run();
+
+public partial class Program;

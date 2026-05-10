@@ -1,7 +1,9 @@
 # Milestone 3 Product Requirements Document
 
-Status: ready-for-agent
+Status: done
 Source: docs/planning/v1-prd.md
+
+Completion note: Child issues 09 through 12 are marked done, and the implemented backend/frontend surface now supports fake job analysis, evidence matching, unmatched requirements, and approved evidence review.
 
 ## Goal
 
