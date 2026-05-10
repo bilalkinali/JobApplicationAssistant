@@ -94,7 +94,7 @@ function App() {
   async function loadApplications() {
     try {
       const response = await apiGet<ApplicationSession[]>("/api/applications");
-      setApplications(response.map(toApplicationForm));
+      setApplications(response.map(toApplicationSession));
     } catch (apiError) {
       setError(formatError(apiError));
     }
@@ -382,9 +382,8 @@ function toProfileForm(profile: ProfileForm): ProfileForm {
   };
 }
 
-function toApplicationForm(application: ApplicationSession): ApplicationSession;
 function toApplicationForm(application: ApplicationForm): ApplicationForm;
-function toApplicationForm(application: ApplicationForm | ApplicationSession) {
+function toApplicationForm(application: ApplicationForm) {
   return {
     ...application,
     applicationUrl: application.applicationUrl ?? "",
@@ -392,6 +391,15 @@ function toApplicationForm(application: ApplicationForm | ApplicationSession) {
     jobPostingText: application.jobPostingText ?? "",
     detectedLanguage: application.detectedLanguage ?? "",
     selectedLanguage: application.selectedLanguage ?? ""
+  };
+}
+
+function toApplicationSession(application: ApplicationSession): ApplicationSession {
+  return {
+    ...toApplicationForm(application),
+    id: application.id,
+    createdAt: application.createdAt,
+    updatedAt: application.updatedAt
   };
 }
 
