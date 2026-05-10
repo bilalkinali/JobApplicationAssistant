@@ -29,6 +29,11 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
@@ -66,7 +71,10 @@ button {
 .workspace-header h2,
 .panel h3,
 .list-header h3,
-.section-heading h3 {
+.section-heading h3,
+.workflow-step h4,
+.review-column h4,
+.signal-column h4 {
   margin: 0;
   letter-spacing: 0;
 }
@@ -398,4 +406,119 @@ button {
 .editor-panel {
   max-width: none;
   padding: 18px;
+}
+
+.workflow-panel {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 16px;
+  padding-top: 18px;
+  border-top: 1px solid #e1e1dc;
+}
+
+.workflow-step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px;
+  border: 1px solid #d9d7d0;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.workflow-step p,
+.signal-column p,
+.evidence-card p {
+  margin: 6px 0 0;
+  color: #64717c;
+  line-height: 1.45;
+}
+
+.workflow-step button,
+.evidence-card button,
+.approved-item button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #b9c4cd;
+  border-radius: 6px;
+  color: #263442;
+  background: #ffffff;
+  font-weight: 750;
+}
+
+.signal-grid,
+.review-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.review-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.signal-column,
+.review-column {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #d9d7d0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.signal-column ul {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: #344250;
+  line-height: 1.55;
+}
+
+.evidence-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid #d7dde2;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.evidence-card.muted {
+  background: #f7f7f3;
+}
+
+.evidence-card span,
+.evidence-card small,
+.approved-item span {
+  color: #64717c;
+}
+
+.evidence-card button {
+  justify-self: start;
+}
+
+.approved-list {
+  display: grid;
+  gap: 10px;
+}
+
+.approved-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #c7ded4;
+  border-radius: 8px;
+  background: #edf5f2;
+}
+
+.approved-item div {
+  display: grid;
+  gap: 4px;
+}
+
+.empty-state.compact {
+  padding: 8px 0;
 }

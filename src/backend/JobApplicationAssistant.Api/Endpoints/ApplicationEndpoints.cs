@@ -1,13 +1,16 @@
+using JobApplicationAssistant.Api.Ai;
 using JobApplicationAssistant.Api.Contracts;
 using JobApplicationAssistant.Api.Data;
 using JobApplicationAssistant.Api.Domain;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace JobApplicationAssistant.Api.Endpoints;
 
 public static class ApplicationEndpoints
 {
     private static readonly string[] ValidStatuses = ["Draft", "PostingCaptured", "ReadyForReview", "Applied", "Archived"];
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public static IEndpointRouteBuilder MapApplicationEndpoints(this IEndpointRouteBuilder app)
     {
@@ -107,6 +110,111 @@ public static class ApplicationEndpoints
             return Results.NoContent();
         });
 
+        group.MapPost("/{id:guid}/analyze-job", async Task<IResult> (Guid id, ApplicationDbContext db, IAiProvider aiProvider, CancellationToken ct) =>
+        {
+            var application = await db.JobApplications.FindAsync([id], ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            if (string.IsNullOrWhiteSpace(application.JobPostingText))
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(application.JobPostingText)] = ["Job posting text is required before analysis."]
+                }));
+            }
+
+            var result = await aiProvider.AnalyzeJobAsync(
+                new JobAnalysisInput(
+                    application.CompanyName,
+                    application.RoleTitle,
+                    application.SelectedLanguage,
+                    application.JobPostingText),
+                ct);
+
+            application.CompanyName = result.CompanyName;
+            application.RoleTitle = result.RoleTitle;
+            application.DetectedLanguage = result.DetectedLanguage;
+            application.SelectedLanguage = result.SelectedLanguage;
+            application.JobSignals = JsonSerializer.Serialize(result.JobSignals, JsonOptions);
+            application.EvidenceMatches = "[]";
+            application.UnmatchedRequirements = "[]";
+            application.ApprovedEvidence = "[]";
+            application.Status = application.Status == "Draft" ? "PostingCaptured" : application.Status;
+            application.UpdatedAt = DateTimeOffset.UtcNow;
+
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(ToResponse(application));
+        });
+
+        group.MapPost("/{id:guid}/match-evidence", async Task<IResult> (Guid id, ApplicationDbContext db, IAiProvider aiProvider, CancellationToken ct) =>
+        {
+            var application = await db.JobApplications.FindAsync([id], ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            var signals = ReadJobSignals(application.JobSignals);
+            if (signals.Count == 0)
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(application.JobSignals)] = ["Run job analysis before matching evidence."]
+                }));
+            }
+
+            var approvedFacts = await db.ProfileFacts
+                .Where(fact => fact.Status == ProfileFactStatus.Approved)
+                .ToListAsync(ct);
+
+            if (approvedFacts.Count == 0)
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    ["ProfileFacts"] = ["At least one approved profile fact is required before matching evidence."]
+                }));
+            }
+
+            var result = await aiProvider.MatchEvidenceAsync(new EvidenceMatchInput(signals, approvedFacts), ct);
+
+            application.EvidenceMatches = JsonSerializer.Serialize(result.EvidenceMatches, JsonOptions);
+            application.UnmatchedRequirements = JsonSerializer.Serialize(result.UnmatchedRequirements, JsonOptions);
+            application.ApprovedEvidence = "[]";
+            application.Status = application.Status is "Draft" or "PostingCaptured" ? "ReadyForReview" : application.Status;
+            application.UpdatedAt = DateTimeOffset.UtcNow;
+
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(ToResponse(application));
+        });
+
+        group.MapPut("/{id:guid}/approved-evidence", async Task<IResult> (Guid id, ApprovedEvidenceRequest request, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var application = await db.JobApplications.FindAsync([id], ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            var validation = ValidateApprovedEvidence(request, application.EvidenceMatches);
+            if (validation.Errors.Count > 0)
+            {
+                return Results.BadRequest(ApiError.Validation(validation.Errors));
+            }
+
+            application.ApprovedEvidence = JsonSerializer.Serialize(validation.ApprovedEvidence, JsonOptions);
+            application.Status = application.Status is "Draft" or "PostingCaptured" ? "ReadyForReview" : application.Status;
+            application.UpdatedAt = DateTimeOffset.UtcNow;
+
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(ToResponse(application));
+        });
+
         return app;
     }
 
@@ -121,6 +229,10 @@ public static class ApplicationEndpoints
             application.JobPostingText,
             application.DetectedLanguage,
             application.SelectedLanguage,
+            application.JobSignals,
+            application.EvidenceMatches,
+            application.UnmatchedRequirements,
+            application.ApprovedEvidence,
             application.CreatedAt,
             application.UpdatedAt);
 
@@ -174,4 +286,104 @@ public static class ApplicationEndpoints
 
     private static string NormalizeStatus(string status) =>
         ValidStatuses.First(validStatus => string.Equals(validStatus, status.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private static ApprovedEvidenceValidation ValidateApprovedEvidence(ApprovedEvidenceRequest request, string evidenceMatchesJson)
+    {
+        var errors = new Dictionary<string, string[]>();
+        var approvedIds = ReadApprovedEvidenceIds(request.ApprovedEvidence, errors);
+        var currentMatches = ReadEvidenceMatches(evidenceMatchesJson);
+
+        if (errors.Count > 0)
+        {
+            return new ApprovedEvidenceValidation(errors, []);
+        }
+
+        var currentById = currentMatches.ToDictionary(match => match.Id, StringComparer.OrdinalIgnoreCase);
+        var missingIds = approvedIds
+            .Where(id => !currentById.ContainsKey(id))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (missingIds.Count > 0)
+        {
+            errors[nameof(request.ApprovedEvidence)] = ["Approved evidence must come from the current evidence matches."];
+            return new ApprovedEvidenceValidation(errors, []);
+        }
+
+        var approvedEvidence = approvedIds
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(id => currentById[id])
+            .ToList();
+
+        return new ApprovedEvidenceValidation(errors, approvedEvidence);
+    }
+
+    private static IReadOnlyList<string> ReadApprovedEvidenceIds(string? value, Dictionary<string, string[]> errors)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(value);
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                errors[nameof(ApprovedEvidenceRequest.ApprovedEvidence)] = ["Approved evidence must be a JSON array."];
+                return [];
+            }
+
+            var ids = new List<string>();
+            foreach (var element in document.RootElement.EnumerateArray())
+            {
+                if (element.ValueKind != JsonValueKind.Object ||
+                    !element.TryGetProperty("id", out var idProperty) ||
+                    idProperty.ValueKind != JsonValueKind.String ||
+                    string.IsNullOrWhiteSpace(idProperty.GetString()))
+                {
+                    errors[nameof(ApprovedEvidenceRequest.ApprovedEvidence)] = ["Each approved evidence item must include an id."];
+                    return [];
+                }
+
+                ids.Add(idProperty.GetString()!.Trim());
+            }
+
+            return ids;
+        }
+        catch (JsonException)
+        {
+            errors[nameof(ApprovedEvidenceRequest.ApprovedEvidence)] = ["Approved evidence must be a JSON array."];
+            return [];
+        }
+    }
+
+    private static IReadOnlyList<JobSignal> ReadJobSignals(string jobSignals)
+    {
+        try
+        {
+            var document = JsonSerializer.Deserialize<JobSignalsDocument>(jobSignals, JsonOptions);
+            return document?.Signals ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static IReadOnlyList<EvidenceMatch> ReadEvidenceMatches(string evidenceMatches)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<EvidenceMatch>>(evidenceMatches, JsonOptions) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private sealed record ApprovedEvidenceValidation(
+        Dictionary<string, string[]> Errors,
+        IReadOnlyList<EvidenceMatch> ApprovedEvidence);
 }

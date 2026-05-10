@@ -1,0 +1,62 @@
+using JobApplicationAssistant.Api.Domain;
+
+namespace JobApplicationAssistant.Api.Ai;
+
+public interface IAiProvider
+{
+    Task<JobAnalysisResult> AnalyzeJobAsync(JobAnalysisInput input, CancellationToken ct);
+
+    Task<EvidenceMatchResult> MatchEvidenceAsync(EvidenceMatchInput input, CancellationToken ct);
+}
+
+public sealed record JobAnalysisInput(
+    string CompanyName,
+    string RoleTitle,
+    string? SelectedLanguage,
+    string JobPostingText);
+
+public sealed record JobAnalysisResult(
+    string CompanyName,
+    string RoleTitle,
+    string DetectedLanguage,
+    string SelectedLanguage,
+    JobSignalsDocument JobSignals);
+
+public sealed record EvidenceMatchInput(
+    IReadOnlyList<JobSignal> Signals,
+    IReadOnlyList<ProfileFact> ApprovedFacts);
+
+public sealed record EvidenceMatchResult(
+    IReadOnlyList<EvidenceMatch> EvidenceMatches,
+    IReadOnlyList<UnmatchedRequirement> UnmatchedRequirements);
+
+public sealed record JobSignalsDocument(
+    string Provider,
+    DateTimeOffset ExtractedAt,
+    IReadOnlyList<string> RequiredSkills,
+    IReadOnlyList<string> PreferredSkills,
+    IReadOnlyList<string> Responsibilities,
+    IReadOnlyList<JobSignal> Signals);
+
+public sealed record JobSignal(
+    string Id,
+    string Label,
+    string Category,
+    IReadOnlyList<string> Keywords);
+
+public sealed record EvidenceMatch(
+    string Id,
+    string SignalId,
+    string Signal,
+    string Category,
+    Guid ProfileFactId,
+    string ProfileFactTitle,
+    string Summary,
+    IReadOnlyList<string> MatchedTerms);
+
+public sealed record UnmatchedRequirement(
+    string Id,
+    string SignalId,
+    string Requirement,
+    string Category,
+    string Recommendation);
