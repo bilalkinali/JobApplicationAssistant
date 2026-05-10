@@ -69,7 +69,7 @@ public sealed class ApplicationWorkflowApiTests
 
         var response = await client.PostAsync($"/api/applications/{application.Id}/analyze-job", null);
 
-        response.EnsureSuccessStatusCode();
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
         var analyzed = await response.Content.ReadFromJsonAsync<ApplicationResponse>();
         Assert.NotNull(analyzed);
         Assert.Equal("Northwind", analyzed.CompanyName);
@@ -195,6 +195,111 @@ public sealed class ApplicationWorkflowApiTests
         Assert.Equal(HttpStatusCode.BadRequest, malformedResponse.StatusCode);
     }
 
+    [Fact]
+    public async Task GenerateDraft_creates_current_draft_from_approved_evidence()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET", "React"]""");
+        var application = await CreateApplicationAsync(
+            client,
+            """
+            Company: Northwind
+            Role: Full-stack Developer
+
+            We need .NET, React, and Kubernetes.
+            """,
+            "English");
+        Assert.NotEqual(Guid.Empty, application.Id);
+        var analysisResponse = await client.PostAsync($"/api/applications/{application.Id}/analyze-job", null);
+        Assert.True(analysisResponse.IsSuccessStatusCode, await analysisResponse.Content.ReadAsStringAsync());
+        var matchResponse = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
+        Assert.True(matchResponse.IsSuccessStatusCode, await matchResponse.Content.ReadAsStringAsync());
+        var matched = await matchResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(matched);
+        var evidenceMatches = JsonSerializer.Deserialize<List<EvidenceMatch>>(matched.EvidenceMatches, JsonOptions);
+        Assert.NotNull(evidenceMatches);
+        await client.PutAsJsonAsync(
+            $"/api/applications/{application.Id}/approved-evidence",
+            new ApprovedEvidenceRequest(JsonSerializer.Serialize(evidenceMatches, JsonOptions)));
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        response.EnsureSuccessStatusCode();
+        var draft = await response.Content.ReadFromJsonAsync<GeneratedDraftResponse>();
+        Assert.NotNull(draft);
+        Assert.Equal(application.Id, draft.JobApplicationId);
+        Assert.Contains("Northwind", draft.CoverLetterText);
+        Assert.Contains("Full-stack Developer", draft.CoverLetterText);
+        Assert.Contains("Approved API work", draft.CoverLetterText);
+        Assert.Contains("Kubernetes", draft.CoverLetterText);
+        Assert.Contains("Northwind", draft.ShortMotivationText);
+        Assert.Contains("Approved API work", draft.ShortMotivationText);
+        Assert.Null(draft.LastEditedAt);
+        Assert.Null(draft.AuditUpdatedAt);
+    }
+
+    [Fact]
+    public async Task GenerateDraft_rejects_application_without_job_posting_text()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, jobPostingText: "");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains(nameof(ApplicationRequest.JobPostingText), error.Details.Keys);
+    }
+
+    [Fact]
+    public async Task GenerateDraft_rejects_application_without_approved_evidence()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains(nameof(ApplicationResponse.ApprovedEvidence), error.Details.Keys);
+    }
+
+    [Fact]
+    public async Task GenerateDraft_updates_the_current_generated_draft_as_latest_state()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+        await client.PostAsync($"/api/applications/{application.Id}/analyze-job", null);
+        var matchResponse = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
+        Assert.True(matchResponse.IsSuccessStatusCode, await matchResponse.Content.ReadAsStringAsync());
+        var matched = await matchResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(matched);
+        await client.PutAsJsonAsync(
+            $"/api/applications/{application.Id}/approved-evidence",
+            new ApprovedEvidenceRequest(matched.EvidenceMatches));
+        var firstResponse = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+        firstResponse.EnsureSuccessStatusCode();
+        var first = await firstResponse.Content.ReadFromJsonAsync<GeneratedDraftResponse>();
+        Assert.NotNull(first);
+
+        var secondResponse = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        secondResponse.EnsureSuccessStatusCode();
+        var second = await secondResponse.Content.ReadFromJsonAsync<GeneratedDraftResponse>();
+        Assert.NotNull(second);
+        Assert.Equal(first.Id, second.Id);
+        Assert.Equal(first.JobApplicationId, second.JobApplicationId);
+        Assert.Equal(first.CreatedAt, second.CreatedAt);
+        Assert.True(second.GeneratedAt >= first.GeneratedAt);
+    }
+
     private static async Task<ApplicationResponse> CreateApplicationAsync(
         HttpClient client,
         string jobPostingText,
@@ -215,6 +320,7 @@ public sealed class ApplicationWorkflowApiTests
         response.EnsureSuccessStatusCode();
         var application = await response.Content.ReadFromJsonAsync<ApplicationResponse>();
         Assert.NotNull(application);
+        Assert.NotEqual(Guid.Empty, application.Id);
         return application;
     }
 

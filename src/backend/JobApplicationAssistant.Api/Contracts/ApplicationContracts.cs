@@ -28,3 +28,15 @@ public sealed record ApplicationResponse(
     DateTimeOffset UpdatedAt);
 
 public sealed record ApprovedEvidenceRequest(string? ApprovedEvidence);
+
+public sealed record GeneratedDraftResponse(
+    Guid Id,
+    Guid JobApplicationId,
+    string CoverLetterText,
+    string ShortMotivationText,
+    string ClaimAudit,
+    DateTimeOffset GeneratedAt,
+    DateTimeOffset? LastEditedAt,
+    DateTimeOffset? AuditUpdatedAt,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);

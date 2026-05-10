@@ -215,6 +215,77 @@ public static class ApplicationEndpoints
             return Results.Ok(ToResponse(application));
         });
 
+        group.MapPost("/{id:guid}/generate-draft", async Task<IResult> (Guid id, ApplicationDbContext db, IAiProvider aiProvider, CancellationToken ct) =>
+        {
+            var application = await db.JobApplications
+                .Include(application => application.GeneratedDraft)
+                .FirstOrDefaultAsync(application => application.Id == id, ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            if (string.IsNullOrWhiteSpace(application.JobPostingText))
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(application.JobPostingText)] = ["Job posting text is required before draft generation."]
+                }));
+            }
+
+            var approvedEvidence = ReadEvidenceMatches(application.ApprovedEvidence);
+            if (approvedEvidence.Count == 0)
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(application.ApprovedEvidence)] = ["Approved evidence is required before draft generation."]
+                }));
+            }
+
+            var profile = await db.Profiles
+                .OrderBy(profile => profile.CreatedAt)
+                .FirstOrDefaultAsync(ct);
+            var unmatchedRequirements = ReadUnmatchedRequirements(application.UnmatchedRequirements);
+            var tonePreference = string.Equals(application.SelectedLanguage, "Danish", StringComparison.OrdinalIgnoreCase)
+                ? profile?.DanishTone
+                : profile?.EnglishTone;
+            var result = await aiProvider.GenerateDraftAsync(
+                new DraftGenerationInput(
+                    application.CompanyName,
+                    application.RoleTitle,
+                    application.SelectedLanguage,
+                    profile?.FullName,
+                    tonePreference,
+                    approvedEvidence,
+                    unmatchedRequirements),
+                ct);
+            var now = DateTimeOffset.UtcNow;
+            var draft = application.GeneratedDraft;
+            if (draft is null)
+            {
+                draft = new GeneratedDraft
+                {
+                    Id = Guid.NewGuid(),
+                    JobApplicationId = application.Id,
+                    CreatedAt = now
+                };
+                db.GeneratedDrafts.Add(draft);
+            }
+
+            draft.CoverLetterText = result.CoverLetterText;
+            draft.ShortMotivationText = result.ShortMotivationText;
+            draft.ClaimAudit = "{}";
+            draft.GeneratedAt = now;
+            draft.LastEditedAt = null;
+            draft.AuditUpdatedAt = null;
+            draft.UpdatedAt = now;
+            application.UpdatedAt = now;
+
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(ToResponse(draft));
+        });
+
         return app;
     }
 
@@ -235,6 +306,19 @@ public static class ApplicationEndpoints
             application.ApprovedEvidence,
             application.CreatedAt,
             application.UpdatedAt);
+
+    private static GeneratedDraftResponse ToResponse(GeneratedDraft draft) =>
+        new(
+            draft.Id,
+            draft.JobApplicationId,
+            draft.CoverLetterText,
+            draft.ShortMotivationText,
+            draft.ClaimAudit,
+            draft.GeneratedAt,
+            draft.LastEditedAt,
+            draft.AuditUpdatedAt,
+            draft.CreatedAt,
+            draft.UpdatedAt);
 
     private static Dictionary<string, string[]> Validate(ApplicationRequest request)
     {
@@ -376,6 +460,18 @@ public static class ApplicationEndpoints
         try
         {
             return JsonSerializer.Deserialize<List<EvidenceMatch>>(evidenceMatches, JsonOptions) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static IReadOnlyList<UnmatchedRequirement> ReadUnmatchedRequirements(string unmatchedRequirements)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<UnmatchedRequirement>>(unmatchedRequirements, JsonOptions) ?? [];
         }
         catch (JsonException)
         {

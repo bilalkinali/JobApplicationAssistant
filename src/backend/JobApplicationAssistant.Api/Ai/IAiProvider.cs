@@ -7,6 +7,8 @@ public interface IAiProvider
     Task<JobAnalysisResult> AnalyzeJobAsync(JobAnalysisInput input, CancellationToken ct);
 
     Task<EvidenceMatchResult> MatchEvidenceAsync(EvidenceMatchInput input, CancellationToken ct);
+
+    Task<DraftGenerationResult> GenerateDraftAsync(DraftGenerationInput input, CancellationToken ct);
 }
 
 public sealed record JobAnalysisInput(
@@ -29,6 +31,19 @@ public sealed record EvidenceMatchInput(
 public sealed record EvidenceMatchResult(
     IReadOnlyList<EvidenceMatch> EvidenceMatches,
     IReadOnlyList<UnmatchedRequirement> UnmatchedRequirements);
+
+public sealed record DraftGenerationInput(
+    string CompanyName,
+    string RoleTitle,
+    string? SelectedLanguage,
+    string? ApplicantName,
+    string? TonePreference,
+    IReadOnlyList<EvidenceMatch> ApprovedEvidence,
+    IReadOnlyList<UnmatchedRequirement> UnmatchedRequirements);
+
+public sealed record DraftGenerationResult(
+    string CoverLetterText,
+    string ShortMotivationText);
 
 public sealed record JobSignalsDocument(
     string Provider,

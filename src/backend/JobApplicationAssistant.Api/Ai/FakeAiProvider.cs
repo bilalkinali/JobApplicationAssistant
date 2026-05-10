@@ -103,6 +103,50 @@ public sealed partial class FakeAiProvider : IAiProvider
         return Task.FromResult(new EvidenceMatchResult(matches, unmatched));
     }
 
+    public Task<DraftGenerationResult> GenerateDraftAsync(DraftGenerationInput input, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var language = string.IsNullOrWhiteSpace(input.SelectedLanguage) ? "English" : input.SelectedLanguage.Trim();
+        var applicant = string.IsNullOrWhiteSpace(input.ApplicantName) ? "I" : input.ApplicantName.Trim();
+        var evidenceLines = input.ApprovedEvidence
+            .Select(evidence => $"- {evidence.ProfileFactTitle}: {evidence.Summary}")
+            .ToList();
+        var gapLines = input.UnmatchedRequirements
+            .Select(requirement => $"- I would treat {requirement.Requirement} as an area to learn, not as existing experience.")
+            .ToList();
+        var evidenceText = string.Join(Environment.NewLine, evidenceLines);
+        var gapText = gapLines.Count == 0
+            ? "- I will keep the application focused on the reviewed evidence."
+            : string.Join(Environment.NewLine, gapLines);
+        var toneText = string.IsNullOrWhiteSpace(input.TonePreference)
+            ? "plain and evidence-led"
+            : input.TonePreference.Trim();
+
+        var coverLetter = $"""
+            Language: {language}
+            Dear {input.CompanyName} hiring team,
+
+            I am applying for the {input.RoleTitle} role at {input.CompanyName}. My draft is written in a {toneText} tone and uses only reviewed evidence.
+
+            Approved evidence:
+            {evidenceText}
+
+            Honest gap handling:
+            {gapText}
+
+            Kind regards,
+            {applicant}
+            """;
+
+        var shortMotivation = $"""
+            Language: {language}
+            I am interested in the {input.RoleTitle} role at {input.CompanyName} because my reviewed evidence includes {string.Join(", ", input.ApprovedEvidence.Select(evidence => evidence.ProfileFactTitle))}. I will describe unmatched requirements honestly as learning areas.
+            """;
+
+        return Task.FromResult(new DraftGenerationResult(coverLetter, shortMotivation));
+    }
+
     private static bool ContainsAny(string text, IReadOnlyList<string> keywords) =>
         keywords.Any(keyword => ContainsTerm(text, keyword));
 
