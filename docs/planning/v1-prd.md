@@ -1,5 +1,8 @@
 **V1 Product Requirements Document**
 
+Status: ready-for-agent
+Source: docs/planning/v1-specification.md
+
 ## Problem Statement
 
 Software developer job applications often require tailored cover letters and short motivation texts, but writing them repeatedly is slow and error-prone. The user needs a personal desktop web app that can turn manually maintained profile facts and a pasted job posting into strong, honest application text without inventing experience.
@@ -154,4 +157,4 @@ V1 should remain deliberately small and trust-centered. The fake provider is not
 
 The main product risk is unsupported claim generation. The core workflow must therefore preserve a visible chain from approved profile facts and approved custom facts to generated text and claim audit results.
 
-This PRD was synthesized from `docs/planning/v1-specification.md`. It was not published to an issue tracker because the repo does not currently contain the agent issue-tracker configuration expected by the `to-prd` skill.
+This PRD was synthesized from `docs/planning/v1-specification.md` and published using the configured local markdown issue tracker/docs setup.
