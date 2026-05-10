@@ -19,9 +19,12 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     {
         modelBuilder.Entity<Profile>(entity =>
         {
-            entity.ToTable("profiles");
+            entity.ToTable("profiles", table =>
+                table.HasCheckConstraint("CK_profiles_singleton_key", "\"SingletonKey\" = 1"));
             entity.HasKey(profile => profile.Id);
+            entity.HasIndex(profile => profile.SingletonKey).IsUnique();
 
+            entity.Property(profile => profile.SingletonKey).HasDefaultValue(1);
             entity.Property(profile => profile.FullName).HasMaxLength(200);
             entity.Property(profile => profile.Email).HasMaxLength(320);
             entity.Property(profile => profile.Phone).HasMaxLength(80);
@@ -79,8 +82,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             entity.Property(draft => draft.ClaimAudit).HasColumnType("jsonb");
 
             entity.HasOne(draft => draft.JobApplication)
-                .WithMany(application => application.GeneratedDrafts)
-                .HasForeignKey(draft => draft.JobApplicationId)
+                .WithOne(application => application.GeneratedDraft)
+                .HasForeignKey<GeneratedDraft>(draft => draft.JobApplicationId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

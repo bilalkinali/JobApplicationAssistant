@@ -34,7 +34,7 @@ public sealed class JobApplication
 
     public DateTimeOffset UpdatedAt { get; set; }
 
-    public ICollection<GeneratedDraft> GeneratedDrafts { get; set; } = [];
+    public GeneratedDraft? GeneratedDraft { get; set; }
 
     public ICollection<AiRun> AiRuns { get; set; } = [];
 }

@@ -4,6 +4,8 @@ public sealed class Profile
 {
     public Guid Id { get; set; }
 
+    public int SingletonKey { get; private set; } = 1;
+
     public string FullName { get; set; } = string.Empty;
 
     public string Email { get; set; } = string.Empty;
