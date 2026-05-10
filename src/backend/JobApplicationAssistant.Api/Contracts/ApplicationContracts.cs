@@ -25,6 +25,24 @@ public sealed record ApplicationResponse(
     string UnmatchedRequirements,
     string ApprovedEvidence,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    GeneratedDraftResponse? GeneratedDraft);
 
 public sealed record ApprovedEvidenceRequest(string? ApprovedEvidence);
+
+public sealed record GeneratedDraftEditRequest(
+    string CoverLetterText,
+    string ShortMotivationText);
+
+public sealed record GeneratedDraftResponse(
+    Guid Id,
+    Guid JobApplicationId,
+    string CoverLetterText,
+    string ShortMotivationText,
+    string ClaimAudit,
+    DateTimeOffset GeneratedAt,
+    DateTimeOffset? LastEditedAt,
+    DateTimeOffset? AuditUpdatedAt,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    bool IsClaimAuditStale);

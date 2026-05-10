@@ -72,6 +72,7 @@ button:disabled {
 .panel h3,
 .list-header h3,
 .section-heading h3,
+.section-heading h4,
 .workflow-step h4,
 .review-column h4,
 .signal-column h4 {
@@ -517,6 +518,69 @@ button:disabled {
 .approved-item div {
   display: grid;
   gap: 4px;
+}
+
+.draft-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  gap: 18px;
+  padding: 14px;
+  border: 1px solid #d9d7d0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.draft-editor textarea {
+  min-height: 260px;
+}
+
+.claim-audit {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 12px;
+}
+
+.audit-list {
+  display: grid;
+  gap: 10px;
+}
+
+.audit-item {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid #d7dde2;
+  border-left: 4px solid #8b97a3;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.audit-item.supported {
+  border-left-color: #3c8f63;
+}
+
+.audit-item.unsupported {
+  border-left-color: #b84a4a;
+}
+
+.audit-item.needsreview {
+  border-left-color: #b8872f;
+}
+
+.audit-item span {
+  color: #263442;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.audit-item p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.audit-item small {
+  color: #64717c;
 }
 
 .empty-state.compact {

@@ -46,6 +46,10 @@ namespace JobApplicationAssistant.Api.Migrations
                 b.Property<string>("CoverLetterText").IsRequired().HasColumnType("text");
                 b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
                 b.Property<DateTimeOffset>("GeneratedAt").HasColumnType("timestamp with time zone");
+                b.Property<bool>("IsClaimAuditStale")
+                    .ValueGeneratedOnAdd()
+                    .HasColumnType("boolean")
+                    .HasDefaultValue(false);
                 b.Property<Guid>("JobApplicationId").HasColumnType("uuid");
                 b.Property<DateTimeOffset?>("LastEditedAt").HasColumnType("timestamp with time zone");
                 b.Property<string>("ShortMotivationText").IsRequired().HasColumnType("text");

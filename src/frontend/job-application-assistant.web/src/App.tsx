@@ -90,8 +90,28 @@ type ApplicationSession = ApplicationForm & {
   evidenceMatches: string;
   unmatchedRequirements: string;
   approvedEvidence: string;
+  generatedDraft: GeneratedDraft | null;
   createdAt: string;
   updatedAt: string;
+};
+
+type GeneratedDraft = {
+  id: string;
+  jobApplicationId: string;
+  coverLetterText: string;
+  shortMotivationText: string;
+  claimAudit: string;
+  generatedAt: string;
+  lastEditedAt: string | null;
+  auditUpdatedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  isClaimAuditStale: boolean;
+};
+
+type GeneratedDraftForm = {
+  coverLetterText: string;
+  shortMotivationText: string;
 };
 
 type View = "home" | "profile" | "applications" | "settings";
@@ -131,6 +151,17 @@ type UnmatchedRequirement = {
   recommendation: string;
 };
 
+type ClaimAudit = {
+  claims: ClaimAuditClaim[];
+};
+
+type ClaimAuditClaim = {
+  id: string;
+  text: string;
+  status: "Supported" | "Unsupported" | "NeedsReview" | string;
+  evidenceIds: string[];
+};
+
 function App() {
   const [view, setView] = useState<View>("home");
   const [profile, setProfile] = useState<ProfileForm>(emptyProfile);
@@ -143,6 +174,10 @@ function App() {
   const [applicationSearch, setApplicationSearch] = useState("");
   const [applicationStatusFilter, setApplicationStatusFilter] = useState("All");
   const [approvedEvidenceDraft, setApprovedEvidenceDraft] = useState<EvidenceMatch[]>([]);
+  const [generatedDraftForm, setGeneratedDraftForm] = useState<GeneratedDraftForm>({
+    coverLetterText: "",
+    shortMotivationText: ""
+  });
   const [workflowBusy, setWorkflowBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -184,6 +219,10 @@ function App() {
     () => parseJsonArray<EvidenceMatch>(selectedApplication?.approvedEvidence),
     [selectedApplication?.approvedEvidence]
   );
+  const claimAudit = useMemo(
+    () => parseClaimAudit(selectedApplication?.generatedDraft?.claimAudit),
+    [selectedApplication?.generatedDraft?.claimAudit]
+  );
 
   useEffect(() => {
     void loadProfile();
@@ -194,6 +233,13 @@ function App() {
   useEffect(() => {
     setApprovedEvidenceDraft(savedApprovedEvidence);
   }, [selectedApplicationId, savedApprovedEvidence]);
+
+  useEffect(() => {
+    setGeneratedDraftForm({
+      coverLetterText: selectedApplication?.generatedDraft?.coverLetterText ?? "",
+      shortMotivationText: selectedApplication?.generatedDraft?.shortMotivationText ?? ""
+    });
+  }, [selectedApplicationId, selectedApplication?.generatedDraft]);
 
   async function loadProfile() {
     try {
@@ -383,12 +429,86 @@ function App() {
     }
   }
 
-  function openApplication(application: ApplicationSession) {
+  async function generateDraft() {
+    if (!selectedApplicationId) {
+      setError("Save the application before generating a draft.");
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setWorkflowBusy("draft");
+
+    try {
+      const draft = await apiSend<GeneratedDraft>(`/api/applications/${selectedApplicationId}/generate-draft`, "POST", null);
+      replaceGeneratedDraft(draft);
+      setNotice("Draft generated.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    } finally {
+      setWorkflowBusy(null);
+    }
+  }
+
+  async function saveGeneratedDraft() {
+    if (!selectedApplicationId) {
+      setError("Save the application before editing a draft.");
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setWorkflowBusy("draft-edit");
+
+    try {
+      const draft = await apiSend<GeneratedDraft>(
+        `/api/applications/${selectedApplicationId}/generated-draft`,
+        "PUT",
+        generatedDraftForm
+      );
+      replaceGeneratedDraft(draft);
+      setNotice("Draft edits saved.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    } finally {
+      setWorkflowBusy(null);
+    }
+  }
+
+  async function auditClaims() {
+    if (!selectedApplicationId) {
+      setError("Save the application before auditing a draft.");
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setWorkflowBusy("audit");
+
+    try {
+      const draft = await apiSend<GeneratedDraft>(`/api/applications/${selectedApplicationId}/audit-claims`, "POST", null);
+      replaceGeneratedDraft(draft);
+      setNotice("Claim audit updated.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    } finally {
+      setWorkflowBusy(null);
+    }
+  }
+
+  async function openApplication(application: ApplicationSession) {
     setSelectedApplicationId(application.id);
     setApplicationForm(toApplicationForm(application));
     setView("applications");
     setError(null);
     setNotice(null);
+
+    try {
+      const detailed = await apiGet<ApplicationSession>(`/api/applications/${application.id}`);
+      replaceApplication(detailed);
+    } catch (apiError) {
+      setError(formatError(apiError));
+    }
   }
 
   function replaceApplication(application: ApplicationSession) {
@@ -396,6 +516,20 @@ function App() {
     setApplications((current) => current.map((item) => (item.id === normalized.id ? normalized : item)));
     setSelectedApplicationId(normalized.id);
     setApplicationForm(toApplicationForm(normalized));
+  }
+
+  function replaceGeneratedDraft(draft: GeneratedDraft) {
+    setApplications((current) =>
+      current.map((application) =>
+        application.id === draft.jobApplicationId
+          ? toApplicationSession({ ...application, generatedDraft: draft, updatedAt: draft.updatedAt })
+          : application
+      )
+    );
+    setGeneratedDraftForm({
+      coverLetterText: draft.coverLetterText,
+      shortMotivationText: draft.shortMotivationText
+    });
   }
 
   function approveMatch(match: EvidenceMatch) {
@@ -572,7 +706,7 @@ function App() {
                     className={application.id === selectedApplicationId ? "session active" : "session"}
                     key={application.id}
                     type="button"
-                    onClick={() => openApplication(application)}
+                    onClick={() => void openApplication(application)}
                   >
                     <strong>{application.companyName}</strong>
                     <span>{application.roleTitle}</span>
@@ -691,6 +825,68 @@ function App() {
                     </article>
                   ))}
                 </div>
+
+                <div className="workflow-step">
+                  <div>
+                    <h4>4. Generated draft</h4>
+                    <p>{savedApprovedEvidence.length > 0 ? "Generate or edit the current cover letter and short motivation." : "Save approved evidence before generating a draft."}</p>
+                  </div>
+                  <button type="button" onClick={generateDraft} disabled={!selectedApplicationId || savedApprovedEvidence.length === 0 || workflowBusy !== null}>
+                    {workflowBusy === "draft" ? "Generating..." : "Generate draft"}
+                  </button>
+                </div>
+
+                {selectedApplication?.generatedDraft ? (
+                  <section className="draft-editor">
+                    <div className="section-heading">
+                      <h4>Current draft</h4>
+                      <p>
+                        Generated {formatDate(selectedApplication.generatedDraft.generatedAt)}
+                        {selectedApplication.generatedDraft.lastEditedAt ? ` - Edited ${formatDate(selectedApplication.generatedDraft.lastEditedAt)}` : ""}
+                        {selectedApplication.generatedDraft.isClaimAuditStale ? " - Audit stale" : ""}
+                      </p>
+                    </div>
+                    <Textarea
+                      label="Cover letter"
+                      value={generatedDraftForm.coverLetterText}
+                      onChange={(coverLetterText) => setGeneratedDraftForm({ ...generatedDraftForm, coverLetterText })}
+                    />
+                    <Textarea
+                      label="Short motivation"
+                      value={generatedDraftForm.shortMotivationText}
+                      onChange={(shortMotivationText) => setGeneratedDraftForm({ ...generatedDraftForm, shortMotivationText })}
+                    />
+                    <div className="form-actions">
+                      <button className="primary-action" type="button" onClick={saveGeneratedDraft} disabled={workflowBusy !== null}>
+                        {workflowBusy === "draft-edit" ? "Saving..." : "Save draft edits"}
+                      </button>
+                      <button type="button" onClick={auditClaims} disabled={workflowBusy !== null}>
+                        {workflowBusy === "audit" ? "Auditing..." : "Run claim audit"}
+                      </button>
+                    </div>
+                    <section className="claim-audit">
+                      <div className="section-heading">
+                        <h4>Claim audit</h4>
+                        <p>{selectedApplication.generatedDraft.auditUpdatedAt ? `Updated ${formatDate(selectedApplication.generatedDraft.auditUpdatedAt)}` : "Not audited yet"}</p>
+                      </div>
+                      {claimAudit.claims.length === 0 ? (
+                        <p className="empty-state compact">No claim audit results yet.</p>
+                      ) : (
+                        <div className="audit-list">
+                          {claimAudit.claims.map((claim) => (
+                            <article className={`audit-item ${claim.status.toLowerCase()}`} key={claim.id}>
+                              <span>{claim.status}</span>
+                              <p>{claim.text}</p>
+                              {claim.evidenceIds.length > 0 && <small>Evidence: {claim.evidenceIds.join(", ")}</small>}
+                            </article>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  </section>
+                ) : (
+                  <p className="empty-state compact">No generated draft yet.</p>
+                )}
               </section>
             </form>
           </div>
@@ -865,6 +1061,7 @@ function toApplicationSession(application: ApplicationSession): ApplicationSessi
     evidenceMatches: application.evidenceMatches || "[]",
     unmatchedRequirements: application.unmatchedRequirements || "[]",
     approvedEvidence: application.approvedEvidence || "[]",
+    generatedDraft: application.generatedDraft ?? null,
     createdAt: application.createdAt,
     updatedAt: application.updatedAt
   };
@@ -904,6 +1101,13 @@ function parseJobSignals(value: string | undefined): JobSignalsDocument {
     responsibilities: [],
     signals: [],
     ...(parseJsonObject<Partial<JobSignalsDocument>>(value) ?? {})
+  };
+}
+
+function parseClaimAudit(value: string | undefined): ClaimAudit {
+  return {
+    claims: [],
+    ...(parseJsonObject<Partial<ClaimAudit>>(value) ?? {})
   };
 }
 

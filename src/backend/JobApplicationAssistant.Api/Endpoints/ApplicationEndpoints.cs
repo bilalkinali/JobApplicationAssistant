@@ -58,7 +58,9 @@ public static class ApplicationEndpoints
 
         group.MapGet("/{id:guid}", async Task<IResult> (Guid id, ApplicationDbContext db, CancellationToken ct) =>
         {
-            var application = await db.JobApplications.FindAsync([id], ct);
+            var application = await db.JobApplications
+                .Include(application => application.GeneratedDraft)
+                .FirstOrDefaultAsync(application => application.Id == id, ct);
             if (application is null)
             {
                 return Results.NotFound(ApiError.NotFound("Application session was not found."));
@@ -215,6 +217,148 @@ public static class ApplicationEndpoints
             return Results.Ok(ToResponse(application));
         });
 
+        group.MapPost("/{id:guid}/generate-draft", async Task<IResult> (Guid id, ApplicationDbContext db, IAiProvider aiProvider, CancellationToken ct) =>
+        {
+            var application = await db.JobApplications
+                .Include(application => application.GeneratedDraft)
+                .FirstOrDefaultAsync(application => application.Id == id, ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            if (string.IsNullOrWhiteSpace(application.JobPostingText))
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(application.JobPostingText)] = ["Job posting text is required before draft generation."]
+                }));
+            }
+
+            var approvedEvidence = ReadEvidenceMatches(application.ApprovedEvidence);
+            if (approvedEvidence.Count == 0)
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(application.ApprovedEvidence)] = ["Approved evidence is required before draft generation."]
+                }));
+            }
+
+            var profile = await db.Profiles
+                .OrderBy(profile => profile.CreatedAt)
+                .FirstOrDefaultAsync(ct);
+            var unmatchedRequirements = ReadUnmatchedRequirements(application.UnmatchedRequirements);
+            var tonePreference = string.Equals(application.SelectedLanguage, "Danish", StringComparison.OrdinalIgnoreCase)
+                ? profile?.DanishTone
+                : profile?.EnglishTone;
+            var result = await aiProvider.GenerateDraftAsync(
+                new DraftGenerationInput(
+                    application.CompanyName,
+                    application.RoleTitle,
+                    application.SelectedLanguage,
+                    profile?.FullName,
+                    tonePreference,
+                    approvedEvidence,
+                    unmatchedRequirements),
+                ct);
+            var now = DateTimeOffset.UtcNow;
+            var draft = application.GeneratedDraft;
+            if (draft is null)
+            {
+                draft = new GeneratedDraft
+                {
+                    Id = Guid.NewGuid(),
+                    JobApplicationId = application.Id,
+                    CreatedAt = now
+                };
+                db.GeneratedDrafts.Add(draft);
+            }
+
+            draft.CoverLetterText = result.CoverLetterText;
+            draft.ShortMotivationText = result.ShortMotivationText;
+            draft.ClaimAudit = "{}";
+            draft.GeneratedAt = now;
+            draft.LastEditedAt = null;
+            draft.AuditUpdatedAt = null;
+            draft.IsClaimAuditStale = false;
+            draft.UpdatedAt = now;
+            application.UpdatedAt = now;
+
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(ToResponse(draft));
+        });
+
+        group.MapPut("/{id:guid}/generated-draft", async Task<IResult> (Guid id, GeneratedDraftEditRequest request, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var application = await db.JobApplications
+                .Include(application => application.GeneratedDraft)
+                .FirstOrDefaultAsync(application => application.Id == id, ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            if (application.GeneratedDraft is null)
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(ApplicationResponse.GeneratedDraft)] = ["Generate a draft before saving manual draft edits."]
+                }));
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var draft = application.GeneratedDraft;
+            draft.CoverLetterText = request.CoverLetterText;
+            draft.ShortMotivationText = request.ShortMotivationText;
+            draft.LastEditedAt = now;
+            draft.IsClaimAuditStale = draft.AuditUpdatedAt is not null || draft.ClaimAudit != "{}";
+            draft.UpdatedAt = now;
+            application.UpdatedAt = now;
+
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(ToResponse(draft));
+        });
+
+        group.MapPost("/{id:guid}/audit-claims", async Task<IResult> (Guid id, ApplicationDbContext db, IAiProvider aiProvider, CancellationToken ct) =>
+        {
+            var application = await db.JobApplications
+                .Include(application => application.GeneratedDraft)
+                .FirstOrDefaultAsync(application => application.Id == id, ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            if (application.GeneratedDraft is null)
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(ApplicationResponse.GeneratedDraft)] = ["Generate a draft before running claim audit."]
+                }));
+            }
+
+            var draft = application.GeneratedDraft;
+            var result = await aiProvider.AuditClaimsAsync(
+                new ClaimAuditInput(
+                    draft.CoverLetterText,
+                    draft.ShortMotivationText,
+                    ReadEvidenceMatches(application.ApprovedEvidence)),
+                ct);
+            var now = DateTimeOffset.UtcNow;
+
+            draft.ClaimAudit = JsonSerializer.Serialize(result, JsonOptions);
+            draft.AuditUpdatedAt = now;
+            draft.IsClaimAuditStale = false;
+            draft.UpdatedAt = now;
+            application.UpdatedAt = now;
+
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(ToResponse(draft));
+        });
+
         return app;
     }
 
@@ -234,7 +378,22 @@ public static class ApplicationEndpoints
             application.UnmatchedRequirements,
             application.ApprovedEvidence,
             application.CreatedAt,
-            application.UpdatedAt);
+            application.UpdatedAt,
+            application.GeneratedDraft is null ? null : ToResponse(application.GeneratedDraft));
+
+    private static GeneratedDraftResponse ToResponse(GeneratedDraft draft) =>
+        new(
+            draft.Id,
+            draft.JobApplicationId,
+            draft.CoverLetterText,
+            draft.ShortMotivationText,
+            draft.ClaimAudit,
+            draft.GeneratedAt,
+            draft.LastEditedAt,
+            draft.AuditUpdatedAt,
+            draft.CreatedAt,
+            draft.UpdatedAt,
+            draft.IsClaimAuditStale);
 
     private static Dictionary<string, string[]> Validate(ApplicationRequest request)
     {
@@ -376,6 +535,18 @@ public static class ApplicationEndpoints
         try
         {
             return JsonSerializer.Deserialize<List<EvidenceMatch>>(evidenceMatches, JsonOptions) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static IReadOnlyList<UnmatchedRequirement> ReadUnmatchedRequirements(string unmatchedRequirements)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<UnmatchedRequirement>>(unmatchedRequirements, JsonOptions) ?? [];
         }
         catch (JsonException)
         {

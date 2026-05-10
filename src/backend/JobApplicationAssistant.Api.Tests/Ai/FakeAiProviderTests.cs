@@ -138,4 +138,107 @@ public sealed class FakeAiProviderTests
         Assert.Equal("PreferredSkill", unmatched.Category);
         Assert.Contains("interest to learn", unmatched.Recommendation);
     }
+
+    [Fact]
+    public async Task GenerateDraftAsync_creates_deterministic_text_from_approved_evidence_and_unmatched_requirements()
+    {
+        var provider = new FakeAiProvider();
+        var approvedEvidence = new[]
+        {
+            new EvidenceMatch(
+                "match-dotnet",
+                "dotnet",
+                ".NET",
+                "RequiredSkill",
+                Guid.NewGuid(),
+                "Approved API work",
+                "Built ASP.NET Core APIs backed by PostgreSQL.",
+                [".net"])
+        };
+        var unmatchedRequirements = new[]
+        {
+            new UnmatchedRequirement(
+                "unmatched-kubernetes",
+                "kubernetes",
+                "Kubernetes",
+                "PreferredSkill",
+                "Mention Kubernetes as an interest to learn only if the posting makes it relevant.")
+        };
+        var input = new DraftGenerationInput(
+            "Northwind",
+            "Full-stack Developer",
+            "English",
+            "Bilal Kinali",
+            "direct and specific",
+            approvedEvidence,
+            unmatchedRequirements);
+
+        var first = await provider.GenerateDraftAsync(input, CancellationToken.None);
+        var second = await provider.GenerateDraftAsync(input, CancellationToken.None);
+
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(first),
+            System.Text.Json.JsonSerializer.Serialize(second));
+        Assert.Contains("Northwind", first.CoverLetterText);
+        Assert.Contains("Full-stack Developer", first.CoverLetterText);
+        Assert.Contains("direct and specific", first.CoverLetterText);
+        Assert.Contains("Approved API work", first.CoverLetterText);
+        Assert.Contains("Built ASP.NET Core APIs backed by PostgreSQL.", first.CoverLetterText);
+        Assert.Contains("Kubernetes", first.CoverLetterText);
+        Assert.Contains("area to learn", first.CoverLetterText);
+        Assert.Contains("Approved API work", first.ShortMotivationText);
+    }
+
+    [Fact]
+    public async Task AuditClaimsAsync_classifies_supported_unsupported_and_needs_review_claims_deterministically()
+    {
+        var provider = new FakeAiProvider();
+        var approvedEvidence = new[]
+        {
+            new EvidenceMatch(
+                "match-dotnet",
+                "dotnet",
+                ".NET",
+                "RequiredSkill",
+                Guid.NewGuid(),
+                "Approved API work",
+                "Built ASP.NET Core APIs backed by PostgreSQL.",
+                [".net"])
+        };
+        var input = new ClaimAuditInput(
+            """
+            Built ASP.NET Core APIs backed by PostgreSQL.
+            Led Kubernetes platform operations.
+            I may be a fit for the team.
+            """,
+            "",
+            approvedEvidence);
+
+        var first = await provider.AuditClaimsAsync(input, CancellationToken.None);
+        var second = await provider.AuditClaimsAsync(input, CancellationToken.None);
+
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(first),
+            System.Text.Json.JsonSerializer.Serialize(second));
+        Assert.Collection(
+            first.Claims,
+            claim =>
+            {
+                Assert.Equal("Supported", claim.Status);
+                Assert.Equal("Built ASP.NET Core APIs backed by PostgreSQL.", claim.Text);
+                Assert.Contains("match-dotnet", claim.EvidenceIds);
+            },
+            claim =>
+            {
+                Assert.Equal("Unsupported", claim.Status);
+                Assert.Equal("Led Kubernetes platform operations.", claim.Text);
+                Assert.Empty(claim.EvidenceIds);
+            },
+            claim =>
+            {
+                Assert.Equal("NeedsReview", claim.Status);
+                Assert.Equal("I may be a fit for the team.", claim.Text);
+                Assert.Empty(claim.EvidenceIds);
+            });
+    }
 }

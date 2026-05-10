@@ -103,6 +103,74 @@ public sealed partial class FakeAiProvider : IAiProvider
         return Task.FromResult(new EvidenceMatchResult(matches, unmatched));
     }
 
+    public Task<DraftGenerationResult> GenerateDraftAsync(DraftGenerationInput input, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var language = string.IsNullOrWhiteSpace(input.SelectedLanguage) ? "English" : input.SelectedLanguage.Trim();
+        var applicant = string.IsNullOrWhiteSpace(input.ApplicantName) ? "I" : input.ApplicantName.Trim();
+        var evidenceLines = input.ApprovedEvidence
+            .Select(evidence => $"- {evidence.ProfileFactTitle}: {evidence.Summary}")
+            .ToList();
+        var gapLines = input.UnmatchedRequirements
+            .Select(requirement => $"- I would treat {requirement.Requirement} as an area to learn, not as existing experience.")
+            .ToList();
+        var evidenceText = string.Join(Environment.NewLine, evidenceLines);
+        var gapText = gapLines.Count == 0
+            ? "- I will keep the application focused on the reviewed evidence."
+            : string.Join(Environment.NewLine, gapLines);
+        var toneText = string.IsNullOrWhiteSpace(input.TonePreference)
+            ? "plain and evidence-led"
+            : input.TonePreference.Trim();
+
+        var coverLetter = $"""
+            Language: {language}
+            Dear {input.CompanyName} hiring team,
+
+            I am applying for the {input.RoleTitle} role at {input.CompanyName}. My draft is written in a {toneText} tone and uses only reviewed evidence.
+
+            Approved evidence:
+            {evidenceText}
+
+            Honest gap handling:
+            {gapText}
+
+            Kind regards,
+            {applicant}
+            """;
+
+        var shortMotivation = $"""
+            Language: {language}
+            I am interested in the {input.RoleTitle} role at {input.CompanyName} because my reviewed evidence includes {string.Join(", ", input.ApprovedEvidence.Select(evidence => evidence.ProfileFactTitle))}. I will describe unmatched requirements honestly as learning areas.
+            """;
+
+        return Task.FromResult(new DraftGenerationResult(coverLetter, shortMotivation));
+    }
+
+    public Task<ClaimAuditResult> AuditClaimsAsync(ClaimAuditInput input, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var evidence = input.ApprovedEvidence.ToList();
+        var claims = SplitClaims(input.CoverLetterText, input.ShortMotivationText)
+            .Select((claim, index) =>
+            {
+                var evidenceIds = evidence
+                    .Where(match => ClaimSupportedByEvidence(claim, match))
+                    .Select(match => match.Id)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var status = evidenceIds.Count > 0
+                    ? "Supported"
+                    : ClaimNeedsReview(claim) ? "NeedsReview" : "Unsupported";
+
+                return new ClaimAuditClaim($"claim-{index + 1}", claim, status, evidenceIds);
+            })
+            .ToList();
+
+        return Task.FromResult(new ClaimAuditResult(claims));
+    }
+
     private static bool ContainsAny(string text, IReadOnlyList<string> keywords) =>
         keywords.Any(keyword => ContainsTerm(text, keyword));
 
@@ -119,6 +187,45 @@ public sealed partial class FakeAiProvider : IAiProvider
 
         return ContainsTerm(haystack, keyword);
     }
+
+    private static IReadOnlyList<string> SplitClaims(params string[] texts) =>
+        texts
+            .Where(text => !string.IsNullOrWhiteSpace(text))
+            .SelectMany(text => text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Select(claim => claim.Trim())
+            .Where(claim => !string.IsNullOrWhiteSpace(claim))
+            .Select(claim => claim.EndsWith(".", StringComparison.Ordinal) ? claim : $"{claim}.")
+            .ToList();
+
+    private static bool ClaimSupportedByEvidence(string claim, EvidenceMatch evidence)
+    {
+        var evidenceText = string.Join(' ', [
+            evidence.Signal,
+            evidence.ProfileFactTitle,
+            evidence.Summary,
+            string.Join(' ', evidence.MatchedTerms)
+        ]);
+
+        return ContainsMeaningfulWords(claim, evidenceText) || ContainsMeaningfulWords(evidence.Summary, claim);
+    }
+
+    private static bool ContainsMeaningfulWords(string expectedWords, string text)
+    {
+        var words = Regex.Matches(expectedWords, @"\b[\w\-.#]+\b")
+            .Select(match => match.Value)
+            .Where(word => word.Length >= 4)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return words.Count > 0 && words.All(word => ContainsTerm(text, word));
+    }
+
+    private static bool ClaimNeedsReview(string claim) =>
+        ContainsTerm(claim, "may") ||
+        ContainsTerm(claim, "might") ||
+        ContainsTerm(claim, "interested") ||
+        ContainsTerm(claim, "learn") ||
+        ContainsTerm(claim, "fit");
 
     private static bool ContainsTerm(string text, string keyword)
     {

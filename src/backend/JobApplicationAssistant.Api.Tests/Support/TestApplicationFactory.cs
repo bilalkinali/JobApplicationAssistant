@@ -13,9 +13,11 @@ public sealed class TestApplicationFactory : WebApplicationFactory<Program>
     {
         builder.ConfigureServices(services =>
         {
+            var databaseName = $"job-application-assistant-{Guid.NewGuid():N}";
+
             services.RemoveAll<DbContextOptions<ApplicationDbContext>>();
             services.AddDbContext<ApplicationDbContext>(options =>
-                options.UseInMemoryDatabase($"job-application-assistant-{Guid.NewGuid():N}"));
+                options.UseInMemoryDatabase(databaseName));
         });
     }
 }
