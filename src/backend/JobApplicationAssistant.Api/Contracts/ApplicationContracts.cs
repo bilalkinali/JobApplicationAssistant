@@ -20,5 +20,11 @@ public sealed record ApplicationResponse(
     string JobPostingText,
     string? DetectedLanguage,
     string? SelectedLanguage,
+    string JobSignals,
+    string EvidenceMatches,
+    string UnmatchedRequirements,
+    string ApprovedEvidence,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
+
+public sealed record ApprovedEvidenceRequest(string? ApprovedEvidence);

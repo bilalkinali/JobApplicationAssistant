@@ -86,11 +86,50 @@ type ApplicationForm = {
 
 type ApplicationSession = ApplicationForm & {
   id: string;
+  jobSignals: string;
+  evidenceMatches: string;
+  unmatchedRequirements: string;
+  approvedEvidence: string;
   createdAt: string;
   updatedAt: string;
 };
 
 type View = "home" | "profile" | "applications" | "settings";
+
+type JobSignalsDocument = {
+  provider: string;
+  extractedAt: string;
+  requiredSkills: string[];
+  preferredSkills: string[];
+  responsibilities: string[];
+  signals: JobSignal[];
+};
+
+type JobSignal = {
+  id: string;
+  label: string;
+  category: string;
+  keywords: string[];
+};
+
+type EvidenceMatch = {
+  id: string;
+  signalId: string;
+  signal: string;
+  category: string;
+  profileFactId: string;
+  profileFactTitle: string;
+  summary: string;
+  matchedTerms: string[];
+};
+
+type UnmatchedRequirement = {
+  id: string;
+  signalId: string;
+  requirement: string;
+  category: string;
+  recommendation: string;
+};
 
 function App() {
   const [view, setView] = useState<View>("home");
@@ -103,6 +142,8 @@ function App() {
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
   const [applicationSearch, setApplicationSearch] = useState("");
   const [applicationStatusFilter, setApplicationStatusFilter] = useState("All");
+  const [approvedEvidenceDraft, setApprovedEvidenceDraft] = useState<EvidenceMatch[]>([]);
+  const [workflowBusy, setWorkflowBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -127,12 +168,32 @@ function App() {
       return matchesStatus && matchesSearch;
     });
   }, [applications, applicationSearch, applicationStatusFilter]);
+  const jobSignals = useMemo(
+    () => parseJobSignals(selectedApplication?.jobSignals),
+    [selectedApplication?.jobSignals]
+  );
+  const evidenceMatches = useMemo(
+    () => parseJsonArray<EvidenceMatch>(selectedApplication?.evidenceMatches),
+    [selectedApplication?.evidenceMatches]
+  );
+  const unmatchedRequirements = useMemo(
+    () => parseJsonArray<UnmatchedRequirement>(selectedApplication?.unmatchedRequirements),
+    [selectedApplication?.unmatchedRequirements]
+  );
+  const savedApprovedEvidence = useMemo(
+    () => parseJsonArray<EvidenceMatch>(selectedApplication?.approvedEvidence),
+    [selectedApplication?.approvedEvidence]
+  );
 
   useEffect(() => {
     void loadProfile();
     void loadProfileFacts();
     void loadApplications();
   }, []);
+
+  useEffect(() => {
+    setApprovedEvidenceDraft(savedApprovedEvidence);
+  }, [selectedApplicationId, savedApprovedEvidence]);
 
   async function loadProfile() {
     try {
@@ -255,12 +316,96 @@ function App() {
     }
   }
 
+  async function analyzeJob() {
+    if (!selectedApplicationId) {
+      setError("Save the application before running job analysis.");
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setWorkflowBusy("analysis");
+
+    try {
+      const saved = await apiSend<ApplicationSession>(`/api/applications/${selectedApplicationId}/analyze-job`, "POST", null);
+      replaceApplication(saved);
+      setNotice("Job analysis updated.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    } finally {
+      setWorkflowBusy(null);
+    }
+  }
+
+  async function matchEvidence() {
+    if (!selectedApplicationId) {
+      setError("Save the application before matching evidence.");
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setWorkflowBusy("matching");
+
+    try {
+      const saved = await apiSend<ApplicationSession>(`/api/applications/${selectedApplicationId}/match-evidence`, "POST", null);
+      replaceApplication(saved);
+      setNotice("Evidence matching updated.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    } finally {
+      setWorkflowBusy(null);
+    }
+  }
+
+  async function saveApprovedEvidence() {
+    if (!selectedApplicationId) {
+      setError("Save the application before reviewing evidence.");
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setWorkflowBusy("review");
+
+    try {
+      const saved = await apiSend<ApplicationSession>(
+        `/api/applications/${selectedApplicationId}/approved-evidence`,
+        "PUT",
+        { approvedEvidence: JSON.stringify(approvedEvidenceDraft) }
+      );
+      replaceApplication(saved);
+      setNotice("Approved evidence saved.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    } finally {
+      setWorkflowBusy(null);
+    }
+  }
+
   function openApplication(application: ApplicationSession) {
     setSelectedApplicationId(application.id);
     setApplicationForm(toApplicationForm(application));
     setView("applications");
     setError(null);
     setNotice(null);
+  }
+
+  function replaceApplication(application: ApplicationSession) {
+    const normalized = toApplicationSession(application);
+    setApplications((current) => current.map((item) => (item.id === normalized.id ? normalized : item)));
+    setSelectedApplicationId(normalized.id);
+    setApplicationForm(toApplicationForm(normalized));
+  }
+
+  function approveMatch(match: EvidenceMatch) {
+    setApprovedEvidenceDraft((current) =>
+      current.some((item) => item.id === match.id) ? current : [...current, match]
+    );
+  }
+
+  function removeApprovedEvidence(matchId: string) {
+    setApprovedEvidenceDraft((current) => current.filter((item) => item.id !== matchId));
   }
 
   function startNewApplication() {
@@ -459,6 +604,94 @@ function App() {
                   <button className="danger-action" type="button" onClick={deleteApplication}>Delete</button>
                 )}
               </div>
+
+              <section className="workflow-panel">
+                <div className="section-heading">
+                  <h3>Fake AI workflow</h3>
+                  <p>Analyze the posting, match approved profile facts, then save the evidence that may be used later.</p>
+                </div>
+
+                <div className="workflow-step">
+                  <div>
+                    <h4>1. Job analysis</h4>
+                    <p>{selectedApplicationId ? "Extract signals from the saved job posting." : "Save the application before analysis."}</p>
+                  </div>
+                  <button type="button" onClick={analyzeJob} disabled={!selectedApplicationId || workflowBusy !== null}>
+                    {workflowBusy === "analysis" ? "Analyzing..." : "Analyze job"}
+                  </button>
+                </div>
+
+                {jobSignals.signals.length > 0 ? (
+                  <div className="signal-grid">
+                    <SignalColumn title="Required skills" values={jobSignals.requiredSkills} />
+                    <SignalColumn title="Preferred skills" values={jobSignals.preferredSkills} />
+                    <SignalColumn title="Responsibilities" values={jobSignals.responsibilities} />
+                  </div>
+                ) : (
+                  <p className="empty-state compact">No analysis results yet.</p>
+                )}
+
+                <div className="workflow-step">
+                  <div>
+                    <h4>2. Evidence matching</h4>
+                    <p>{approvedProfileFacts.length > 0 ? "Match analyzed signals against approved profile facts." : "Approve at least one profile fact before matching."}</p>
+                  </div>
+                  <button type="button" onClick={matchEvidence} disabled={!selectedApplicationId || jobSignals.signals.length === 0 || approvedProfileFacts.length === 0 || workflowBusy !== null}>
+                    {workflowBusy === "matching" ? "Matching..." : "Match evidence"}
+                  </button>
+                </div>
+
+                <div className="review-grid">
+                  <section className="review-column">
+                    <h4>Matched evidence</h4>
+                    {evidenceMatches.length === 0 && <p className="empty-state compact">No matches yet.</p>}
+                    {evidenceMatches.map((match) => (
+                      <article className="evidence-card" key={match.id}>
+                        <strong>{match.signal}</strong>
+                        <span>{match.profileFactTitle}</span>
+                        <p>{match.summary}</p>
+                        <small>Matched: {match.matchedTerms.join(", ")}</small>
+                        <button type="button" onClick={() => approveMatch(match)}>Approve</button>
+                      </article>
+                    ))}
+                  </section>
+
+                  <section className="review-column">
+                    <h4>Unmatched requirements</h4>
+                    {unmatchedRequirements.length === 0 && <p className="empty-state compact">No unmatched requirements recorded.</p>}
+                    {unmatchedRequirements.map((requirement) => (
+                      <article className="evidence-card muted" key={requirement.id}>
+                        <strong>{requirement.requirement}</strong>
+                        <span>{requirement.category}</span>
+                        <p>{requirement.recommendation}</p>
+                      </article>
+                    ))}
+                  </section>
+                </div>
+
+                <div className="workflow-step">
+                  <div>
+                    <h4>3. Approved evidence</h4>
+                    <p>Save only the matched evidence that should be available to later generation steps.</p>
+                  </div>
+                  <button type="button" onClick={saveApprovedEvidence} disabled={!selectedApplicationId || workflowBusy !== null}>
+                    {workflowBusy === "review" ? "Saving..." : "Save approved evidence"}
+                  </button>
+                </div>
+
+                <div className="approved-list">
+                  {approvedEvidenceDraft.length === 0 && <p className="empty-state compact">No approved evidence selected.</p>}
+                  {approvedEvidenceDraft.map((match) => (
+                    <article className="approved-item" key={match.id}>
+                      <div>
+                        <strong>{match.signal}</strong>
+                        <span>{match.profileFactTitle}</span>
+                      </div>
+                      <button type="button" onClick={() => removeApprovedEvidence(match.id)}>Remove</button>
+                    </article>
+                  ))}
+                </div>
+              </section>
             </form>
           </div>
         )}
@@ -528,6 +761,23 @@ function Textarea(props: {
       <span>{props.label}</span>
       <textarea required={props.required} value={props.value} onChange={(event) => props.onChange(event.target.value)} />
     </label>
+  );
+}
+
+function SignalColumn(props: { title: string; values: string[] }) {
+  return (
+    <section className="signal-column">
+      <h4>{props.title}</h4>
+      {props.values.length === 0 ? (
+        <p>None found.</p>
+      ) : (
+        <ul>
+          {props.values.map((value) => (
+            <li key={value}>{value}</li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -611,6 +861,10 @@ function toApplicationSession(application: ApplicationSession): ApplicationSessi
   return {
     ...toApplicationForm(application),
     id: application.id,
+    jobSignals: application.jobSignals || "{}",
+    evidenceMatches: application.evidenceMatches || "[]",
+    unmatchedRequirements: application.unmatchedRequirements || "[]",
+    approvedEvidence: application.approvedEvidence || "[]",
     createdAt: application.createdAt,
     updatedAt: application.updatedAt
   };
@@ -639,6 +893,44 @@ function formatError(error: unknown): string {
     : "";
 
   return details ? `${apiError.message} ${details}` : apiError.message;
+}
+
+function parseJobSignals(value: string | undefined): JobSignalsDocument {
+  return {
+    provider: "Fake",
+    extractedAt: "",
+    requiredSkills: [],
+    preferredSkills: [],
+    responsibilities: [],
+    signals: [],
+    ...(parseJsonObject<Partial<JobSignalsDocument>>(value) ?? {})
+  };
+}
+
+function parseJsonArray<T>(value: string | undefined): T[] {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseJsonObject<T>(value: string | undefined): T | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function pageTitle(view: View): string {
