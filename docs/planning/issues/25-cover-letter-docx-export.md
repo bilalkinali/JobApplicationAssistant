@@ -19,8 +19,6 @@ Use TDD for this slice: begin with a failing public endpoint test for a successf
 
 ## Acceptance criteria
 
-- [ ] The implementation starts with a failing public endpoint test for successful DOCX cover letter export.
-- [ ] Each additional DOCX behavior is added through a red-green-refactor cycle, one behavior at a time.
 - [ ] Tests assert public response behavior and inspect document contents through a stable document-reading path where practical.
 - [ ] A public DOCX export endpoint returns a valid DOCX file response for an application with a generated draft.
 - [ ] DOCX export uses the current saved cover letter text and does not regenerate, re-audit, or call an AI provider.

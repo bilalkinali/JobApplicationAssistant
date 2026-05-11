@@ -1063,6 +1063,79 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task PutApplicationStatus_marks_saved_application_applied_and_updates_history_metadata()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/applications/{application.Id}/status",
+            new ApplicationStatusRequest("Applied"));
+
+        response.EnsureSuccessStatusCode();
+        var applied = await response.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(applied);
+        Assert.Equal("Applied", applied.Status);
+        Assert.True(applied.UpdatedAt > application.UpdatedAt);
+
+        var historyResponse = await client.GetAsync("/api/applications?status=Applied");
+        historyResponse.EnsureSuccessStatusCode();
+        var history = await historyResponse.Content.ReadFromJsonAsync<List<ApplicationResponse>>();
+        Assert.NotNull(history);
+        var listed = Assert.Single(history);
+        Assert.Equal(application.Id, listed.Id);
+        Assert.Equal("Applied", listed.Status);
+        Assert.Equal(applied.UpdatedAt, listed.UpdatedAt);
+    }
+
+    [Fact]
+    public async Task PutApplicationStatus_marks_saved_application_archived_and_keeps_it_available_when_archived_sessions_are_included()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/applications/{application.Id}/status",
+            new ApplicationStatusRequest("Archived"));
+
+        response.EnsureSuccessStatusCode();
+        var archived = await response.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(archived);
+        Assert.Equal("Archived", archived.Status);
+        Assert.True(archived.UpdatedAt > application.UpdatedAt);
+
+        var activeResponse = await client.GetAsync("/api/applications");
+        var allResponse = await client.GetAsync("/api/applications?includeArchived=true");
+        activeResponse.EnsureSuccessStatusCode();
+        allResponse.EnsureSuccessStatusCode();
+        var active = await activeResponse.Content.ReadFromJsonAsync<List<ApplicationResponse>>();
+        var all = await allResponse.Content.ReadFromJsonAsync<List<ApplicationResponse>>();
+        Assert.NotNull(active);
+        Assert.NotNull(all);
+        Assert.DoesNotContain(active, item => item.Id == application.Id);
+        Assert.Contains(all, item => item.Id == application.Id && item.Status == "Archived");
+    }
+
+    [Fact]
+    public async Task PutApplicationStatus_rejects_non_final_or_unknown_status()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/applications/{application.Id}/status",
+            new ApplicationStatusRequest("ReadyForReview"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains(nameof(ApplicationStatusRequest.Status), error.Details.Keys);
+    }
+
+    [Fact]
     public async Task PutGeneratedDraft_saves_manual_edits_preserves_generation_metadata_and_marks_audit_stale()
     {
         await using var factory = new TestApplicationFactory();

@@ -165,6 +165,30 @@ public static class ApplicationEndpoints
             return Results.NoContent();
         });
 
+        group.MapPut("/{id:guid}/status", async Task<IResult> (Guid id, ApplicationStatusRequest request, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var errors = ValidateFinalStatus(request);
+            if (errors.Count > 0)
+            {
+                return Results.BadRequest(ApiError.Validation(errors));
+            }
+
+            var application = await db.JobApplications
+                .Include(application => application.GeneratedDraft)
+                .FirstOrDefaultAsync(application => application.Id == id, ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            application.Status = NormalizeStatus(request.Status);
+            application.UpdatedAt = DateTimeOffset.UtcNow;
+
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(ToResponse(application));
+        });
+
         group.MapPost("/{id:guid}/analyze-job", async Task<IResult> (Guid id, ApplicationDbContext db, IAiProvider aiProvider, AiOptions aiOptions, CancellationToken ct) =>
         {
             var application = await db.JobApplications.FindAsync([id], ct);
@@ -658,6 +682,20 @@ public static class ApplicationEndpoints
         return errors;
     }
 
+    private static Dictionary<string, string[]> ValidateFinalStatus(ApplicationStatusRequest request)
+    {
+        var errors = new Dictionary<string, string[]>();
+        AddRequired(errors, nameof(request.Status), request.Status, 80);
+
+        if (!string.IsNullOrWhiteSpace(request.Status) &&
+            !IsFinalStatus(request.Status))
+        {
+            errors[nameof(request.Status)] = ["Status must be Applied or Archived."];
+        }
+
+        return errors;
+    }
+
     private static void AddRequired(Dictionary<string, string[]> errors, string field, string value, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -682,6 +720,10 @@ public static class ApplicationEndpoints
 
     private static string NormalizeStatus(string status) =>
         ValidStatuses.First(validStatus => string.Equals(validStatus, status.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsFinalStatus(string status) =>
+        string.Equals(status.Trim(), "Applied", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status.Trim(), "Archived", StringComparison.OrdinalIgnoreCase);
 
     private static OptionalFilter NormalizeOptionalStatus(string? status) =>
         NormalizeOptionalFilter(status, ValidStatuses);

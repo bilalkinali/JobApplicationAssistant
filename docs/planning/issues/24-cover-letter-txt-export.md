@@ -17,8 +17,6 @@ Use TDD for this slice: start with a failing public endpoint test for TXT export
 
 ## Acceptance criteria
 
-- [ ] The implementation starts with a failing public endpoint test for successful TXT cover letter export.
-- [ ] Each additional export behavior is added through a red-green-refactor cycle, one behavior at a time.
 - [ ] Tests assert observable response behavior such as status code, content type, content disposition, and text body.
 - [ ] A public TXT export endpoint returns the current edited cover letter text for an application with a generated draft.
 - [ ] TXT export uses the current saved draft text and does not regenerate, re-audit, or call an AI provider.

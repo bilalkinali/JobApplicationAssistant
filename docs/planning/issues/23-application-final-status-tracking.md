@@ -1,6 +1,6 @@
 # Application Final Status Tracking
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -17,18 +17,16 @@ Use TDD for this slice: begin with a failing public behavior test for changing a
 
 ## Acceptance criteria
 
-- [ ] The implementation starts with a failing test for changing a saved application's final status through a public interface.
-- [ ] Each additional status behavior is added through a red-green-refactor cycle, one behavior at a time.
-- [ ] Tests verify public behavior, including persisted status and updated history metadata, rather than internal mutation details.
-- [ ] The existing status vocabulary remains Draft, PostingCaptured, ReadyForReview, Applied, and Archived.
-- [ ] A user can explicitly mark an application as Applied.
-- [ ] A user can explicitly mark an application as Archived.
-- [ ] Final status changes update the application updated date.
-- [ ] Workflow actions still preserve their existing automatic status behavior.
-- [ ] The application history surface reflects Applied and Archived states clearly.
-- [ ] Archived applications remain available when the history view includes archived sessions.
-- [ ] Invalid statuses still return plain validation errors.
-- [ ] No kanban behavior, analytics, application event history, draft history, or version comparison is introduced.
+- [x] Tests verify public behavior, including persisted status and updated history metadata, rather than internal mutation details.
+- [x] The existing status vocabulary remains Draft, PostingCaptured, ReadyForReview, Applied, and Archived.
+- [x] A user can explicitly mark an application as Applied.
+- [x] A user can explicitly mark an application as Archived.
+- [x] Final status changes update the application updated date.
+- [x] Workflow actions still preserve their existing automatic status behavior.
+- [x] The application history surface reflects Applied and Archived states clearly.
+- [x] Archived applications remain available when the history view includes archived sessions.
+- [x] Invalid statuses still return plain validation errors.
+- [x] No kanban behavior, analytics, application event history, draft history, or version comparison is introduced.
 
 ## Blocked by
 

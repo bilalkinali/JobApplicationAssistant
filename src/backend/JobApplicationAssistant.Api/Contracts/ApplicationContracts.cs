@@ -32,6 +32,8 @@ public sealed record ApplicationResponse(
 
 public sealed record ApprovedEvidenceRequest(string? ApprovedEvidence);
 
+public sealed record ApplicationStatusRequest(string Status);
+
 public sealed record GeneratedDraftEditRequest(
     string CoverLetterText,
     string ShortMotivationText);

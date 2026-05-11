@@ -411,6 +411,33 @@ function App() {
     }
   }
 
+  async function markApplicationStatus(status: "Applied" | "Archived") {
+    if (!selectedApplicationId) {
+      setError("Save the application before changing its final status.");
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+
+    try {
+      const saved = await apiSend<ApplicationSession>(
+        `/api/applications/${selectedApplicationId}/status`,
+        "PUT",
+        { status }
+      );
+      replaceApplication(saved);
+      await loadApplications();
+      if (status === "Archived" && !includeArchivedApplications) {
+        setSelectedApplicationId(null);
+        setApplicationForm(emptyApplication);
+      }
+      setNotice(status === "Applied" ? "Application marked applied." : "Application archived.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    }
+  }
+
   async function analyzeJob() {
     if (!selectedApplicationId) {
       setError("Save the application before running job analysis.");
@@ -861,6 +888,25 @@ function App() {
                   <button className="danger-action" type="button" onClick={deleteApplication}>Delete</button>
                 )}
               </div>
+              {selectedApplicationId && (
+                <div className="final-status-actions" aria-label="Final application status actions">
+                  <button
+                    type="button"
+                    onClick={() => void markApplicationStatus("Applied")}
+                    disabled={selectedApplication?.status === "Applied" || workflowBusy !== null}
+                  >
+                    Mark applied
+                  </button>
+                  <button
+                    className="danger-action"
+                    type="button"
+                    onClick={() => void markApplicationStatus("Archived")}
+                    disabled={selectedApplication?.status === "Archived" || workflowBusy !== null}
+                  >
+                    Archive
+                  </button>
+                </div>
+              )}
 
               <section className="workflow-panel">
                 <div className="section-heading">

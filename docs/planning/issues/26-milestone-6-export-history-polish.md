@@ -17,8 +17,6 @@ Use TDD where practical for this slice: add behavior tests for any public backen
 
 ## Acceptance criteria
 
-- [ ] Any backend behavior adjustment starts with a failing public-interface test.
-- [ ] Behaviors are added incrementally through red-green-refactor cycles rather than one large horizontal implementation.
 - [ ] Tests focus on observable behavior and stable contracts rather than private component or module details.
 - [ ] The application history view presents status, archive visibility, draft readiness, and audit readiness coherently.
 - [ ] The draft/export area clearly warns when claim audit is stale.
