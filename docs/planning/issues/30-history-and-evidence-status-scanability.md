@@ -1,6 +1,6 @@
 # History and Evidence Status Scanability
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,17 +15,17 @@ This slice should refine presentation and wording around existing states. It sho
 
 ## Acceptance criteria
 
-- [ ] Application history clearly distinguishes active, applied, and archived sessions.
-- [ ] Archived applications remain visually distinct when visible.
-- [ ] Application history empty states distinguish no applications from no matching filtered results.
-- [ ] Application history filters remain easy to scan and do not introduce advanced tracking concepts.
-- [ ] Profile fact statuses clearly distinguish Draft, Approved, and Archived.
-- [ ] Job-local custom fact statuses clearly distinguish PendingConfirmation, Approved, and Rejected.
-- [ ] Evidence review wording reinforces that only approved evidence should support generated claims.
-- [ ] Status presentation stays consistent with the existing desktop-first workbench style.
-- [ ] Destructive actions in these areas are clearly labeled and confirmable where the existing flow supports it.
-- [ ] Tests are added only for extracted status-formatting helpers or changed public contracts.
-- [ ] No new workflow status values, application event history, analytics, kanban, or profile fact revision history is introduced.
+- [x] Application history clearly distinguishes active, applied, and archived sessions.
+- [x] Archived applications remain visually distinct when visible.
+- [x] Application history empty states distinguish no applications from no matching filtered results.
+- [x] Application history filters remain easy to scan and do not introduce advanced tracking concepts.
+- [x] Profile fact statuses clearly distinguish Draft, Approved, and Archived.
+- [x] Job-local custom fact statuses clearly distinguish PendingConfirmation, Approved, and Rejected.
+- [x] Evidence review wording reinforces that only approved evidence should support generated claims.
+- [x] Status presentation stays consistent with the existing desktop-first workbench style.
+- [x] Destructive actions in these areas are clearly labeled and confirmable where the existing flow supports it.
+- [x] Tests are added only for extracted status-formatting helpers or changed public contracts.
+- [x] No new workflow status values, application event history, analytics, kanban, or profile fact revision history is introduced.
 
 ## Blocked by
 

@@ -102,6 +102,7 @@ type ApplicationSession = ApplicationForm & {
   evidenceMatches: string;
   unmatchedRequirements: string;
   approvedEvidence: string;
+  customFacts: string;
   generatedDraft: GeneratedDraft | null;
   hasGeneratedDraft: boolean;
   auditReadiness: string;
@@ -155,6 +156,15 @@ type EvidenceMatch = {
   profileFactTitle: string;
   summary: string;
   matchedTerms: string[];
+};
+
+type CustomFact = {
+  id: string;
+  title: string;
+  summary: string;
+  technologies?: string[];
+  allowedClaims?: string[];
+  status: "PendingConfirmation" | "Approved" | "Rejected" | string;
 };
 
 type UnmatchedRequirement = {
@@ -269,6 +279,10 @@ function App() {
   const savedApprovedEvidence = useMemo(
     () => parseJsonArray<EvidenceMatch>(selectedApplication?.approvedEvidence),
     [selectedApplication?.approvedEvidence]
+  );
+  const customFacts = useMemo(
+    () => parseJsonArray<CustomFact>(selectedApplication?.customFacts),
+    [selectedApplication?.customFacts]
   );
   const claimAudit = useMemo(
     () => parseClaimAudit(selectedApplication?.generatedDraft?.claimAudit),
@@ -452,6 +466,10 @@ function App() {
       return;
     }
 
+    if (!window.confirm("Delete this profile fact? This permanently removes it from your evidence library.")) {
+      return;
+    }
+
     setError(null);
     setNotice(null);
 
@@ -467,6 +485,10 @@ function App() {
 
   async function deleteApplication() {
     if (!selectedApplicationId) {
+      return;
+    }
+
+    if (!window.confirm("Delete this application session? This permanently removes its workflow state.")) {
       return;
     }
 
@@ -487,6 +509,10 @@ function App() {
   async function markApplicationStatus(status: "Applied" | "Archived") {
     if (!selectedApplicationId) {
       setError(plainError("Validation blocker", "Save the application before changing its final status."));
+      return;
+    }
+
+    if (status === "Archived" && !window.confirm("Archive this application session? It will move out of the active history unless archived sessions are included.")) {
       return;
     }
 
@@ -959,13 +985,14 @@ function App() {
               <div className="fact-list">
                 {profileFacts.map((fact) => (
                   <button
-                    className={fact.id === selectedProfileFactId ? "fact-card active" : `fact-card ${fact.status.toLowerCase()}`}
+                    className={`fact-card ${fact.status.toLowerCase()}${fact.id === selectedProfileFactId ? " active" : ""}`}
                     key={fact.id}
                     type="button"
                     onClick={() => openProfileFact(fact)}
                   >
                     <strong>{fact.title}</strong>
-                    <span>{fact.type} - {fact.status}</span>
+                    <span>{fact.type}</span>
+                    <StatusBadge tone={statusTone(fact.status)}>{profileFactStatusLabel(fact.status)}</StatusBadge>
                   </button>
                 ))}
               </div>
@@ -1014,15 +1041,16 @@ function App() {
               <div className="session-list">
                 {filteredApplications.map((application) => (
                   <button
-                    className={application.id === selectedApplicationId ? "session active" : "session"}
+                    className={`session ${applicationStatusClass(application.status)}${application.id === selectedApplicationId ? " active" : ""}`}
                     key={application.id}
                     type="button"
                     onClick={() => void openApplication(application)}
                   >
+                    <StatusBadge tone={applicationHistoryTone(application.status)}>{applicationHistoryLabel(application.status)}</StatusBadge>
                     <strong>{application.companyName}</strong>
                     <span>{application.roleTitle}</span>
                     <small>
-                      {application.status} - {application.selectedLanguage || application.detectedLanguage || "Language unset"} - Updated {formatDate(application.updatedAt)}
+                      {applicationStatusLabel(application.status)} - {application.selectedLanguage || application.detectedLanguage || "Language unset"} - Updated {formatDate(application.updatedAt)}
                     </small>
                     <div className="session-badges">
                       {application.deadline && <span>Deadline {formatDate(application.deadline)}</span>}
@@ -1031,8 +1059,8 @@ function App() {
                     </div>
                   </button>
                 ))}
-                {applications.length === 0 && <p className="empty-state">No application sessions yet.</p>}
-                {applications.length > 0 && filteredApplications.length === 0 && <p className="empty-state">No applications match the current filters.</p>}
+                {applications.length === 0 && <p className="empty-state">{applicationHistoryEmptyMessage(includeArchivedApplications)}</p>}
+                {applications.length > 0 && filteredApplications.length === 0 && <p className="empty-state">No applications match the current search, status, and draft/audit filters.</p>}
               </div>
             </section>
 
@@ -1148,7 +1176,7 @@ function App() {
                 <div className="workflow-step">
                   <div>
                     <h4>3. Approved evidence</h4>
-                    <p>Save only the matched evidence that should be available to later generation steps.</p>
+                    <p>Save only evidence you approve as support for generated claims. Draft, archived, and removed evidence is not sent to draft generation.</p>
                   </div>
                   <button type="button" onClick={saveApprovedEvidence} disabled={!selectedApplicationId || workflowBusy !== null}>
                     {workflowBusy === "review" ? "Saving..." : "Save approved evidence"}
@@ -1160,6 +1188,7 @@ function App() {
                   {approvedEvidenceDraft.map((match) => (
                     <article className="approved-item" key={match.id}>
                       <div>
+                        <StatusBadge tone="approved">Approved evidence</StatusBadge>
                         <strong>{match.signal}</strong>
                         <span>{match.profileFactTitle}</span>
                       </div>
@@ -1167,6 +1196,27 @@ function App() {
                     </article>
                   ))}
                 </div>
+
+                <section className="custom-facts-panel">
+                  <div className="section-heading">
+                    <h4>Job-local custom facts</h4>
+                    <p>Only approved job-local facts should support generated claims.</p>
+                  </div>
+                  {customFacts.length === 0 ? (
+                    <p className="empty-state compact">No job-local custom facts recorded.</p>
+                  ) : (
+                    <div className="custom-fact-list">
+                      {customFacts.map((fact) => (
+                        <article className={`custom-fact ${customFactStatusClass(fact.status)}`} key={fact.id}>
+                          <StatusBadge tone={customFactStatusTone(fact.status)}>{customFactStatusLabel(fact.status)}</StatusBadge>
+                          <strong>{fact.title}</strong>
+                          <p>{fact.summary}</p>
+                          {fact.technologies && fact.technologies.length > 0 && <small>{fact.technologies.join(", ")}</small>}
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </section>
 
                 <div className="workflow-step">
                   <div>
@@ -1437,6 +1487,10 @@ function InlineFeedbackMessage(props: { feedback: InlineFeedback }) {
   );
 }
 
+function StatusBadge(props: { tone: string; children: string }) {
+  return <span className={`state-badge ${props.tone}`}>{props.children}</span>;
+}
+
 function SignalColumn(props: { title: string; values: string[] }) {
   return (
     <section className="signal-column">
@@ -1538,6 +1592,7 @@ function toApplicationSession(application: ApplicationSession): ApplicationSessi
     evidenceMatches: application.evidenceMatches || "[]",
     unmatchedRequirements: application.unmatchedRequirements || "[]",
     approvedEvidence: application.approvedEvidence || "[]",
+    customFacts: application.customFacts || "[]",
     generatedDraft: application.generatedDraft ?? null,
     hasGeneratedDraft: application.hasGeneratedDraft ?? Boolean(application.generatedDraft),
     auditReadiness: application.auditReadiness ?? auditReadinessForDraft(application.generatedDraft),
@@ -1622,6 +1677,124 @@ function auditReadinessForDraft(draft: GeneratedDraft | null): string {
 
 function readinessLabel(readiness: string): string {
   return readiness === "NotApplicable" ? "not applicable" : readiness.toLowerCase();
+}
+
+function applicationHistoryLabel(status: string): string {
+  if (status === "Applied") {
+    return "Applied";
+  }
+
+  if (status === "Archived") {
+    return "Archived";
+  }
+
+  return "Active";
+}
+
+function applicationHistoryTone(status: string): string {
+  if (status === "Applied") {
+    return "applied";
+  }
+
+  if (status === "Archived") {
+    return "archived";
+  }
+
+  return "active-work";
+}
+
+function applicationStatusClass(status: string): string {
+  if (status === "Applied") {
+    return "applied";
+  }
+
+  if (status === "Archived") {
+    return "archived";
+  }
+
+  return "active-work";
+}
+
+function applicationStatusLabel(status: string): string {
+  switch (status) {
+    case "PostingCaptured":
+      return "Posting captured";
+    case "ReadyForReview":
+      return "Ready for review";
+    default:
+      return status;
+  }
+}
+
+function profileFactStatusLabel(status: string): string {
+  switch (status) {
+    case "Draft":
+      return "Draft evidence";
+    case "Approved":
+      return "Approved evidence";
+    case "Archived":
+      return "Archived evidence";
+    default:
+      return status;
+  }
+}
+
+function customFactStatusLabel(status: string): string {
+  switch (status) {
+    case "PendingConfirmation":
+      return "Pending confirmation";
+    case "Approved":
+      return "Approved custom fact";
+    case "Rejected":
+      return "Rejected custom fact";
+    default:
+      return status;
+  }
+}
+
+function customFactStatusClass(status: string): string {
+  switch (status) {
+    case "PendingConfirmation":
+      return "pending";
+    case "Approved":
+      return "approved";
+    case "Rejected":
+      return "rejected";
+    default:
+      return "neutral";
+  }
+}
+
+function customFactStatusTone(status: string): string {
+  switch (status) {
+    case "PendingConfirmation":
+      return "pending";
+    case "Approved":
+      return "approved";
+    case "Rejected":
+      return "rejected";
+    default:
+      return "neutral";
+  }
+}
+
+function statusTone(status: string): string {
+  switch (status) {
+    case "Draft":
+      return "draft";
+    case "Approved":
+      return "approved";
+    case "Archived":
+      return "archived";
+    default:
+      return "neutral";
+  }
+}
+
+function applicationHistoryEmptyMessage(includeArchived: boolean): string {
+  return includeArchived
+    ? "No application sessions yet."
+    : "No active application sessions yet. Create one here, or include archived sessions to review older work.";
 }
 
 function summarizeClaimAudit(audit: ClaimAudit) {

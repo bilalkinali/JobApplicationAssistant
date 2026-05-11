@@ -983,6 +983,42 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task GetApplications_includes_job_local_custom_facts_for_status_scanability()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var created = await CreateApplicationAsync(client, "We need .NET.");
+        const string customFacts = """
+            [
+              {
+                "id": "custom-1",
+                "title": "Contract-specific API work",
+                "summary": "Built a similar integration for a client.",
+                "technologies": [".NET"],
+                "allowedClaims": ["Built integrations"],
+                "status": "PendingConfirmation"
+              }
+            ]
+            """;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var application = await db.JobApplications.FindAsync(created.Id);
+            Assert.NotNull(application);
+            application.CustomFacts = customFacts;
+            await db.SaveChangesAsync();
+        }
+
+        var response = await client.GetAsync("/api/applications");
+
+        response.EnsureSuccessStatusCode();
+        var applications = await response.Content.ReadFromJsonAsync<List<ApplicationResponse>>();
+        Assert.NotNull(applications);
+        var listed = Assert.Single(applications);
+        Assert.Equal(customFacts, listed.CustomFacts);
+    }
+
+    [Fact]
     public async Task GetApplications_hides_archived_sessions_by_default_and_includes_them_when_requested()
     {
         await using var factory = new TestApplicationFactory();

@@ -710,6 +710,7 @@ public static class ApplicationEndpoints
             application.EvidenceMatches,
             application.UnmatchedRequirements,
             application.ApprovedEvidence,
+            application.CustomFacts,
             application.CreatedAt,
             application.UpdatedAt,
             application.GeneratedDraft is null ? null : ToResponse(application.GeneratedDraft),

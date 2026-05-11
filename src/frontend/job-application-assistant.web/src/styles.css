@@ -155,6 +155,52 @@ button:disabled {
   background: #fff5f3;
 }
 
+.state-badge {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid #d7dde2;
+  border-radius: 999px;
+  color: #3f4a54;
+  background: #f7f8f5;
+  font-size: 0.72rem;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.state-badge.active-work,
+.state-badge.approved {
+  border-color: #b8ddcd;
+  color: #24533b;
+  background: #e7f5ee;
+}
+
+.state-badge.applied {
+  border-color: #a9c9e5;
+  color: #254d71;
+  background: #eaf4ff;
+}
+
+.state-badge.draft,
+.state-badge.pending {
+  border-color: #e4c06e;
+  color: #714d12;
+  background: #fff2d8;
+}
+
+.state-badge.archived {
+  color: #5f6872;
+  background: #f1f2ef;
+}
+
+.state-badge.rejected {
+  border-color: #c58f88;
+  color: #7c241f;
+  background: #fff5f3;
+}
+
 .message {
   margin-bottom: 16px;
   padding: 12px 14px;
@@ -453,7 +499,16 @@ button:disabled {
   background: #edf5f2;
 }
 
+.fact-card.draft {
+  border-left: 4px solid #d3a23c;
+}
+
+.fact-card.approved {
+  border-left: 4px solid #3c8f63;
+}
+
 .fact-card.archived {
+  border-left: 4px solid #8b97a3;
   color: #5f6872;
   background: #f3f3f0;
 }
@@ -522,6 +577,20 @@ button:disabled {
 .session:hover,
 .session.active {
   background: #edf5f2;
+}
+
+.session.active-work {
+  border-left: 4px solid #3c8f63;
+}
+
+.session.applied {
+  border-left: 4px solid #4b86b9;
+}
+
+.session.archived {
+  border-left: 4px solid #8b97a3;
+  color: #5f6872;
+  background: #f3f3f0;
 }
 
 .session span {
@@ -692,6 +761,56 @@ button:disabled {
 .approved-item div {
   display: grid;
   gap: 4px;
+}
+
+.custom-facts-panel {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #d9d7d0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.custom-fact-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.custom-fact {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #d7dde2;
+  border-left: 4px solid #8b97a3;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.custom-fact.pending {
+  border-left-color: #d3a23c;
+}
+
+.custom-fact.approved {
+  border-left-color: #3c8f63;
+}
+
+.custom-fact.rejected {
+  border-left-color: #b84a4a;
+  background: #fffafa;
+}
+
+.custom-fact p {
+  margin: 0;
+  color: #64717c;
+  line-height: 1.45;
+}
+
+.custom-fact small {
+  color: #64717c;
 }
 
 .draft-editor {
