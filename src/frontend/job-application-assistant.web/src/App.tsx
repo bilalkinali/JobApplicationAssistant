@@ -4,6 +4,12 @@ import {
   getCoverLetterExportState,
   getCoverLetterText
 } from "./exportControls";
+import {
+  getDraftGenerationState,
+  getEvidenceMatchingState,
+  getJobAnalysisState,
+  getProfileReadiness
+} from "./readiness";
 import "./styles.css";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:5108";
@@ -280,6 +286,36 @@ function App() {
   const auditExportWarning = useMemo(
     () => getAuditExportWarning(selectedApplication),
     [selectedApplication]
+  );
+  const profileReadiness = useMemo(
+    () => getProfileReadiness(profile, approvedProfileFacts.length),
+    [approvedProfileFacts.length, profile]
+  );
+  const jobAnalysisState = useMemo(
+    () =>
+      getJobAnalysisState({
+        selectedApplicationId,
+        hasSavedJobPosting
+      }),
+    [hasSavedJobPosting, selectedApplicationId]
+  );
+  const evidenceMatchingState = useMemo(
+    () =>
+      getEvidenceMatchingState({
+        selectedApplicationId,
+        hasJobSignals: jobSignals.signals.length > 0,
+        approvedProfileFactCount: approvedProfileFacts.length
+      }),
+    [approvedProfileFacts.length, jobSignals.signals.length, selectedApplicationId]
+  );
+  const draftGenerationState = useMemo(
+    () =>
+      getDraftGenerationState({
+        selectedApplicationId,
+        hasSavedJobPosting,
+        hasSavedApprovedEvidence
+      }),
+    [hasSavedApprovedEvidence, hasSavedJobPosting, selectedApplicationId]
   );
 
   useEffect(() => {
@@ -797,8 +833,13 @@ function App() {
           <div className="panel-grid">
             <article className="panel">
               <h3>Profile readiness</h3>
-              <p>{profile.fullName ? `${profile.fullName} has contact details saved.` : "Profile contact details are not saved yet."}</p>
-              <p>{approvedProfileFacts.length > 0 ? `${approvedProfileFacts.length} approved profile fact${approvedProfileFacts.length === 1 ? "" : "s"} ready as evidence.` : "No approved profile facts yet."}</p>
+              <p>{profileReadiness.contactMessage}</p>
+              <p>{profileReadiness.evidenceMessage}</p>
+              {profileReadiness.warnings.length > 0 && (
+                <button type="button" onClick={() => setView("profile")}>
+                  Review profile setup
+                </button>
+              )}
             </article>
             <article className="panel">
               <h3>New application</h3>
@@ -847,8 +888,11 @@ function App() {
             <form className="form-layout panel-form" onSubmit={saveProfile}>
               <div className="section-heading">
                 <h3>Contact and tone</h3>
-                <p>Used later when generated text needs profile context.</p>
+                <p>{profileReadiness.contactMessage}</p>
               </div>
+              {!profileReadiness.hasContactDetails && (
+                <p className="workflow-note warning">Contact setup is incomplete. You can keep editing applications, but later drafts and exports may miss useful applicant context.</p>
+              )}
               <Field label="Full name" required value={profile.fullName} onChange={(fullName) => setProfile({ ...profile, fullName })} />
               <Field label="Email" required type="email" value={profile.email} onChange={(email) => setProfile({ ...profile, email })} />
               <Field label="Phone" value={profile.phone} onChange={(phone) => setProfile({ ...profile, phone })} />
@@ -867,8 +911,11 @@ function App() {
             <section className="profile-facts-panel">
               <div className="section-heading">
                 <h3>Profile facts</h3>
-                <p>{approvedProfileFacts.length > 0 ? `${approvedProfileFacts.length} approved fact${approvedProfileFacts.length === 1 ? "" : "s"} available.` : "Add and approve facts before later generation work."}</p>
+                <p>{profileReadiness.evidenceMessage}</p>
               </div>
+              {!profileReadiness.hasApprovedEvidence && (
+                <p className="workflow-note warning">Approved evidence is required before evidence matching and draft generation. Draft or archived facts will not be used as proof.</p>
+              )}
               {profileFacts.length === 0 && <p className="empty-state">No profile facts yet.</p>}
               <div className="fact-list">
                 {profileFacts.map((fact) => (
@@ -1004,9 +1051,9 @@ function App() {
                 <div className="workflow-step">
                   <div>
                     <h4>1. Job analysis</h4>
-                    <p>{selectedApplicationId ? "Extract signals from the saved job posting." : "Save the application before analysis."}</p>
+                    <p>{jobAnalysisState.message}</p>
                   </div>
-                  <button type="button" onClick={analyzeJob} disabled={!selectedApplicationId || workflowBusy !== null}>
+                  <button type="button" onClick={analyzeJob} disabled={!jobAnalysisState.canRun || workflowBusy !== null}>
                     {workflowBusy === "analysis" ? "Analyzing..." : "Analyze job"}
                   </button>
                 </div>
@@ -1024,9 +1071,9 @@ function App() {
                 <div className="workflow-step">
                   <div>
                     <h4>2. Evidence matching</h4>
-                    <p>{approvedProfileFacts.length > 0 ? "Match analyzed signals against approved profile facts." : "Approve at least one profile fact before matching."}</p>
+                    <p>{evidenceMatchingState.message}</p>
                   </div>
-                  <button type="button" onClick={matchEvidence} disabled={!selectedApplicationId || jobSignals.signals.length === 0 || approvedProfileFacts.length === 0 || workflowBusy !== null}>
+                  <button type="button" onClick={matchEvidence} disabled={!evidenceMatchingState.canRun || workflowBusy !== null}>
                     {workflowBusy === "matching" ? "Matching..." : "Match evidence"}
                   </button>
                 </div>
@@ -1085,9 +1132,9 @@ function App() {
                 <div className="workflow-step">
                   <div>
                     <h4>4. Generated draft</h4>
-                    <p>{draftGenerationMessage(selectedApplicationId, hasSavedJobPosting, hasSavedApprovedEvidence)}</p>
+                    <p>{draftGenerationState.message}</p>
                   </div>
-                  <button type="button" onClick={generateDraft} disabled={!selectedApplicationId || !hasSavedJobPosting || !hasSavedApprovedEvidence || workflowBusy !== null}>
+                  <button type="button" onClick={generateDraft} disabled={!draftGenerationState.canRun || workflowBusy !== null}>
                     {workflowBusy === "draft" ? "Generating..." : "Generate draft"}
                   </button>
                 </div>
@@ -1505,26 +1552,6 @@ function isInvalidAiOutputMessage(message: string): boolean {
     normalized.includes("incomplete") ||
     normalized.includes("duplicate")
   );
-}
-
-function draftGenerationMessage(
-  selectedApplicationId: string | null,
-  hasSavedJobPosting: boolean,
-  hasSavedApprovedEvidence: boolean
-): string {
-  if (!selectedApplicationId) {
-    return "Save the application before generating a draft.";
-  }
-
-  if (!hasSavedJobPosting) {
-    return "Add and save job posting text before generating a draft.";
-  }
-
-  if (!hasSavedApprovedEvidence) {
-    return "Save approved evidence before generating a draft.";
-  }
-
-  return "Generate or edit the current cover letter and short motivation.";
 }
 
 function claimAuditMessage(hasGeneratedDraft: boolean): string {

@@ -1,6 +1,6 @@
 # Setup Readiness and Validation Blockers
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,17 +15,17 @@ This slice should keep warnings non-blocking unless the existing workflow alread
 
 ## Acceptance criteria
 
-- [ ] Profile readiness language is consistent between the home workbench and profile area.
-- [ ] Missing contact details are presented as warnings, not blockers, unless a specific existing action requires them.
-- [ ] Missing approved profile facts are presented as a readiness warning before generation.
-- [ ] Setup warnings guide the user toward the relevant profile or fact area.
-- [ ] The application detail workflow clearly explains blockers for missing job posting text.
-- [ ] The application detail workflow clearly explains blockers for missing approved profile facts or approved custom facts.
-- [ ] Warnings do not block creating, editing, or reviewing applications.
-- [ ] Disabled AI workflow actions explain missing-data blockers without taking ownership of provider error presentation.
-- [ ] Existing workflow state remains visible while readiness warnings and blockers are shown.
-- [ ] Tests are added only for extracted readiness/blocker helpers or changed public contracts.
-- [ ] No new AI provider behavior, export format, CV import, history model, or mobile-first redesign is introduced.
+- [x] Profile readiness language is consistent between the home workbench and profile area.
+- [x] Missing contact details are presented as warnings, not blockers, unless a specific existing action requires them.
+- [x] Missing approved profile facts are presented as a readiness warning before generation.
+- [x] Setup warnings guide the user toward the relevant profile or fact area.
+- [x] The application detail workflow clearly explains blockers for missing job posting text.
+- [x] The application detail workflow clearly explains blockers for missing approved profile facts or approved custom facts.
+- [x] Warnings do not block creating, editing, or reviewing applications.
+- [x] Disabled AI workflow actions explain missing-data blockers without taking ownership of provider error presentation.
+- [x] Existing workflow state remains visible while readiness warnings and blockers are shown.
+- [x] Tests are added only for extracted readiness/blocker helpers or changed public contracts.
+- [x] No new AI provider behavior, export format, CV import, history model, or mobile-first redesign is introduced.
 
 ## Blocked by
 
