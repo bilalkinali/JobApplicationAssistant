@@ -3,7 +3,9 @@ using JobApplicationAssistant.Api.Contracts;
 using JobApplicationAssistant.Api.Data;
 using JobApplicationAssistant.Api.Domain;
 using Microsoft.EntityFrameworkCore;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace JobApplicationAssistant.Api.Endpoints;
 
@@ -187,6 +189,40 @@ public static class ApplicationEndpoints
             await db.SaveChangesAsync(ct);
 
             return Results.Ok(ToResponse(application));
+        });
+
+        group.MapGet("/{id:guid}/exports/cover-letter.txt", async Task<IResult> (Guid id, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var application = await db.JobApplications
+                .Include(application => application.GeneratedDraft)
+                .FirstOrDefaultAsync(application => application.Id == id, ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            if (application.GeneratedDraft is null)
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(ApplicationResponse.GeneratedDraft)] = ["Generate a draft before exporting the cover letter."]
+                }));
+            }
+
+            var coverLetterText = application.GeneratedDraft.CoverLetterText;
+            if (string.IsNullOrWhiteSpace(coverLetterText))
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(GeneratedDraftResponse.CoverLetterText)] = ["Cover letter text is required before export."]
+                }));
+            }
+
+            var fileName = BuildCoverLetterFileName(application);
+            return Results.File(
+                Encoding.UTF8.GetBytes(coverLetterText),
+                "text/plain; charset=utf-8",
+                fileName);
         });
 
         group.MapPost("/{id:guid}/analyze-job", async Task<IResult> (Guid id, ApplicationDbContext db, IAiProvider aiProvider, AiOptions aiOptions, CancellationToken ct) =>
@@ -765,6 +801,23 @@ public static class ApplicationEndpoints
         }
 
         return "Current";
+    }
+
+    private static string BuildCoverLetterFileName(JobApplication application)
+    {
+        var company = SlugifyFileNamePart(application.CompanyName);
+        var role = SlugifyFileNamePart(application.RoleTitle);
+        var name = string.Join('-', new[] { company, role }.Where(part => part.Length > 0));
+
+        return name.Length == 0
+            ? $"application-{application.Id:N}-cover-letter.txt"
+            : $"{name}-cover-letter.txt";
+    }
+
+    private static string SlugifyFileNamePart(string value)
+    {
+        var normalized = Regex.Replace(value.Trim().ToLowerInvariant(), @"[^a-z0-9]+", "-").Trim('-');
+        return normalized.Length > 60 ? normalized[..60].Trim('-') : normalized;
     }
 
     private static ApprovedEvidenceValidation ValidateApprovedEvidence(ApprovedEvidenceRequest request, string evidenceMatchesJson)

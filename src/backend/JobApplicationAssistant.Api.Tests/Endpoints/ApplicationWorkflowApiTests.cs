@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using JobApplicationAssistant.Api.Ai;
@@ -1189,6 +1190,100 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task ExportCoverLetterTxt_returns_current_edited_cover_letter_with_text_headers_and_safe_filename()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(
+            client,
+            "We need .NET.",
+            companyName: "Northwind & Sons",
+            roleTitle: "Senior C# Engineer");
+        await AddGeneratedDraftAsync(factory, application.Id, coverLetterText: "Edited cover letter text.\r\nSecond line.");
+
+        var response = await client.GetAsync($"/api/applications/{application.Id}/exports/cover-letter.txt");
+
+        response.EnsureSuccessStatusCode();
+        Assert.Equal("text/plain", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("utf-8", response.Content.Headers.ContentType?.CharSet);
+        Assert.Equal("Edited cover letter text.\r\nSecond line.", await response.Content.ReadAsStringAsync());
+        var contentDisposition = response.Content.Headers.ContentDisposition;
+        Assert.NotNull(contentDisposition);
+        Assert.Equal("attachment", contentDisposition.DispositionType);
+        Assert.Equal("northwind-sons-senior-c-engineer-cover-letter.txt", GetFileName(contentDisposition));
+    }
+
+    [Fact]
+    public async Task ExportCoverLetterTxt_rejects_missing_application_generated_draft_and_empty_cover_letter()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var missingResponse = await client.GetAsync($"/api/applications/{Guid.NewGuid()}/exports/cover-letter.txt");
+
+        Assert.Equal(HttpStatusCode.NotFound, missingResponse.StatusCode);
+        var missingError = await missingResponse.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(missingError);
+        Assert.Equal("not_found", missingError.Code);
+
+        var withoutDraft = await CreateApplicationAsync(client, "We need .NET.");
+        var withoutDraftResponse = await client.GetAsync($"/api/applications/{withoutDraft.Id}/exports/cover-letter.txt");
+
+        Assert.Equal(HttpStatusCode.BadRequest, withoutDraftResponse.StatusCode);
+        var withoutDraftError = await withoutDraftResponse.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(withoutDraftError);
+        Assert.Contains(nameof(ApplicationResponse.GeneratedDraft), withoutDraftError.Details!.Keys);
+
+        var emptyDraftApplication = await CreateApplicationAsync(client, "We need React.");
+        await AddGeneratedDraftAsync(factory, emptyDraftApplication.Id, coverLetterText: "   ");
+        var emptyDraftResponse = await client.GetAsync($"/api/applications/{emptyDraftApplication.Id}/exports/cover-letter.txt");
+
+        Assert.Equal(HttpStatusCode.BadRequest, emptyDraftResponse.StatusCode);
+        var emptyDraftError = await emptyDraftResponse.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(emptyDraftError);
+        Assert.Contains(nameof(GeneratedDraftResponse.CoverLetterText), emptyDraftError.Details!.Keys);
+    }
+
+    [Fact]
+    public async Task ExportCoverLetterTxt_allows_stale_or_missing_claim_audit()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var stale = await CreateApplicationAsync(client, "We need .NET.", companyName: "Stale Co");
+        var missing = await CreateApplicationAsync(client, "We need React.", companyName: "Missing Co");
+        await AddGeneratedDraftAsync(factory, stale.Id, isClaimAuditStale: true, coverLetterText: "Stale audit cover letter.");
+        await AddGeneratedDraftAsync(factory, missing.Id, claimAudit: "{}", auditUpdatedAt: null, coverLetterText: "Missing audit cover letter.");
+
+        var staleResponse = await client.GetAsync($"/api/applications/{stale.Id}/exports/cover-letter.txt");
+        var missingResponse = await client.GetAsync($"/api/applications/{missing.Id}/exports/cover-letter.txt");
+
+        staleResponse.EnsureSuccessStatusCode();
+        missingResponse.EnsureSuccessStatusCode();
+        Assert.Equal("Stale audit cover letter.", await staleResponse.Content.ReadAsStringAsync());
+        Assert.Equal("Missing audit cover letter.", await missingResponse.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task ExportCoverLetterTxt_uses_application_id_filename_fallback_when_metadata_is_not_filename_safe()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(
+            client,
+            "We need .NET.",
+            companyName: "!!!",
+            roleTitle: "!!!");
+        await AddGeneratedDraftAsync(factory, application.Id);
+
+        var response = await client.GetAsync($"/api/applications/{application.Id}/exports/cover-letter.txt");
+
+        response.EnsureSuccessStatusCode();
+        var contentDisposition = response.Content.Headers.ContentDisposition;
+        Assert.NotNull(contentDisposition);
+        Assert.Equal($"application-{application.Id:N}-cover-letter.txt", GetFileName(contentDisposition));
+    }
+
+    [Fact]
     public async Task AuditClaims_rejects_application_without_generated_draft()
     {
         await using var factory = new TestApplicationFactory();
@@ -1528,7 +1623,8 @@ public sealed class ApplicationWorkflowApiTests
         Guid applicationId,
         string claimAudit = """{"status":"current"}""",
         DateTimeOffset? auditUpdatedAt = default,
-        bool isClaimAuditStale = false)
+        bool isClaimAuditStale = false,
+        string coverLetterText = "Existing cover letter.")
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
@@ -1538,7 +1634,7 @@ public sealed class ApplicationWorkflowApiTests
         {
             Id = Guid.NewGuid(),
             JobApplicationId = applicationId,
-            CoverLetterText = "Existing cover letter.",
+            CoverLetterText = coverLetterText,
             ShortMotivationText = "Existing motivation.",
             ClaimAudit = claimAudit,
             GeneratedAt = now,
@@ -1563,6 +1659,9 @@ public sealed class ApplicationWorkflowApiTests
             draft.UpdatedAt,
             draft.IsClaimAuditStale);
     }
+
+    private static string? GetFileName(ContentDispositionHeaderValue contentDisposition) =>
+        contentDisposition.FileNameStar ?? contentDisposition.FileName?.Trim('"');
 
     private static async Task MarkApplicationAnalyzedAsync(WebApplicationFactory<Program> factory, Guid applicationId)
     {
