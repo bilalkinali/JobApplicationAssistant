@@ -162,6 +162,24 @@ type ClaimAuditClaim = {
   evidenceIds: string[];
 };
 
+type AiProviderStatus = {
+  provider: string;
+  model: string;
+  endpoint: string | null;
+  isAvailable: boolean;
+  message: string;
+};
+
+type AiDiagnostics = AiProviderStatus & {
+  checks: AiDiagnosticCheck[];
+};
+
+type AiDiagnosticCheck = {
+  name: string;
+  status: string;
+  message: string;
+};
+
 function App() {
   const [view, setView] = useState<View>("home");
   const [profile, setProfile] = useState<ProfileForm>(emptyProfile);
@@ -179,6 +197,11 @@ function App() {
     shortMotivationText: ""
   });
   const [workflowBusy, setWorkflowBusy] = useState<string | null>(null);
+  const [aiStatus, setAiStatus] = useState<AiProviderStatus | null>(null);
+  const [aiDiagnostics, setAiDiagnostics] = useState<AiDiagnostics | null>(null);
+  const [aiDiagnosticsError, setAiDiagnosticsError] = useState<string | null>(null);
+  const [aiDiagnosticsBusy, setAiDiagnosticsBusy] = useState(false);
+  const [aiDiagnosticsLastRanAt, setAiDiagnosticsLastRanAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -232,6 +255,7 @@ function App() {
     void loadProfile();
     void loadProfileFacts();
     void loadApplications();
+    void loadAiStatus();
   }, []);
 
   useEffect(() => {
@@ -267,6 +291,15 @@ function App() {
     try {
       const response = await apiGet<ProfileFact[]>("/api/profile/facts");
       setProfileFacts(response.map(toProfileFact));
+    } catch (apiError) {
+      setError(formatError(apiError));
+    }
+  }
+
+  async function loadAiStatus() {
+    try {
+      const response = await apiGet<AiProviderStatus>("/api/ai/status");
+      setAiStatus(response);
     } catch (apiError) {
       setError(formatError(apiError));
     }
@@ -500,6 +533,33 @@ function App() {
     }
   }
 
+  async function runAiDiagnostics() {
+    setError(null);
+    setNotice(null);
+    setAiDiagnosticsError(null);
+    setAiDiagnostics(null);
+    setAiDiagnosticsBusy(true);
+
+    try {
+      const diagnostics = await apiSend<AiDiagnostics>("/api/ai/diagnostics", "POST", null);
+      setAiDiagnostics(diagnostics);
+      setAiDiagnosticsLastRanAt(new Date().toISOString());
+      setAiStatus({
+        provider: diagnostics.provider,
+        model: diagnostics.model,
+        endpoint: diagnostics.endpoint,
+        isAvailable: diagnostics.isAvailable,
+        message: diagnostics.message
+      });
+      setNotice("AI diagnostics updated.");
+    } catch (apiError) {
+      setAiDiagnosticsLastRanAt(new Date().toISOString());
+      setAiDiagnosticsError(formatError(apiError));
+    } finally {
+      setAiDiagnosticsBusy(false);
+    }
+  }
+
   async function openApplication(application: ApplicationSession) {
     setSelectedApplicationId(application.id);
     setApplicationForm(toApplicationForm(application));
@@ -599,7 +659,9 @@ function App() {
             <p className="eyebrow">Workbench</p>
             <h2 id="workspace-title">{pageTitle(view)}</h2>
           </div>
-          <span className="status-pill">CRUD foundation</span>
+          <span className={`status-pill ${aiStatus?.isAvailable === false ? "unavailable" : ""}`}>
+            {aiStatus ? `${aiStatus.provider} - ${aiStatus.model} - ${availabilityLabel(aiStatus)}` : "AI status loading"}
+          </span>
         </header>
 
         {error && <div className="message error">{error}</div>}
@@ -625,7 +687,31 @@ function App() {
             </article>
             <article className="panel">
               <h3>AI status</h3>
-              <p>AI providers and diagnostics are intentionally outside this slice.</p>
+              {aiStatus ? (
+                <>
+                  <p>{providerSummary(aiStatus)}</p>
+                  <dl className="status-details compact">
+                    <div>
+                      <dt>Provider</dt>
+                      <dd>{aiStatus.provider}</dd>
+                    </div>
+                    <div>
+                      <dt>Model</dt>
+                      <dd>{aiStatus.model}</dd>
+                    </div>
+                    <div>
+                      <dt>Availability</dt>
+                      <dd>{aiStatus.isAvailable ? "Available" : "Unavailable"}</dd>
+                    </div>
+                    <div>
+                      <dt>Diagnostics</dt>
+                      <dd>{aiDiagnosticsLastRanAt ? `Last ran ${formatDateTime(aiDiagnosticsLastRanAt)}` : "Not run this session"}</dd>
+                    </div>
+                  </dl>
+                </>
+              ) : (
+                <p>Loading AI provider status.</p>
+              )}
             </article>
           </div>
         )}
@@ -748,6 +834,11 @@ function App() {
                   <h3>Application text workflow</h3>
                   <p>Move from job analysis to approved evidence, generated text, and claim audit before final use.</p>
                 </div>
+                {aiStatus && (
+                  <p className={`workflow-note ${aiStatus.isAvailable ? "info" : "warning"}`}>
+                    {aiWorkflowStatusMessage(aiStatus)}
+                  </p>
+                )}
 
                 <div className="workflow-step">
                   <div>
@@ -904,9 +995,60 @@ function App() {
         )}
 
         {view === "settings" && (
-          <article className="panel">
-            <h3>Settings</h3>
-            <p>Provider settings and diagnostics are reserved for the later AI slices.</p>
+          <article className="panel settings-panel">
+            <h3>AI settings</h3>
+            {aiStatus ? (
+              <>
+                <p>{providerSummary(aiStatus)}</p>
+                <dl className="status-details">
+                  <div>
+                    <dt>Provider</dt>
+                    <dd>{aiStatus.provider}</dd>
+                  </div>
+                  <div>
+                    <dt>Model</dt>
+                    <dd>{aiStatus.model}</dd>
+                  </div>
+                  <div>
+                    <dt>Endpoint</dt>
+                    <dd>{aiStatus.endpoint ?? "Not applicable"}</dd>
+                  </div>
+                  <div>
+                    <dt>Availability</dt>
+                    <dd>{aiStatus.isAvailable ? "Available" : "Unavailable"}</dd>
+                  </div>
+                  <div>
+                    <dt>Diagnostics</dt>
+                    <dd>{aiDiagnosticsLastRanAt ? `Last ran ${formatDateTime(aiDiagnosticsLastRanAt)}` : "Not run this session"}</dd>
+                  </div>
+                </dl>
+              </>
+            ) : (
+              <p>Loading AI provider status.</p>
+            )}
+            <button className="primary-action" type="button" onClick={runAiDiagnostics} disabled={aiDiagnosticsBusy}>
+              {aiDiagnosticsBusy ? "Running diagnostics..." : "Run diagnostics"}
+            </button>
+            {aiDiagnosticsBusy && <p className="diagnostics-state">Checking provider connectivity and model readiness.</p>}
+            {!aiDiagnosticsBusy && !aiDiagnostics && !aiDiagnosticsError && (
+              <p className="diagnostics-state">Diagnostics have not been run this session.</p>
+            )}
+            {aiDiagnosticsError && <p className="diagnostics-state error">{aiDiagnosticsError}</p>}
+            {aiDiagnostics && (
+              <section className="diagnostics-list">
+                <h4>Diagnostics result</h4>
+                <p className={aiDiagnostics.isAvailable ? "diagnostics-state success" : "diagnostics-state warning"}>
+                  {aiDiagnostics.message}
+                </p>
+                {aiDiagnostics.checks.map((check) => (
+                  <article className="diagnostics-item" key={check.name}>
+                    <strong>{check.name}</strong>
+                    <span>{check.status}</span>
+                    <p>{check.message}</p>
+                  </article>
+                ))}
+              </section>
+            )}
           </article>
         )}
       </section>
@@ -1091,7 +1233,21 @@ function toApplicationPayload(application: ApplicationForm) {
 function formatError(error: unknown): string {
   const apiError = error as ApiError;
   if (!apiError?.message) {
-    return "The API request failed.";
+    return error instanceof Error ? error.message : "The API request failed.";
+  }
+
+  const aiProviderMessages = apiError.details?.AiProvider;
+  if (aiProviderMessages?.length) {
+    const providerMessage = aiProviderMessages.join(" ");
+    if (providerMessage.toLowerCase().includes("unavailable")) {
+      return `AI provider unavailable: ${providerMessage} Check AI settings, then run diagnostics. Existing workflow state was kept.`;
+    }
+
+    if (isInvalidAiOutputMessage(providerMessage)) {
+      return `AI provider returned invalid output: ${providerMessage} Existing workflow state was kept.`;
+    }
+
+    return `AI provider failed: ${providerMessage} Existing workflow state was kept.`;
   }
 
   const details = apiError.details
@@ -1101,6 +1257,46 @@ function formatError(error: unknown): string {
     : "";
 
   return details ? `${apiError.message} ${details}` : apiError.message;
+}
+
+function providerSummary(status: AiProviderStatus): string {
+  const availability = status.isAvailable ? "available" : "unavailable";
+  const endpoint = status.endpoint ? ` at ${status.endpoint}` : "";
+  const deterministic = isFakeProvider(status) ? " Deterministic fake workflow is active." : "";
+
+  return `${status.provider} provider is ${availability} with model ${status.model}${endpoint}. ${status.message}${deterministic}`;
+}
+
+function availabilityLabel(status: AiProviderStatus): string {
+  return status.isAvailable ? "Available" : "Unavailable";
+}
+
+function aiWorkflowStatusMessage(status: AiProviderStatus): string {
+  if (isFakeProvider(status)) {
+    return "Deterministic fake AI is active for repeatable workflow checks.";
+  }
+
+  if (status.isAvailable) {
+    return `${status.provider} model ${status.model} is available for AI workflow actions.`;
+  }
+
+  return `${status.provider} model ${status.model} is unavailable. AI actions may fail until diagnostics pass; validation blockers are still shown separately.`;
+}
+
+function isFakeProvider(status: AiProviderStatus): boolean {
+  return status.provider.toLowerCase() === "fake";
+}
+
+function isInvalidAiOutputMessage(message: string): boolean {
+  const normalized = message.toLowerCase();
+
+  return (
+    normalized.includes("invalid") ||
+    normalized.includes("malformed") ||
+    normalized.includes("empty response") ||
+    normalized.includes("incomplete") ||
+    normalized.includes("duplicate")
+  );
 }
 
 function draftGenerationMessage(
@@ -1216,6 +1412,15 @@ function formatDate(value: string): string {
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric"
+  }).format(new Date(value));
+}
+
+function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
   }).format(new Date(value));
 }
 

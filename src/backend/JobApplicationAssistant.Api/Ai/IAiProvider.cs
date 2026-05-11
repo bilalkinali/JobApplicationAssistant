@@ -4,6 +4,10 @@ namespace JobApplicationAssistant.Api.Ai;
 
 public interface IAiProvider
 {
+    Task<AiProviderStatus> GetStatusAsync(CancellationToken ct);
+
+    Task<AiDiagnosticsResult> RunDiagnosticsAsync(CancellationToken ct);
+
     Task<JobAnalysisResult> AnalyzeJobAsync(JobAnalysisInput input, CancellationToken ct);
 
     Task<EvidenceMatchResult> MatchEvidenceAsync(EvidenceMatchInput input, CancellationToken ct);
@@ -12,6 +16,26 @@ public interface IAiProvider
 
     Task<ClaimAuditResult> AuditClaimsAsync(ClaimAuditInput input, CancellationToken ct);
 }
+
+public sealed record AiProviderStatus(
+    string Provider,
+    string Model,
+    string? Endpoint,
+    bool IsAvailable,
+    string Message);
+
+public sealed record AiDiagnosticsResult(
+    string Provider,
+    string Model,
+    string? Endpoint,
+    bool IsAvailable,
+    string Message,
+    IReadOnlyList<AiDiagnosticCheck> Checks);
+
+public sealed record AiDiagnosticCheck(
+    string Name,
+    string Status,
+    string Message);
 
 public sealed record JobAnalysisInput(
     string CompanyName,
@@ -24,7 +48,10 @@ public sealed record JobAnalysisResult(
     string RoleTitle,
     string DetectedLanguage,
     string SelectedLanguage,
-    JobSignalsDocument JobSignals);
+    JobSignalsDocument JobSignals)
+{
+    public int AttemptCount { get; init; } = 1;
+}
 
 public sealed record EvidenceMatchInput(
     IReadOnlyList<JobSignal> Signals,
@@ -32,7 +59,10 @@ public sealed record EvidenceMatchInput(
 
 public sealed record EvidenceMatchResult(
     IReadOnlyList<EvidenceMatch> EvidenceMatches,
-    IReadOnlyList<UnmatchedRequirement> UnmatchedRequirements);
+    IReadOnlyList<UnmatchedRequirement> UnmatchedRequirements)
+{
+    public int AttemptCount { get; init; } = 1;
+}
 
 public sealed record DraftGenerationInput(
     string CompanyName,
@@ -45,7 +75,10 @@ public sealed record DraftGenerationInput(
 
 public sealed record DraftGenerationResult(
     string CoverLetterText,
-    string ShortMotivationText);
+    string ShortMotivationText)
+{
+    public int AttemptCount { get; init; } = 1;
+}
 
 public sealed record ClaimAuditInput(
     string CoverLetterText,
@@ -53,7 +86,10 @@ public sealed record ClaimAuditInput(
     IReadOnlyList<EvidenceMatch> ApprovedEvidence);
 
 public sealed record ClaimAuditResult(
-    IReadOnlyList<ClaimAuditClaim> Claims);
+    IReadOnlyList<ClaimAuditClaim> Claims)
+{
+    public int AttemptCount { get; init; } = 1;
+}
 
 public sealed record ClaimAuditClaim(
     string Id,

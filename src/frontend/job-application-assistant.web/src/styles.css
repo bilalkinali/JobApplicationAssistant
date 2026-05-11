@@ -149,6 +149,12 @@ button:disabled {
   font-weight: 700;
 }
 
+.status-pill.unavailable {
+  border-color: #c58f88;
+  color: #7c241f;
+  background: #fff5f3;
+}
+
 .message {
   margin-bottom: 16px;
   padding: 12px 14px;
@@ -195,6 +201,90 @@ button:disabled {
   margin: 0 0 16px;
   color: #5a6672;
   line-height: 1.6;
+}
+
+.status-details {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.status-details.compact {
+  gap: 8px;
+}
+
+.status-details div {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+}
+
+.status-details dt {
+  color: #64717c;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.status-details dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #263442;
+}
+
+.settings-panel {
+  display: grid;
+  gap: 18px;
+  max-width: 760px;
+}
+
+.diagnostics-list {
+  display: grid;
+  gap: 10px;
+}
+
+.diagnostics-list h4 {
+  margin: 0;
+}
+
+.diagnostics-item {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid #d7dde2;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.diagnostics-item span {
+  color: #64717c;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.diagnostics-item p {
+  margin: 0;
+}
+
+.panel .diagnostics-state {
+  margin: 0;
+  color: #64717c;
+  line-height: 1.45;
+}
+
+.panel .diagnostics-state.success {
+  color: #24533b;
+}
+
+.panel .diagnostics-state.warning {
+  color: #714d12;
+}
+
+.panel .diagnostics-state.error {
+  color: #7c241f;
 }
 
 .form-layout {
@@ -545,6 +635,11 @@ button:disabled {
 .workflow-note.warning {
   color: #714d12;
   background: #fff2d8;
+}
+
+.workflow-note.info {
+  color: #24533b;
+  background: #dff1e7;
 }
 
 .claim-audit {

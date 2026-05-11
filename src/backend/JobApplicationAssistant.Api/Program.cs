@@ -7,7 +7,25 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
-builder.Services.AddSingleton<IAiProvider, FakeAiProvider>();
+builder.Services.AddSingleton(_ =>
+{
+    var options = new AiOptions();
+    builder.Configuration.GetSection("Ai").Bind(options);
+    return options;
+});
+builder.Services.AddHttpClient<OllamaAiProvider>((serviceProvider, client) =>
+{
+    var options = serviceProvider.GetRequiredService<AiOptions>();
+    client.BaseAddress = new Uri(options.Endpoint);
+    client.Timeout = TimeSpan.FromSeconds(Math.Max(1, options.TimeoutSeconds));
+});
+builder.Services.AddSingleton<IAiProvider>(serviceProvider =>
+{
+    var options = serviceProvider.GetRequiredService<AiOptions>();
+    return string.Equals(options.Provider, "Ollama", StringComparison.OrdinalIgnoreCase)
+        ? serviceProvider.GetRequiredService<OllamaAiProvider>()
+        : new FakeAiProvider(new FakeAiProviderOptions(options.Model));
+});
 builder.Services.AddCors(options =>
 {
     var allowedOrigins = builder.Configuration
@@ -43,6 +61,7 @@ app.MapGet("/", () => Results.Ok(new
 
 app.MapProfileEndpoints();
 app.MapApplicationEndpoints();
+app.MapAiEndpoints();
 
 app.Run();
 

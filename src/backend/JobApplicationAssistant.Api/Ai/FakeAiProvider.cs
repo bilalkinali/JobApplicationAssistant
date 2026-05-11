@@ -25,6 +25,43 @@ public sealed partial class FakeAiProvider : IAiProvider
         new("html-css", "HTML/CSS", "RequiredSkill", ["html", "css"])
     ];
 
+    private readonly string model;
+
+    public FakeAiProvider()
+        : this(new FakeAiProviderOptions())
+    {
+    }
+
+    public FakeAiProvider(FakeAiProviderOptions options)
+    {
+        model = string.IsNullOrWhiteSpace(options.Model) ? "fake-deterministic" : options.Model.Trim();
+    }
+
+    public Task<AiProviderStatus> GetStatusAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        return Task.FromResult(new AiProviderStatus(
+            "Fake",
+            model,
+            null,
+            true,
+            "Fake provider is available."));
+    }
+
+    public Task<AiDiagnosticsResult> RunDiagnosticsAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        return Task.FromResult(new AiDiagnosticsResult(
+            "Fake",
+            model,
+            null,
+            true,
+            "Fake provider diagnostics passed.",
+            [new AiDiagnosticCheck("provider", "ok", "Fake provider is ready.")]));
+    }
+
     public Task<JobAnalysisResult> AnalyzeJobAsync(JobAnalysisInput input, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
