@@ -162,6 +162,24 @@ type ClaimAuditClaim = {
   evidenceIds: string[];
 };
 
+type AiProviderStatus = {
+  provider: string;
+  model: string;
+  endpoint: string | null;
+  isAvailable: boolean;
+  message: string;
+};
+
+type AiDiagnostics = AiProviderStatus & {
+  checks: AiDiagnosticCheck[];
+};
+
+type AiDiagnosticCheck = {
+  name: string;
+  status: string;
+  message: string;
+};
+
 function App() {
   const [view, setView] = useState<View>("home");
   const [profile, setProfile] = useState<ProfileForm>(emptyProfile);
@@ -179,6 +197,9 @@ function App() {
     shortMotivationText: ""
   });
   const [workflowBusy, setWorkflowBusy] = useState<string | null>(null);
+  const [aiStatus, setAiStatus] = useState<AiProviderStatus | null>(null);
+  const [aiDiagnostics, setAiDiagnostics] = useState<AiDiagnostics | null>(null);
+  const [aiDiagnosticsBusy, setAiDiagnosticsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -232,6 +253,7 @@ function App() {
     void loadProfile();
     void loadProfileFacts();
     void loadApplications();
+    void loadAiStatus();
   }, []);
 
   useEffect(() => {
@@ -267,6 +289,15 @@ function App() {
     try {
       const response = await apiGet<ProfileFact[]>("/api/profile/facts");
       setProfileFacts(response.map(toProfileFact));
+    } catch (apiError) {
+      setError(formatError(apiError));
+    }
+  }
+
+  async function loadAiStatus() {
+    try {
+      const response = await apiGet<AiProviderStatus>("/api/ai/status");
+      setAiStatus(response);
     } catch (apiError) {
       setError(formatError(apiError));
     }
@@ -500,6 +531,29 @@ function App() {
     }
   }
 
+  async function runAiDiagnostics() {
+    setError(null);
+    setNotice(null);
+    setAiDiagnosticsBusy(true);
+
+    try {
+      const diagnostics = await apiSend<AiDiagnostics>("/api/ai/diagnostics", "POST", null);
+      setAiDiagnostics(diagnostics);
+      setAiStatus({
+        provider: diagnostics.provider,
+        model: diagnostics.model,
+        endpoint: diagnostics.endpoint,
+        isAvailable: diagnostics.isAvailable,
+        message: diagnostics.message
+      });
+      setNotice("AI diagnostics updated.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    } finally {
+      setAiDiagnosticsBusy(false);
+    }
+  }
+
   async function openApplication(application: ApplicationSession) {
     setSelectedApplicationId(application.id);
     setApplicationForm(toApplicationForm(application));
@@ -599,7 +653,9 @@ function App() {
             <p className="eyebrow">Workbench</p>
             <h2 id="workspace-title">{pageTitle(view)}</h2>
           </div>
-          <span className="status-pill">CRUD foundation</span>
+          <span className={`status-pill ${aiStatus?.isAvailable === false ? "unavailable" : ""}`}>
+            {aiStatus ? `${aiStatus.provider} - ${aiStatus.model}` : "AI status loading"}
+          </span>
         </header>
 
         {error && <div className="message error">{error}</div>}
@@ -625,7 +681,27 @@ function App() {
             </article>
             <article className="panel">
               <h3>AI status</h3>
-              <p>AI providers and diagnostics are intentionally outside this slice.</p>
+              {aiStatus ? (
+                <>
+                  <p>{aiStatus.message}</p>
+                  <dl className="status-details">
+                    <div>
+                      <dt>Provider</dt>
+                      <dd>{aiStatus.provider}</dd>
+                    </div>
+                    <div>
+                      <dt>Model</dt>
+                      <dd>{aiStatus.model}</dd>
+                    </div>
+                    <div>
+                      <dt>Availability</dt>
+                      <dd>{aiStatus.isAvailable ? "Available" : "Unavailable"}</dd>
+                    </div>
+                  </dl>
+                </>
+              ) : (
+                <p>Loading AI provider status.</p>
+              )}
             </article>
           </div>
         )}
@@ -904,9 +980,49 @@ function App() {
         )}
 
         {view === "settings" && (
-          <article className="panel">
-            <h3>Settings</h3>
-            <p>Provider settings and diagnostics are reserved for the later AI slices.</p>
+          <article className="panel settings-panel">
+            <h3>AI settings</h3>
+            {aiStatus ? (
+              <>
+                <p>{aiStatus.message}</p>
+                <dl className="status-details">
+                  <div>
+                    <dt>Provider</dt>
+                    <dd>{aiStatus.provider}</dd>
+                  </div>
+                  <div>
+                    <dt>Model</dt>
+                    <dd>{aiStatus.model}</dd>
+                  </div>
+                  <div>
+                    <dt>Endpoint</dt>
+                    <dd>{aiStatus.endpoint ?? "Not applicable"}</dd>
+                  </div>
+                  <div>
+                    <dt>Availability</dt>
+                    <dd>{aiStatus.isAvailable ? "Available" : "Unavailable"}</dd>
+                  </div>
+                </dl>
+              </>
+            ) : (
+              <p>Loading AI provider status.</p>
+            )}
+            <button className="primary-action" type="button" onClick={runAiDiagnostics} disabled={aiDiagnosticsBusy}>
+              {aiDiagnosticsBusy ? "Running diagnostics..." : "Run diagnostics"}
+            </button>
+            {aiDiagnostics && (
+              <section className="diagnostics-list">
+                <h4>Diagnostics result</h4>
+                <p>{aiDiagnostics.message}</p>
+                {aiDiagnostics.checks.map((check) => (
+                  <article className="diagnostics-item" key={check.name}>
+                    <strong>{check.name}</strong>
+                    <span>{check.status}</span>
+                    <p>{check.message}</p>
+                  </article>
+                ))}
+              </section>
+            )}
           </article>
         )}
       </section>

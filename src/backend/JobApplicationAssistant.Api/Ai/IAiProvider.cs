@@ -4,6 +4,10 @@ namespace JobApplicationAssistant.Api.Ai;
 
 public interface IAiProvider
 {
+    Task<AiProviderStatus> GetStatusAsync(CancellationToken ct);
+
+    Task<AiDiagnosticsResult> RunDiagnosticsAsync(CancellationToken ct);
+
     Task<JobAnalysisResult> AnalyzeJobAsync(JobAnalysisInput input, CancellationToken ct);
 
     Task<EvidenceMatchResult> MatchEvidenceAsync(EvidenceMatchInput input, CancellationToken ct);
@@ -12,6 +16,26 @@ public interface IAiProvider
 
     Task<ClaimAuditResult> AuditClaimsAsync(ClaimAuditInput input, CancellationToken ct);
 }
+
+public sealed record AiProviderStatus(
+    string Provider,
+    string Model,
+    string? Endpoint,
+    bool IsAvailable,
+    string Message);
+
+public sealed record AiDiagnosticsResult(
+    string Provider,
+    string Model,
+    string? Endpoint,
+    bool IsAvailable,
+    string Message,
+    IReadOnlyList<AiDiagnosticCheck> Checks);
+
+public sealed record AiDiagnosticCheck(
+    string Name,
+    string Status,
+    string Message);
 
 public sealed record JobAnalysisInput(
     string CompanyName,
