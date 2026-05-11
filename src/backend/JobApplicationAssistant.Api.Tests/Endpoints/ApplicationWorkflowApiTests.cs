@@ -321,6 +321,26 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task GetApplications_includes_current_generated_draft_when_one_exists()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var draft = await CreateGeneratedDraftAsync(client);
+        await MarkDraftAuditedAsync(factory, draft.Id);
+
+        var response = await client.GetAsync("/api/applications");
+
+        response.EnsureSuccessStatusCode();
+        var applications = await response.Content.ReadFromJsonAsync<List<ApplicationResponse>>();
+        Assert.NotNull(applications);
+        var application = Assert.Single(applications);
+        Assert.NotNull(application.GeneratedDraft);
+        Assert.Equal(draft.Id, application.GeneratedDraft.Id);
+        Assert.False(application.GeneratedDraft.IsClaimAuditStale);
+        Assert.NotNull(application.GeneratedDraft.AuditUpdatedAt);
+    }
+
+    [Fact]
     public async Task PutGeneratedDraft_saves_manual_edits_preserves_generation_metadata_and_marks_audit_stale()
     {
         await using var factory = new TestApplicationFactory();

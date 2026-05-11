@@ -1,6 +1,6 @@
 # Milestone 4 Workflow Polish
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -17,20 +17,20 @@ This slice should not add Ollama, diagnostics, export, custom fact normalization
 
 ## Acceptance criteria
 
-- [ ] The application detail view presents draft generation after approved evidence review.
-- [ ] The application detail view presents claim audit after generated text.
-- [ ] The frontend can trigger draft generation for a saved application with approved evidence.
-- [ ] The frontend shows generated cover letter text and short motivation text.
-- [ ] The frontend lets the user edit and save the cover letter text.
-- [ ] The frontend lets the user edit and save the short motivation text.
-- [ ] The frontend shows when claim audit is stale after draft edits.
-- [ ] The frontend can manually trigger claim audit.
-- [ ] The frontend shows supported, unsupported, and needs-review audit results clearly.
-- [ ] Generation, editing, and audit actions have consistent button wording and loading/error states.
-- [ ] Missing job posting text, missing approved evidence, missing draft, and stale audit states are explained near the relevant workflow step.
-- [ ] Reopening an application session shows the saved draft and audit state.
-- [ ] The UI remains desktop-first and consistent with the existing application detail structure.
-- [ ] No Ollama, diagnostics, export, custom fact normalization, provider JSON repair, or draft history is introduced.
+- [x] The application detail view presents draft generation after approved evidence review.
+- [x] The application detail view presents claim audit after generated text.
+- [x] The frontend can trigger draft generation for a saved application with approved evidence.
+- [x] The frontend shows generated cover letter text and short motivation text.
+- [x] The frontend lets the user edit and save the cover letter text.
+- [x] The frontend lets the user edit and save the short motivation text.
+- [x] The frontend shows when claim audit is stale after draft edits.
+- [x] The frontend can manually trigger claim audit.
+- [x] The frontend shows supported, unsupported, and needs-review audit results clearly.
+- [x] Generation, editing, and audit actions have consistent button wording and loading/error states.
+- [x] Missing job posting text, missing approved evidence, missing draft, and stale audit states are explained near the relevant workflow step.
+- [x] Reopening an application session shows the saved draft and audit state.
+- [x] The UI remains desktop-first and consistent with the existing application detail structure.
+- [x] No Ollama, diagnostics, export, custom fact normalization, provider JSON repair, or draft history is introduced.
 
 ## Blocked by
 

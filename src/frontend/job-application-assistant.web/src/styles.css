@@ -534,6 +534,19 @@ button:disabled {
   min-height: 260px;
 }
 
+.workflow-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  line-height: 1.45;
+}
+
+.workflow-note.warning {
+  color: #714d12;
+  background: #fff2d8;
+}
+
 .claim-audit {
   display: grid;
   grid-column: 1 / -1;

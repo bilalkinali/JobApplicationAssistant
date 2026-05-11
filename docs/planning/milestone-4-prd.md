@@ -1,6 +1,6 @@
 # Milestone 4 Product Requirements Document
 
-Status: ready-for-agent
+Status: done
 Source: docs/planning/v1-prd.md
 
 ## Goal
