@@ -200,7 +200,7 @@ public static class ApplicationEndpoints
             return Results.Ok(ToResponse(application));
         });
 
-        group.MapPost("/{id:guid}/match-evidence", async Task<IResult> (Guid id, ApplicationDbContext db, IAiProvider aiProvider, CancellationToken ct) =>
+        group.MapPost("/{id:guid}/match-evidence", async Task<IResult> (Guid id, ApplicationDbContext db, IAiProvider aiProvider, AiOptions aiOptions, CancellationToken ct) =>
         {
             var application = await db.JobApplications.FindAsync([id], ct);
             if (application is null)
@@ -229,13 +229,57 @@ public static class ApplicationEndpoints
                 }));
             }
 
-            var result = await aiProvider.MatchEvidenceAsync(new EvidenceMatchInput(signals, approvedFacts), ct);
+            var run = new AiRun
+            {
+                Id = Guid.NewGuid(),
+                JobApplicationId = application.Id,
+                Step = "EvidenceMatching",
+                Provider = aiOptions.Provider,
+                Model = aiOptions.Model,
+                Status = "Running",
+                AttemptCount = 1,
+                StartedAt = DateTimeOffset.UtcNow,
+                InputSummary = JsonSerializer.Serialize(new
+                {
+                    SignalCount = signals.Count,
+                    ApprovedFactCount = approvedFacts.Count
+                }, JsonOptions)
+            };
+            db.AiRuns.Add(run);
+
+            EvidenceMatchResult result;
+            try
+            {
+                result = await aiProvider.MatchEvidenceAsync(new EvidenceMatchInput(signals, approvedFacts), ct);
+            }
+            catch (AiProviderException exception)
+            {
+                run.Status = "Failed";
+                run.ErrorCode = exception.ErrorCode;
+                run.ErrorMessage = exception.Message;
+                run.AttemptCount = exception.AttemptCount;
+                run.CompletedAt = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync(ct);
+
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    ["AiProvider"] = [exception.Message]
+                }));
+            }
 
             application.EvidenceMatches = JsonSerializer.Serialize(result.EvidenceMatches, JsonOptions);
             application.UnmatchedRequirements = JsonSerializer.Serialize(result.UnmatchedRequirements, JsonOptions);
             application.ApprovedEvidence = "[]";
             application.Status = application.Status is "Draft" or "PostingCaptured" ? "ReadyForReview" : application.Status;
             application.UpdatedAt = DateTimeOffset.UtcNow;
+            run.Status = result.AttemptCount > 1 ? "RepairedSucceeded" : "Succeeded";
+            run.AttemptCount = result.AttemptCount;
+            run.CompletedAt = DateTimeOffset.UtcNow;
+            run.OutputSummary = JsonSerializer.Serialize(new
+            {
+                MatchCount = result.EvidenceMatches.Count,
+                UnmatchedCount = result.UnmatchedRequirements.Count
+            }, JsonOptions);
 
             await db.SaveChangesAsync(ct);
 

@@ -59,7 +59,10 @@ public sealed record EvidenceMatchInput(
 
 public sealed record EvidenceMatchResult(
     IReadOnlyList<EvidenceMatch> EvidenceMatches,
-    IReadOnlyList<UnmatchedRequirement> UnmatchedRequirements);
+    IReadOnlyList<UnmatchedRequirement> UnmatchedRequirements)
+{
+    public int AttemptCount { get; init; } = 1;
+}
 
 public sealed record DraftGenerationInput(
     string CompanyName,

@@ -1,6 +1,6 @@
 # Ollama Job Analysis JSON Repair and AiRun Tracking
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -17,21 +17,21 @@ This slice should not add Ollama evidence matching, draft generation, claim audi
 
 ## Acceptance criteria
 
-- [ ] Ollama job analysis is available through the existing job analysis workflow action when Ollama is configured.
-- [ ] The job analysis prompt is stored as a backend markdown file.
-- [ ] The Ollama request asks for strict JSON matching the job analysis contract.
-- [ ] Valid Ollama analysis updates company, role, detected language, selected language default, and job signals.
-- [ ] Job analysis remains blocked with a plain validation error when the application has no job posting text.
-- [ ] Ollama unavailable errors are returned plainly and do not prevent app startup.
-- [ ] Malformed JSON receives exactly one repair attempt.
-- [ ] Structurally invalid JSON receives exactly one repair attempt.
-- [ ] Application workflow state is not mutated when output remains invalid after repair.
-- [ ] `AiRun` records success with step, provider, model, status, attempt count, timing, and minimal summaries.
-- [ ] `AiRun` records repaired success with an attempt count that reflects the repair.
-- [ ] `AiRun` records unavailable provider failures with error details.
-- [ ] `AiRun` records invalid output failures after repair with error details.
-- [ ] Backend tests cover valid analysis, unavailable provider, malformed JSON repair, invalid structure repair, failure after repair, unchanged state on failure, and `AiRun` records.
-- [ ] No Ollama evidence matching, draft generation, claim audit, export, or provider settings editing is introduced.
+- [x] Ollama job analysis is available through the existing job analysis workflow action when Ollama is configured.
+- [x] The job analysis prompt is stored as a backend markdown file.
+- [x] The Ollama request asks for strict JSON matching the job analysis contract.
+- [x] Valid Ollama analysis updates company, role, detected language, selected language default, and job signals.
+- [x] Job analysis remains blocked with a plain validation error when the application has no job posting text.
+- [x] Ollama unavailable errors are returned plainly and do not prevent app startup.
+- [x] Malformed JSON receives exactly one repair attempt.
+- [x] Structurally invalid JSON receives exactly one repair attempt.
+- [x] Application workflow state is not mutated when output remains invalid after repair.
+- [x] `AiRun` records success with step, provider, model, status, attempt count, timing, and minimal summaries.
+- [x] `AiRun` records repaired success with an attempt count that reflects the repair.
+- [x] `AiRun` records unavailable provider failures with error details.
+- [x] `AiRun` records invalid output failures after repair with error details.
+- [x] Backend tests cover valid analysis, unavailable provider, malformed JSON repair, invalid structure repair, failure after repair, unchanged state on failure, and `AiRun` records.
+- [x] No Ollama evidence matching, draft generation, claim audit, export, or provider settings editing is introduced.
 
 ## Blocked by
 

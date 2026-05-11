@@ -377,6 +377,242 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task MatchEvidence_with_ollama_stores_matches_unmatched_requirements_and_records_successful_ai_run()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>());
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var approvedFact = await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        await CreateProfileFactAsync(client, "Draft Kubernetes work", "Draft", """["Kubernetes"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        await MarkApplicationAnalyzedAsync(factory, application.Id);
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = OllamaGenerateContent(ValidOllamaEvidenceMatchingJson(approvedFact.Id))
+        });
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var matched = await response.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(matched);
+        Assert.Equal("ReadyForReview", matched.Status);
+
+        var evidenceMatches = JsonSerializer.Deserialize<List<EvidenceMatch>>(matched.EvidenceMatches, JsonOptions);
+        var unmatchedRequirements = JsonSerializer.Deserialize<List<UnmatchedRequirement>>(matched.UnmatchedRequirements, JsonOptions);
+        Assert.NotNull(evidenceMatches);
+        Assert.NotNull(unmatchedRequirements);
+        var match = Assert.Single(evidenceMatches);
+        Assert.Equal("dotnet", match.SignalId);
+        Assert.Equal(".NET", match.Signal);
+        Assert.Equal(approvedFact.Id, match.ProfileFactId);
+        Assert.Equal("Approved API work", match.ProfileFactTitle);
+        Assert.Contains(".NET", match.MatchedTerms);
+        var unmatched = Assert.Single(unmatchedRequirements);
+        Assert.Equal("kubernetes", unmatched.SignalId);
+        Assert.Equal("Kubernetes", unmatched.Requirement);
+
+        var ollamaRequestJson = await Assert.Single(handler.Requests).Content!.ReadAsStringAsync();
+        Assert.Contains("\"format\":\"json\"", ollamaRequestJson);
+        Assert.Contains("\"stream\":false", ollamaRequestJson);
+        Assert.Contains("Return only strict JSON", ollamaRequestJson);
+        Assert.Contains(approvedFact.Id.ToString(), ollamaRequestJson);
+        Assert.DoesNotContain("Draft Kubernetes work", ollamaRequestJson);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal(application.Id, run.JobApplicationId);
+        Assert.Equal("EvidenceMatching", run.Step);
+        Assert.Equal("Ollama", run.Provider);
+        Assert.Equal("llama3.1:8b", run.Model);
+        Assert.Equal("Succeeded", run.Status);
+        Assert.Equal(1, run.AttemptCount);
+        Assert.Null(run.ErrorCode);
+        Assert.Contains("\"matchCount\":1", run.OutputSummary);
+    }
+
+    [Fact]
+    public async Task MatchEvidence_with_ollama_repairs_malformed_json_once_and_records_repaired_success()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>());
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var approvedFact = await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        await MarkApplicationAnalyzedAsync(factory, application.Id);
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent("{ malformed") });
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = OllamaGenerateContent(ValidOllamaEvidenceMatchingJson(approvedFact.Id))
+        });
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        Assert.Equal(2, handler.Requests.Count);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("RepairedSucceeded", run.Status);
+        Assert.Equal(2, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task MatchEvidence_with_ollama_repairs_draft_fact_reference_once()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>());
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var approvedFact = await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var draftFact = await CreateProfileFactAsync(client, "Draft Kubernetes work", "Draft", """["Kubernetes"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        await MarkApplicationAnalyzedAsync(factory, application.Id);
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = OllamaGenerateContent(ValidOllamaEvidenceMatchingJson(draftFact.Id))
+        });
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = OllamaGenerateContent(ValidOllamaEvidenceMatchingJson(approvedFact.Id))
+        });
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        Assert.Equal(2, handler.Requests.Count);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("RepairedSucceeded", run.Status);
+        Assert.Equal(2, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task MatchEvidence_with_ollama_repairs_incomplete_signal_coverage_once()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>());
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var approvedFact = await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        await MarkApplicationAnalyzedAsync(factory, application.Id);
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = OllamaGenerateContent($$"""
+                {
+                  "evidenceMatches": [
+                    {
+                      "signalId": "dotnet",
+                      "profileFactId": "{{approvedFact.Id}}",
+                      "summary": "Approved API work demonstrates .NET experience.",
+                      "matchedTerms": [".NET"]
+                    }
+                  ],
+                  "unmatchedRequirements": []
+                }
+                """)
+        });
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = OllamaGenerateContent(ValidOllamaEvidenceMatchingJson(approvedFact.Id))
+        });
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        Assert.Equal(2, handler.Requests.Count);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("RepairedSucceeded", run.Status);
+        Assert.Equal(2, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task MatchEvidence_with_ollama_invalid_output_after_repair_records_failure_and_does_not_mutate_application()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>());
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        await MarkApplicationAnalyzedAsync(factory, application.Id);
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent("{ malformed") });
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = OllamaGenerateContent("""
+                {
+                  "evidenceMatches": [
+                    {
+                      "signalId": "unknown-signal",
+                      "profileFactId": "00000000-0000-0000-0000-000000000000",
+                      "summary": "Unsupported reference.",
+                      "matchedTerms": [".NET"]
+                    }
+                  ],
+                  "unmatchedRequirements": []
+                }
+                """)
+        });
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(2, handler.Requests.Count);
+        var reopenedResponse = await client.GetAsync($"/api/applications/{application.Id}");
+        reopenedResponse.EnsureSuccessStatusCode();
+        var reopened = await reopenedResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(reopened);
+        Assert.Equal("PostingCaptured", reopened.Status);
+        Assert.Equal("[]", reopened.EvidenceMatches);
+        Assert.Equal("[]", reopened.UnmatchedRequirements);
+        Assert.Equal("[]", reopened.ApprovedEvidence);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("InvalidOutput", run.ErrorCode);
+        Assert.Equal(2, run.AttemptCount);
+        Assert.NotNull(run.CompletedAt);
+    }
+
+    [Fact]
+    public async Task MatchEvidence_with_unavailable_ollama_records_failure()
+    {
+        await using var factory = new TestApplicationFactory()
+            .WithOllamaResponses([new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                ReasonPhrase = "Service Unavailable"
+            }]);
+        using var client = factory.CreateClient();
+        await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        await MarkApplicationAnalyzedAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains("AiProvider", error!.Details!.Keys);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+        Assert.Equal("EvidenceMatching", run.Step);
+        Assert.Equal("Ollama", run.Provider);
+        Assert.Equal("llama3.1:8b", run.Model);
+        Assert.Equal(1, run.AttemptCount);
+    }
+
+    [Fact]
     public async Task PutApprovedEvidence_persists_only_submitted_current_matches()
     {
         await using var factory = new TestApplicationFactory();
@@ -389,7 +625,7 @@ public sealed class ApplicationWorkflowApiTests
         Assert.NotNull(matched);
         var evidenceMatches = JsonSerializer.Deserialize<List<EvidenceMatch>>(matched.EvidenceMatches, JsonOptions);
         Assert.NotNull(evidenceMatches);
-        var selected = Assert.Single(evidenceMatches.Where(match => match.Signal == ".NET"));
+        var selected = Assert.Single(evidenceMatches, match => match.Signal == ".NET");
 
         var response = await client.PutAsJsonAsync(
             $"/api/applications/{application.Id}/approved-evidence",
@@ -401,6 +637,7 @@ public sealed class ApplicationWorkflowApiTests
         Assert.NotEqual("{}", reviewed.JobSignals);
         Assert.NotEqual("[]", reviewed.EvidenceMatches);
         var approvedEvidence = JsonSerializer.Deserialize<List<EvidenceMatch>>(reviewed.ApprovedEvidence, JsonOptions);
+        Assert.NotNull(approvedEvidence);
         var approved = Assert.Single(approvedEvidence);
         Assert.Equal(selected.Id, approved.Id);
         Assert.Equal(selected.ProfileFactId, approved.ProfileFactId);
@@ -724,6 +961,28 @@ public sealed class ApplicationWorkflowApiTests
         return draft;
     }
 
+    private static async Task MarkApplicationAnalyzedAsync(WebApplicationFactory<Program> factory, Guid applicationId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var application = await db.JobApplications.FindAsync(applicationId);
+        Assert.NotNull(application);
+        application.Status = "PostingCaptured";
+        application.JobSignals = JsonSerializer.Serialize(
+            new JobSignalsDocument(
+                "Test",
+                DateTimeOffset.UtcNow,
+                [".NET"],
+                ["Kubernetes"],
+                [],
+                [
+                    new JobSignal("dotnet", ".NET", "RequiredSkill", [".net"]),
+                    new JobSignal("kubernetes", "Kubernetes", "PreferredSkill", ["kubernetes"])
+                ]),
+            JsonOptions);
+        await db.SaveChangesAsync();
+    }
+
     private static async Task MarkDraftAuditedAsync(TestApplicationFactory factory, Guid draftId)
     {
         using var scope = factory.Services.CreateScope();
@@ -783,9 +1042,31 @@ public sealed class ApplicationWorkflowApiTests
         }
         """;
 
+    private static string ValidOllamaEvidenceMatchingJson(Guid profileFactId) =>
+        $$"""
+        {
+          "evidenceMatches": [
+            {
+              "signalId": "dotnet",
+              "profileFactId": "{{profileFactId}}",
+              "summary": "Approved API work demonstrates .NET experience.",
+              "matchedTerms": [".NET"]
+            }
+          ],
+          "unmatchedRequirements": [
+            {
+              "signalId": "kubernetes",
+              "recommendation": "Treat Kubernetes as an honest learning area."
+            }
+          ]
+        }
+        """;
+
     internal sealed class QueuedOllamaHandler(Queue<HttpResponseMessage> responses) : HttpMessageHandler
     {
         public List<HttpRequestMessage> Requests { get; } = [];
+
+        public void Enqueue(HttpResponseMessage response) => responses.Enqueue(response);
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {

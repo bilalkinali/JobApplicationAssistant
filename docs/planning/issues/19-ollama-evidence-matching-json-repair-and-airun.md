@@ -1,6 +1,6 @@
 # Ollama Evidence Matching JSON Repair and AiRun Tracking
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -17,21 +17,21 @@ This slice should not add Ollama draft generation, claim audit, export, custom f
 
 ## Acceptance criteria
 
-- [ ] Ollama evidence matching is available through the existing evidence matching workflow action when Ollama is configured.
-- [ ] The evidence matching prompt is stored as a backend markdown file.
-- [ ] The Ollama request asks for strict JSON matching the evidence matching contract.
-- [ ] Matching uses only approved profile facts as possible evidence.
-- [ ] Valid Ollama matching stores evidence matches and unmatched requirements on the application session.
-- [ ] Match output validation rejects references to draft or archived profile facts.
-- [ ] Match output validation rejects references to unknown profile facts.
-- [ ] Match output validation rejects references to unknown job signals.
-- [ ] Evidence matching remains blocked with a plain validation error when no approved profile facts exist.
-- [ ] Malformed JSON receives exactly one repair attempt.
-- [ ] Structurally invalid JSON receives exactly one repair attempt.
-- [ ] Application workflow state is not mutated when output remains invalid after repair.
-- [ ] `AiRun` records success, repaired success, unavailable provider failure, and invalid output failure.
-- [ ] Backend tests cover valid matching, invalid evidence references, unavailable provider, repair behavior, unchanged state on failure, and `AiRun` records.
-- [ ] No Ollama draft generation, claim audit, export, custom fact normalization, or provider settings editing is introduced.
+- [x] Ollama evidence matching is available through the existing evidence matching workflow action when Ollama is configured.
+- [x] The evidence matching prompt is stored as a backend markdown file.
+- [x] The Ollama request asks for strict JSON matching the evidence matching contract.
+- [x] Matching uses only approved profile facts as possible evidence.
+- [x] Valid Ollama matching stores evidence matches and unmatched requirements on the application session.
+- [x] Match output validation rejects references to draft or archived profile facts.
+- [x] Match output validation rejects references to unknown profile facts.
+- [x] Match output validation rejects references to unknown job signals.
+- [x] Evidence matching remains blocked with a plain validation error when no approved profile facts exist.
+- [x] Malformed JSON receives exactly one repair attempt.
+- [x] Structurally invalid JSON receives exactly one repair attempt.
+- [x] Application workflow state is not mutated when output remains invalid after repair.
+- [x] `AiRun` records success, repaired success, unavailable provider failure, and invalid output failure.
+- [x] Backend tests cover valid matching, invalid evidence references, unavailable provider, repair behavior, unchanged state on failure, and `AiRun` records.
+- [x] No Ollama draft generation, claim audit, export, custom fact normalization, or provider settings editing is introduced.
 
 ## Blocked by
 
