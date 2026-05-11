@@ -339,6 +339,8 @@ function App() {
       }),
     [hasSavedApprovedEvidence, hasSavedJobPosting, selectedApplicationId]
   );
+  const workflowBusyReason = workflowBusy ? "Wait for the current workflow action to finish." : null;
+  const exportBusyReason = exportBusy ? "Wait for the current export action to finish." : null;
 
   useEffect(() => {
     void loadProfile();
@@ -892,7 +894,12 @@ function App() {
         </header>
 
         {error && <ErrorMessage error={error} />}
-        {notice && <div className="message success">{notice}</div>}
+        {notice && (
+          <div className="message success" role="status">
+            <strong>Success</strong>
+            <p>{notice}</p>
+          </div>
+        )}
 
         {view === "home" && (
           <div className="panel-grid">
@@ -1090,6 +1097,10 @@ function App() {
                     type="button"
                     onClick={() => void markApplicationStatus("Applied")}
                     disabled={selectedApplication?.status === "Applied" || workflowBusy !== null}
+                    title={disabledTitle(
+                      selectedApplication?.status === "Applied" || workflowBusy !== null,
+                      selectedApplication?.status === "Applied" ? "This application is already marked applied." : workflowBusyReason
+                    )}
                   >
                     Mark applied
                   </button>
@@ -1098,6 +1109,10 @@ function App() {
                     type="button"
                     onClick={() => void markApplicationStatus("Archived")}
                     disabled={selectedApplication?.status === "Archived" || workflowBusy !== null}
+                    title={disabledTitle(
+                      selectedApplication?.status === "Archived" || workflowBusy !== null,
+                      selectedApplication?.status === "Archived" ? "This application is already archived." : workflowBusyReason
+                    )}
                   >
                     Archive
                   </button>
@@ -1114,13 +1129,34 @@ function App() {
                     {aiWorkflowStatusMessage(aiStatus)}
                   </p>
                 )}
+                {selectedApplication && (
+                  <div className="trust-chain" aria-label="Draft trust chain">
+                    <StatusBadge tone={savedApprovedEvidence.length > 0 ? "approved" : "pending"}>
+                      {approvedEvidenceCountLabel(savedApprovedEvidence.length)}
+                    </StatusBadge>
+                    <StatusBadge tone={hasGeneratedDraft ? "approved" : "draft"}>
+                      {hasGeneratedDraft ? "Draft saved" : "No draft"}
+                    </StatusBadge>
+                    <StatusBadge tone={auditReadinessTone(selectedApplication.auditReadiness)}>
+                      {auditReadinessLabel(selectedApplication.auditReadiness)}
+                    </StatusBadge>
+                    <StatusBadge tone={coverLetterExportState.canExport ? "approved" : "pending"}>
+                      {coverLetterExportState.canExport ? "Export ready" : "Export blocked"}
+                    </StatusBadge>
+                  </div>
+                )}
 
                 <div className="workflow-step">
                   <div>
                     <h4>1. Job analysis</h4>
                     <p>{jobAnalysisState.message}</p>
                   </div>
-                  <button type="button" onClick={analyzeJob} disabled={!jobAnalysisState.canRun || workflowBusy !== null}>
+                  <button
+                    type="button"
+                    onClick={analyzeJob}
+                    disabled={!jobAnalysisState.canRun || workflowBusy !== null}
+                    title={disabledTitle(!jobAnalysisState.canRun || workflowBusy !== null, workflowBusyReason ?? jobAnalysisState.message)}
+                  >
                     {workflowBusy === "analysis" ? "Analyzing..." : "Analyze job"}
                   </button>
                 </div>
@@ -1140,7 +1176,12 @@ function App() {
                     <h4>2. Evidence matching</h4>
                     <p>{evidenceMatchingState.message}</p>
                   </div>
-                  <button type="button" onClick={matchEvidence} disabled={!evidenceMatchingState.canRun || workflowBusy !== null}>
+                  <button
+                    type="button"
+                    onClick={matchEvidence}
+                    disabled={!evidenceMatchingState.canRun || workflowBusy !== null}
+                    title={disabledTitle(!evidenceMatchingState.canRun || workflowBusy !== null, workflowBusyReason ?? evidenceMatchingState.message)}
+                  >
                     {workflowBusy === "matching" ? "Matching..." : "Match evidence"}
                   </button>
                 </div>
@@ -1178,7 +1219,15 @@ function App() {
                     <h4>3. Approved evidence</h4>
                     <p>Save only evidence you approve as support for generated claims. Draft, archived, and removed evidence is not sent to draft generation.</p>
                   </div>
-                  <button type="button" onClick={saveApprovedEvidence} disabled={!selectedApplicationId || workflowBusy !== null}>
+                  <button
+                    type="button"
+                    onClick={saveApprovedEvidence}
+                    disabled={!selectedApplicationId || workflowBusy !== null}
+                    title={disabledTitle(
+                      !selectedApplicationId || workflowBusy !== null,
+                      workflowBusyReason ?? "Save the application before reviewing evidence."
+                    )}
+                  >
                     {workflowBusy === "review" ? "Saving..." : "Save approved evidence"}
                   </button>
                 </div>
@@ -1223,7 +1272,12 @@ function App() {
                     <h4>4. Generated draft</h4>
                     <p>{draftGenerationState.message}</p>
                   </div>
-                  <button type="button" onClick={generateDraft} disabled={!draftGenerationState.canRun || workflowBusy !== null}>
+                  <button
+                    type="button"
+                    onClick={generateDraft}
+                    disabled={!draftGenerationState.canRun || workflowBusy !== null}
+                    title={disabledTitle(!draftGenerationState.canRun || workflowBusy !== null, workflowBusyReason ?? draftGenerationState.message)}
+                  >
                     {workflowBusy === "draft" ? "Generating..." : "Generate draft"}
                   </button>
                 </div>
@@ -1256,10 +1310,21 @@ function App() {
                       }}
                     />
                     <div className="form-actions">
-                      <button className="primary-action" type="button" onClick={saveGeneratedDraft} disabled={workflowBusy !== null}>
+                      <button
+                        className="primary-action"
+                        type="button"
+                        onClick={saveGeneratedDraft}
+                        disabled={workflowBusy !== null}
+                        title={disabledTitle(workflowBusy !== null, workflowBusyReason)}
+                      >
                         {workflowBusy === "draft-edit" ? "Saving..." : "Save draft edits"}
                       </button>
-                      <button type="button" onClick={auditClaims} disabled={workflowBusy !== null}>
+                      <button
+                        type="button"
+                        onClick={auditClaims}
+                        disabled={workflowBusy !== null}
+                        title={disabledTitle(workflowBusy !== null, workflowBusyReason)}
+                      >
                         {workflowBusy === "audit" ? "Auditing..." : "Run claim audit"}
                       </button>
                     </div>
@@ -1275,13 +1340,31 @@ function App() {
                       )}
                       {exportFeedback && <InlineFeedbackMessage feedback={exportFeedback} />}
                       <div className="form-actions">
-                        <button type="button" onClick={() => void copyCoverLetter()} disabled={!coverLetterExportState.canCopy || exportBusy !== null}>
+                        <button
+                          type="button"
+                          onClick={() => void copyCoverLetter()}
+                          disabled={!coverLetterExportState.canCopy || exportBusy !== null}
+                          title={disabledTitle(
+                            !coverLetterExportState.canCopy || exportBusy !== null,
+                            exportBusyReason ?? coverLetterExportState.reason ?? "Clipboard copy is not available in this browser."
+                          )}
+                        >
                           Copy
                         </button>
-                        <button type="button" onClick={() => void downloadCoverLetter("txt")} disabled={!coverLetterExportState.canExport || exportBusy !== null}>
+                        <button
+                          type="button"
+                          onClick={() => void downloadCoverLetter("txt")}
+                          disabled={!coverLetterExportState.canExport || exportBusy !== null}
+                          title={disabledTitle(!coverLetterExportState.canExport || exportBusy !== null, exportBusyReason ?? coverLetterExportState.reason)}
+                        >
                           {exportBusy === "txt" ? "Downloading..." : "Download TXT"}
                         </button>
-                        <button type="button" onClick={() => void downloadCoverLetter("docx")} disabled={!coverLetterExportState.canExport || exportBusy !== null}>
+                        <button
+                          type="button"
+                          onClick={() => void downloadCoverLetter("docx")}
+                          disabled={!coverLetterExportState.canExport || exportBusy !== null}
+                          title={disabledTitle(!coverLetterExportState.canExport || exportBusy !== null, exportBusyReason ?? coverLetterExportState.reason)}
+                        >
                           {exportBusy === "docx" ? "Downloading..." : "Download DOCX"}
                         </button>
                       </div>
@@ -1319,9 +1402,9 @@ function App() {
                     </div>
                     <p className="workflow-note neutral">TXT and DOCX downloads become available after a non-empty generated draft is saved.</p>
                     <div className="form-actions">
-                      <button type="button" disabled>Copy</button>
-                      <button type="button" disabled>Download TXT</button>
-                      <button type="button" disabled>Download DOCX</button>
+                      <button type="button" disabled title={coverLetterExportState.reason ?? "Generate a draft before copying."}>Copy</button>
+                      <button type="button" disabled title={coverLetterExportState.reason ?? "Generate a draft before downloading TXT."}>Download TXT</button>
+                      <button type="button" disabled title={coverLetterExportState.reason ?? "Generate a draft before downloading DOCX."}>Download DOCX</button>
                     </div>
                   </section>
                 )}
@@ -1679,6 +1762,26 @@ function readinessLabel(readiness: string): string {
   return readiness === "NotApplicable" ? "not applicable" : readiness.toLowerCase();
 }
 
+function approvedEvidenceCountLabel(count: number): string {
+  return count === 1 ? "1 approved evidence item" : `${count} approved evidence items`;
+}
+
+function auditReadinessLabel(readiness: string): string {
+  return `Audit ${readinessLabel(readiness)}`;
+}
+
+function auditReadinessTone(readiness: string): string {
+  switch (readiness) {
+    case "Current":
+      return "approved";
+    case "Stale":
+    case "Missing":
+      return "pending";
+    default:
+      return "neutral";
+  }
+}
+
 function applicationHistoryLabel(status: string): string {
   if (status === "Applied") {
     return "Applied";
@@ -1878,6 +1981,10 @@ function pageTitle(view: View): string {
 
 function titleCase(value: string): string {
   return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`;
+}
+
+function disabledTitle(isDisabled: boolean, reason: string | null | undefined): string | undefined {
+  return isDisabled && reason ? reason : undefined;
 }
 
 function formatDate(value: string): string {

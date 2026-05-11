@@ -405,6 +405,7 @@ button:disabled {
 
 .form-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: center;
 }
@@ -527,6 +528,10 @@ button:disabled {
   display: grid;
   grid-template-columns: 380px minmax(0, 1fr);
   gap: 18px;
+}
+
+.applications-layout .form-layout {
+  max-width: none;
 }
 
 .list-panel {
@@ -671,6 +676,14 @@ button:disabled {
   background: #fafafa;
 }
 
+.workflow-step > div {
+  min-width: 0;
+}
+
+.workflow-step button {
+  flex: 0 0 auto;
+}
+
 .workflow-step p,
 .signal-column p,
 .evidence-card p {
@@ -761,6 +774,23 @@ button:disabled {
 .approved-item div {
   display: grid;
   gap: 4px;
+  min-width: 0;
+}
+
+.approved-item strong,
+.approved-item span {
+  overflow-wrap: anywhere;
+}
+
+.trust-chain {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #d9d7d0;
+  border-radius: 8px;
+  background: #ffffff;
 }
 
 .custom-facts-panel {
