@@ -48,7 +48,10 @@ public sealed record JobAnalysisResult(
     string RoleTitle,
     string DetectedLanguage,
     string SelectedLanguage,
-    JobSignalsDocument JobSignals);
+    JobSignalsDocument JobSignals)
+{
+    public int AttemptCount { get; init; } = 1;
+}
 
 public sealed record EvidenceMatchInput(
     IReadOnlyList<JobSignal> Signals,

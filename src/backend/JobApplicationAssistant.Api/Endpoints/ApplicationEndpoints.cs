@@ -113,7 +113,7 @@ public static class ApplicationEndpoints
             return Results.NoContent();
         });
 
-        group.MapPost("/{id:guid}/analyze-job", async Task<IResult> (Guid id, ApplicationDbContext db, IAiProvider aiProvider, CancellationToken ct) =>
+        group.MapPost("/{id:guid}/analyze-job", async Task<IResult> (Guid id, ApplicationDbContext db, IAiProvider aiProvider, AiOptions aiOptions, CancellationToken ct) =>
         {
             var application = await db.JobApplications.FindAsync([id], ct);
             if (application is null)
@@ -129,13 +129,51 @@ public static class ApplicationEndpoints
                 }));
             }
 
-            var result = await aiProvider.AnalyzeJobAsync(
-                new JobAnalysisInput(
+            var now = DateTimeOffset.UtcNow;
+            var run = new AiRun
+            {
+                Id = Guid.NewGuid(),
+                JobApplicationId = application.Id,
+                Step = "JobAnalysis",
+                Provider = aiOptions.Provider,
+                Model = aiOptions.Model,
+                Status = "Running",
+                AttemptCount = 1,
+                StartedAt = now,
+                InputSummary = JsonSerializer.Serialize(new
+                {
                     application.CompanyName,
                     application.RoleTitle,
-                    application.SelectedLanguage,
-                    application.JobPostingText),
-                ct);
+                    PostingLength = application.JobPostingText.Length
+                }, JsonOptions)
+            };
+            db.AiRuns.Add(run);
+
+            JobAnalysisResult result;
+            try
+            {
+                result = await aiProvider.AnalyzeJobAsync(
+                    new JobAnalysisInput(
+                        application.CompanyName,
+                        application.RoleTitle,
+                        application.SelectedLanguage,
+                        application.JobPostingText),
+                    ct);
+            }
+            catch (AiProviderException exception)
+            {
+                run.Status = "Failed";
+                run.ErrorCode = exception.ErrorCode;
+                run.ErrorMessage = exception.Message;
+                run.AttemptCount = exception.AttemptCount;
+                run.CompletedAt = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync(ct);
+
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    ["AiProvider"] = [exception.Message]
+                }));
+            }
 
             application.CompanyName = result.CompanyName;
             application.RoleTitle = result.RoleTitle;
@@ -147,6 +185,15 @@ public static class ApplicationEndpoints
             application.ApprovedEvidence = "[]";
             application.Status = application.Status == "Draft" ? "PostingCaptured" : application.Status;
             application.UpdatedAt = DateTimeOffset.UtcNow;
+            run.Status = result.AttemptCount > 1 ? "RepairedSucceeded" : "Succeeded";
+            run.AttemptCount = result.AttemptCount;
+            run.CompletedAt = DateTimeOffset.UtcNow;
+            run.OutputSummary = JsonSerializer.Serialize(new
+            {
+                result.CompanyName,
+                result.RoleTitle,
+                SignalCount = result.JobSignals.Signals.Count
+            }, JsonOptions);
 
             await db.SaveChangesAsync(ct);
 
