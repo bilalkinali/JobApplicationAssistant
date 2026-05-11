@@ -1,6 +1,6 @@
 # Cover Letter DOCX Export
 
-Status: ready-for-agent
+Status: in-progress
 Type: AFK
 
 ## Parent
@@ -19,19 +19,19 @@ Use TDD for this slice: begin with a failing public endpoint test for a successf
 
 ## Acceptance criteria
 
-- [ ] Tests assert public response behavior and inspect document contents through a stable document-reading path where practical.
-- [ ] A public DOCX export endpoint returns a valid DOCX file response for an application with a generated draft.
-- [ ] DOCX export uses the current saved cover letter text and does not regenerate, re-audit, or call an AI provider.
-- [ ] DOCX export includes profile contact information when present.
-- [ ] DOCX export tolerates missing optional profile contact fields.
-- [ ] DOCX export includes company and role context where appropriate.
-- [ ] DOCX export returns a safe readable filename based on company and role metadata, with a stable fallback.
-- [ ] DOCX export is blocked with a plain not-found error when the application does not exist.
-- [ ] DOCX export is blocked with a plain validation error when no generated draft exists.
-- [ ] DOCX export is blocked with a plain validation error when the cover letter text is empty or whitespace.
-- [ ] DOCX export remains allowed when claim audit is stale.
-- [ ] DOCX export remains allowed when claim audit has not been run.
-- [ ] No frontend export controls, PDF export, custom DOCX templates, regeneration, AI provider calls, draft history, or CV export are introduced.
+- [x] Tests assert public response behavior and inspect document contents through a stable document-reading path where practical.
+- [x] A public DOCX export endpoint returns a valid DOCX file response for an application with a generated draft.
+- [x] DOCX export uses the current saved cover letter text and does not regenerate, re-audit, or call an AI provider.
+- [x] DOCX export includes profile contact information when present.
+- [x] DOCX export tolerates missing optional profile contact fields.
+- [x] DOCX export includes company and role context where appropriate.
+- [x] DOCX export returns a safe readable filename based on company and role metadata, with a stable fallback.
+- [x] DOCX export is blocked with a plain not-found error when the application does not exist.
+- [x] DOCX export is blocked with a plain validation error when no generated draft exists.
+- [x] DOCX export is blocked with a plain validation error when the cover letter text is empty or whitespace.
+- [x] DOCX export remains allowed when claim audit is stale.
+- [x] DOCX export remains allowed when claim audit has not been run.
+- [x] No frontend export controls, PDF export, custom DOCX templates, regeneration, AI provider calls, draft history, or CV export are introduced.
 
 ## Blocked by
 

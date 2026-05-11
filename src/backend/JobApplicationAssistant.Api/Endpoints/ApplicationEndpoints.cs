@@ -2,6 +2,7 @@ using JobApplicationAssistant.Api.Ai;
 using JobApplicationAssistant.Api.Contracts;
 using JobApplicationAssistant.Api.Data;
 using JobApplicationAssistant.Api.Domain;
+using JobApplicationAssistant.Api.Exports;
 using Microsoft.EntityFrameworkCore;
 using System.Text;
 using System.Text.Json;
@@ -222,6 +223,43 @@ public static class ApplicationEndpoints
             return Results.File(
                 Encoding.UTF8.GetBytes(coverLetterText),
                 "text/plain; charset=utf-8",
+                fileName);
+        });
+
+        group.MapGet("/{id:guid}/exports/cover-letter.docx", async Task<IResult> (Guid id, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var application = await db.JobApplications
+                .Include(application => application.GeneratedDraft)
+                .FirstOrDefaultAsync(application => application.Id == id, ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            if (application.GeneratedDraft is null)
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(ApplicationResponse.GeneratedDraft)] = ["Generate a draft before exporting the cover letter."]
+                }));
+            }
+
+            var coverLetterText = application.GeneratedDraft.CoverLetterText;
+            if (string.IsNullOrWhiteSpace(coverLetterText))
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(GeneratedDraftResponse.CoverLetterText)] = ["Cover letter text is required before export."]
+                }));
+            }
+
+            var profile = await db.Profiles
+                .OrderBy(profile => profile.CreatedAt)
+                .FirstOrDefaultAsync(ct);
+            var fileName = BuildCoverLetterFileName(application, "docx");
+            return Results.File(
+                CoverLetterDocxExporter.Export(application, profile),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 fileName);
         });
 
@@ -804,14 +842,17 @@ public static class ApplicationEndpoints
     }
 
     private static string BuildCoverLetterFileName(JobApplication application)
+        => BuildCoverLetterFileName(application, "txt");
+
+    private static string BuildCoverLetterFileName(JobApplication application, string extension)
     {
         var company = SlugifyFileNamePart(application.CompanyName);
         var role = SlugifyFileNamePart(application.RoleTitle);
         var name = string.Join('-', new[] { company, role }.Where(part => part.Length > 0));
 
         return name.Length == 0
-            ? $"application-{application.Id:N}-cover-letter.txt"
-            : $"{name}-cover-letter.txt";
+            ? $"application-{application.Id:N}-cover-letter.{extension}"
+            : $"{name}-cover-letter.{extension}";
     }
 
     private static string SlugifyFileNamePart(string value)
