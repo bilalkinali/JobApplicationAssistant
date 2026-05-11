@@ -5,6 +5,12 @@ import {
   getCoverLetterText
 } from "./exportControls";
 import {
+  ErrorPresentation,
+  formatError,
+  plainError,
+  technicalDetails
+} from "./errorPresentation";
+import {
   getDraftGenerationState,
   getEvidenceMatchingState,
   getJobAnalysisState,
@@ -48,12 +54,6 @@ const emptyProfileFact: ProfileFactForm = {
 const applicationStatuses = ["Draft", "PostingCaptured", "ReadyForReview", "Applied", "Archived"];
 const auditReadinessOptions = ["All", "Current", "Stale", "Missing", "NotApplicable"];
 const profileFactStatuses = ["Draft", "Approved", "Archived"];
-
-type ApiError = {
-  code: string;
-  message: string;
-  details?: Record<string, string[]>;
-};
 
 type ProfileForm = {
   fullName: string;
@@ -217,10 +217,10 @@ function App() {
   const [isClipboardAvailable, setIsClipboardAvailable] = useState(false);
   const [aiStatus, setAiStatus] = useState<AiProviderStatus | null>(null);
   const [aiDiagnostics, setAiDiagnostics] = useState<AiDiagnostics | null>(null);
-  const [aiDiagnosticsError, setAiDiagnosticsError] = useState<string | null>(null);
+  const [aiDiagnosticsError, setAiDiagnosticsError] = useState<ErrorPresentation | null>(null);
   const [aiDiagnosticsBusy, setAiDiagnosticsBusy] = useState(false);
   const [aiDiagnosticsLastRanAt, setAiDiagnosticsLastRanAt] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorPresentation | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const selectedApplication = useMemo(
@@ -477,7 +477,7 @@ function App() {
 
   async function markApplicationStatus(status: "Applied" | "Archived") {
     if (!selectedApplicationId) {
-      setError("Save the application before changing its final status.");
+      setError(plainError("Validation blocker", "Save the application before changing its final status."));
       return;
     }
 
@@ -504,7 +504,7 @@ function App() {
 
   async function analyzeJob() {
     if (!selectedApplicationId) {
-      setError("Save the application before running job analysis.");
+      setError(plainError("Validation blocker", "Save the application before running job analysis."));
       return;
     }
 
@@ -525,7 +525,7 @@ function App() {
 
   async function matchEvidence() {
     if (!selectedApplicationId) {
-      setError("Save the application before matching evidence.");
+      setError(plainError("Validation blocker", "Save the application before matching evidence."));
       return;
     }
 
@@ -546,7 +546,7 @@ function App() {
 
   async function saveApprovedEvidence() {
     if (!selectedApplicationId) {
-      setError("Save the application before reviewing evidence.");
+      setError(plainError("Validation blocker", "Save the application before reviewing evidence."));
       return;
     }
 
@@ -571,7 +571,7 @@ function App() {
 
   async function generateDraft() {
     if (!selectedApplicationId) {
-      setError("Save the application before generating a draft.");
+      setError(plainError("Validation blocker", "Save the application before generating a draft."));
       return;
     }
 
@@ -592,7 +592,7 @@ function App() {
 
   async function saveGeneratedDraft() {
     if (!selectedApplicationId) {
-      setError("Save the application before editing a draft.");
+      setError(plainError("Validation blocker", "Save the application before editing a draft."));
       return;
     }
 
@@ -617,7 +617,7 @@ function App() {
 
   async function auditClaims() {
     if (!selectedApplicationId) {
-      setError("Save the application before auditing a draft.");
+      setError(plainError("Validation blocker", "Save the application before auditing a draft."));
       return;
     }
 
@@ -638,7 +638,7 @@ function App() {
 
   async function copyCoverLetter() {
     if (!coverLetterExportState.canCopy) {
-      setError(coverLetterExportState.reason ?? "Clipboard copy is not available in this browser.");
+      setError(plainError("Copy blocked", coverLetterExportState.reason ?? "Clipboard copy is not available in this browser."));
       return;
     }
 
@@ -648,14 +648,18 @@ function App() {
     try {
       await navigator.clipboard.writeText(getCoverLetterText(selectedApplication, generatedDraftForm.coverLetterText));
       setNotice("Cover letter copied.");
-    } catch {
-      setError("Clipboard copy failed. You can still select and copy the cover letter manually.");
+    } catch (apiError) {
+      setError(plainError(
+        "Clipboard copy failed",
+        "Clipboard copy failed. You can still select and copy the cover letter manually.",
+        technicalDetails(apiError)
+      ));
     }
   }
 
   async function downloadCoverLetter(format: "txt" | "docx") {
     if (!selectedApplicationId || !coverLetterExportState.canExport) {
-      setError(coverLetterExportState.reason ?? "Select an application with a generated cover letter before exporting.");
+      setError(plainError("Export blocked", coverLetterExportState.reason ?? "Select an application with a generated cover letter before exporting."));
       return;
     }
 
@@ -693,7 +697,6 @@ function App() {
     setError(null);
     setNotice(null);
     setAiDiagnosticsError(null);
-    setAiDiagnostics(null);
     setAiDiagnosticsBusy(true);
 
     try {
@@ -826,7 +829,7 @@ function App() {
           </span>
         </header>
 
-        {error && <div className="message error">{error}</div>}
+        {error && <ErrorMessage error={error} />}
         {notice && <div className="message success">{notice}</div>}
 
         {view === "home" && (
@@ -1272,7 +1275,7 @@ function App() {
             {!aiDiagnosticsBusy && !aiDiagnostics && !aiDiagnosticsError && (
               <p className="diagnostics-state">Diagnostics have not been run this session.</p>
             )}
-            {aiDiagnosticsError && <p className="diagnostics-state error">{aiDiagnosticsError}</p>}
+            {aiDiagnosticsError && <ErrorMessage error={aiDiagnosticsError} compact />}
             {aiDiagnostics && (
               <section className="diagnostics-list">
                 <h4>Diagnostics result</h4>
@@ -1349,6 +1352,25 @@ function Textarea(props: {
       <span>{props.label}</span>
       <textarea required={props.required} value={props.value} onChange={(event) => props.onChange(event.target.value)} />
     </label>
+  );
+}
+
+function ErrorMessage(props: { error: ErrorPresentation; compact?: boolean }) {
+  return (
+    <div className={props.compact ? "message error compact" : "message error"} role="alert">
+      <strong>{props.error.title}</strong>
+      <p>{props.error.message}</p>
+      {props.error.details && props.error.details.length > 0 && (
+        <details>
+          <summary>Technical details</summary>
+          <ul>
+            {props.error.details.map((detail, index) => (
+              <li key={`${detail}-${index}`}>{detail}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
   );
 }
 
@@ -1471,35 +1493,6 @@ function toApplicationPayload(application: ApplicationForm) {
   };
 }
 
-function formatError(error: unknown): string {
-  const apiError = error as ApiError;
-  if (!apiError?.message) {
-    return error instanceof Error ? error.message : "The API request failed.";
-  }
-
-  const aiProviderMessages = apiError.details?.AiProvider;
-  if (aiProviderMessages?.length) {
-    const providerMessage = aiProviderMessages.join(" ");
-    if (providerMessage.toLowerCase().includes("unavailable")) {
-      return `AI provider unavailable: ${providerMessage} Check AI settings, then run diagnostics. Existing workflow state was kept.`;
-    }
-
-    if (isInvalidAiOutputMessage(providerMessage)) {
-      return `AI provider returned invalid output: ${providerMessage} Existing workflow state was kept.`;
-    }
-
-    return `AI provider failed: ${providerMessage} Existing workflow state was kept.`;
-  }
-
-  const details = apiError.details
-    ? Object.entries(apiError.details)
-        .flatMap(([field, messages]) => messages.map((message) => `${field}: ${message}`))
-        .join(" ")
-    : "";
-
-  return details ? `${apiError.message} ${details}` : apiError.message;
-}
-
 function fileNameFromContentDisposition(header: string | null, fallback: string): string {
   if (!header) {
     return fallback;
@@ -1540,18 +1533,6 @@ function aiWorkflowStatusMessage(status: AiProviderStatus): string {
 
 function isFakeProvider(status: AiProviderStatus): boolean {
   return status.provider.toLowerCase() === "fake";
-}
-
-function isInvalidAiOutputMessage(message: string): boolean {
-  const normalized = message.toLowerCase();
-
-  return (
-    normalized.includes("invalid") ||
-    normalized.includes("malformed") ||
-    normalized.includes("empty response") ||
-    normalized.includes("incomplete") ||
-    normalized.includes("duplicate")
-  );
 }
 
 function claimAuditMessage(hasGeneratedDraft: boolean): string {

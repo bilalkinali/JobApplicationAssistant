@@ -162,6 +162,33 @@ button:disabled {
   line-height: 1.45;
 }
 
+.message.compact {
+  margin-bottom: 0;
+}
+
+.message strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.message p {
+  margin: 0;
+}
+
+.message details {
+  margin-top: 8px;
+}
+
+.message summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.message ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
 .message.error {
   color: #7c241f;
   background: #f8dedb;

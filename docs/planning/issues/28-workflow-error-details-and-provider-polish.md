@@ -1,6 +1,6 @@
 # Workflow Error Details and Provider Polish
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,17 +15,17 @@ This slice should preserve existing backend-owned provider behavior and must not
 
 ## Acceptance criteria
 
-- [ ] AI action errors distinguish provider unavailable failures from validation blockers.
-- [ ] Invalid AI output errors are described plainly and do not imply that saved workflow state was corrupted.
-- [ ] Settings AI diagnostics shows consistent loading, success, unavailable, and error states.
-- [ ] Error presentation can include expandable technical details where diagnostics are useful.
-- [ ] Frontend error details do not expose raw provider requests or raw provider responses.
-- [ ] Existing application workflow state remains visible after failed AI actions.
-- [ ] Existing settings AI state remains visible after failed diagnostics.
-- [ ] Save, copy, and export failures use the same plain error presentation pattern where practical.
-- [ ] Fake provider status remains clearly identified as deterministic fake behavior.
-- [ ] Tests are added only for stable error classification helpers or public API contract changes.
-- [ ] No provider settings editing, streaming generation, raw payload display, or new AI capability is introduced.
+- [x] AI action errors distinguish provider unavailable failures from validation blockers.
+- [x] Invalid AI output errors are described plainly and do not imply that saved workflow state was corrupted.
+- [x] Settings AI diagnostics shows consistent loading, success, unavailable, and error states.
+- [x] Error presentation can include expandable technical details where diagnostics are useful.
+- [x] Frontend error details do not expose raw provider requests or raw provider responses.
+- [x] Existing application workflow state remains visible after failed AI actions.
+- [x] Existing settings AI state remains visible after failed diagnostics.
+- [x] Save, copy, and export failures use the same plain error presentation pattern where practical.
+- [x] Fake provider status remains clearly identified as deterministic fake behavior.
+- [x] Tests are added only for stable error classification helpers or public API contract changes.
+- [x] No provider settings editing, streaming generation, raw payload display, or new AI capability is introduced.
 
 ## Blocked by
 
