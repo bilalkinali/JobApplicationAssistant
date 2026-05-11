@@ -646,6 +646,9 @@ function App() {
   }
 
   async function copyCoverLetter() {
+    setError(null);
+    setNotice(null);
+
     if (!coverLetterExportState.canCopy) {
       setExportFeedback({
         tone: "error",
@@ -655,8 +658,6 @@ function App() {
       return;
     }
 
-    setError(null);
-    setNotice(null);
     setExportFeedback(null);
 
     try {
@@ -677,6 +678,9 @@ function App() {
   }
 
   async function downloadCoverLetter(format: "txt" | "docx") {
+    setError(null);
+    setNotice(null);
+
     if (!selectedApplicationId || !coverLetterExportState.canExport) {
       setExportFeedback({
         tone: "error",
@@ -686,8 +690,6 @@ function App() {
       return;
     }
 
-    setError(null);
-    setNotice(null);
     setExportFeedback(null);
     setExportBusy(format);
 
@@ -1190,12 +1192,18 @@ function App() {
                     <Textarea
                       label="Cover letter"
                       value={generatedDraftForm.coverLetterText}
-                      onChange={(coverLetterText) => setGeneratedDraftForm({ ...generatedDraftForm, coverLetterText })}
+                      onChange={(coverLetterText) => {
+                        setGeneratedDraftForm({ ...generatedDraftForm, coverLetterText });
+                        setExportFeedback(null);
+                      }}
                     />
                     <Textarea
                       label="Short motivation"
                       value={generatedDraftForm.shortMotivationText}
-                      onChange={(shortMotivationText) => setGeneratedDraftForm({ ...generatedDraftForm, shortMotivationText })}
+                      onChange={(shortMotivationText) => {
+                        setGeneratedDraftForm({ ...generatedDraftForm, shortMotivationText });
+                        setExportFeedback(null);
+                      }}
                     />
                     <div className="form-actions">
                       <button className="primary-action" type="button" onClick={saveGeneratedDraft} disabled={workflowBusy !== null}>
@@ -1210,7 +1218,7 @@ function App() {
                         <h4>Export cover letter</h4>
                         <p>{coverLetterExportState.reason ?? "Copy or download the current saved cover letter exactly as edited."}</p>
                       </div>
-                      <p className="workflow-note info">Copy uses the visible edited text. TXT and DOCX downloads use the current saved cover letter and never regenerate or re-run claim audit.</p>
+                      <p className="workflow-note info">Copy uses the visible edited text. TXT and DOCX downloads use the current saved draft edits and never regenerate or re-run claim audit.</p>
                       {auditExportNotice && <p className={`workflow-note ${auditExportNotice.tone}`}>{auditExportNotice.message}</p>}
                       {!coverLetterExportState.canCopy && coverLetterExportState.canExport && (
                         <p className="workflow-note neutral">Clipboard copy is not available in this browser. TXT and DOCX export are still available.</p>
