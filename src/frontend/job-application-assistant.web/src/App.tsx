@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
-  getAuditExportWarning,
+  getAuditExportNotice,
   getCoverLetterExportState,
   getCoverLetterText
 } from "./exportControls";
@@ -194,6 +194,13 @@ type AiDiagnosticCheck = {
   message: string;
 };
 
+type InlineFeedback = {
+  tone: "success" | "error";
+  title: string;
+  message: string;
+  details?: string[];
+};
+
 function App() {
   const [view, setView] = useState<View>("home");
   const [profile, setProfile] = useState<ProfileForm>(emptyProfile);
@@ -214,6 +221,7 @@ function App() {
   });
   const [workflowBusy, setWorkflowBusy] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState<"txt" | "docx" | null>(null);
+  const [exportFeedback, setExportFeedback] = useState<InlineFeedback | null>(null);
   const [isClipboardAvailable, setIsClipboardAvailable] = useState(false);
   const [aiStatus, setAiStatus] = useState<AiProviderStatus | null>(null);
   const [aiDiagnostics, setAiDiagnostics] = useState<AiDiagnostics | null>(null);
@@ -283,8 +291,8 @@ function App() {
       }),
     [generatedDraftForm.coverLetterText, hasUnsavedDraftEdits, isClipboardAvailable, selectedApplication]
   );
-  const auditExportWarning = useMemo(
-    () => getAuditExportWarning(selectedApplication),
+  const auditExportNotice = useMemo(
+    () => getAuditExportNotice(selectedApplication),
     [selectedApplication]
   );
   const profileReadiness = useMemo(
@@ -337,6 +345,7 @@ function App() {
       coverLetterText: selectedApplication?.generatedDraft?.coverLetterText ?? "",
       shortMotivationText: selectedApplication?.generatedDraft?.shortMotivationText ?? ""
     });
+    setExportFeedback(null);
   }, [selectedApplicationId, selectedApplication?.generatedDraft]);
 
   async function loadProfile() {
@@ -638,33 +647,48 @@ function App() {
 
   async function copyCoverLetter() {
     if (!coverLetterExportState.canCopy) {
-      setError(plainError("Copy blocked", coverLetterExportState.reason ?? "Clipboard copy is not available in this browser."));
+      setExportFeedback({
+        tone: "error",
+        title: "Copy blocked",
+        message: coverLetterExportState.reason ?? "Clipboard copy is not available in this browser."
+      });
       return;
     }
 
     setError(null);
     setNotice(null);
+    setExportFeedback(null);
 
     try {
       await navigator.clipboard.writeText(getCoverLetterText(selectedApplication, generatedDraftForm.coverLetterText));
-      setNotice("Cover letter copied.");
+      setExportFeedback({
+        tone: "success",
+        title: "Cover letter copied",
+        message: "The current edited cover letter text is on the clipboard."
+      });
     } catch (apiError) {
-      setError(plainError(
-        "Clipboard copy failed",
-        "Clipboard copy failed. You can still select and copy the cover letter manually.",
-        technicalDetails(apiError)
-      ));
+      setExportFeedback({
+        tone: "error",
+        title: "Clipboard copy failed",
+        message: "Clipboard copy failed. You can still select and copy the cover letter manually.",
+        details: technicalDetails(apiError)
+      });
     }
   }
 
   async function downloadCoverLetter(format: "txt" | "docx") {
     if (!selectedApplicationId || !coverLetterExportState.canExport) {
-      setError(plainError("Export blocked", coverLetterExportState.reason ?? "Select an application with a generated cover letter before exporting."));
+      setExportFeedback({
+        tone: "error",
+        title: "Export blocked",
+        message: coverLetterExportState.reason ?? "Select an application with a generated cover letter before exporting."
+      });
       return;
     }
 
     setError(null);
     setNotice(null);
+    setExportFeedback(null);
     setExportBusy(format);
 
     try {
@@ -685,9 +709,19 @@ function App() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      setNotice(format === "txt" ? "TXT cover letter downloaded." : "DOCX cover letter downloaded.");
+      setExportFeedback({
+        tone: "success",
+        title: `${format.toUpperCase()} cover letter downloaded`,
+        message: "The download used the current saved cover letter text without regenerating or re-running audit."
+      });
     } catch (apiError) {
-      setError(formatError(apiError));
+      const presentation = formatError(apiError);
+      setExportFeedback({
+        tone: "error",
+        title: presentation.title,
+        message: presentation.message,
+        details: presentation.details
+      });
     } finally {
       setExportBusy(null);
     }
@@ -1152,9 +1186,7 @@ function App() {
                         {selectedApplication.generatedDraft.isClaimAuditStale ? " - Audit stale" : ""}
                       </p>
                     </div>
-                    {selectedApplication.generatedDraft.isClaimAuditStale && (
-                      <p className="workflow-note warning">Draft edits were saved after the last audit. Run claim audit again before using this text.</p>
-                    )}
+                    {auditExportNotice && <p className={`workflow-note ${auditExportNotice.tone}`}>{auditExportNotice.message}</p>}
                     <Textarea
                       label="Cover letter"
                       value={generatedDraftForm.coverLetterText}
@@ -1176,12 +1208,14 @@ function App() {
                     <section className="export-panel">
                       <div className="section-heading">
                         <h4>Export cover letter</h4>
-                        <p>{coverLetterExportState.reason ?? "Copy or download the current cover letter exactly as edited."}</p>
+                        <p>{coverLetterExportState.reason ?? "Copy or download the current saved cover letter exactly as edited."}</p>
                       </div>
-                      {auditExportWarning && <p className="workflow-note warning">{auditExportWarning}</p>}
+                      <p className="workflow-note info">Copy uses the visible edited text. TXT and DOCX downloads use the current saved cover letter and never regenerate or re-run claim audit.</p>
+                      {auditExportNotice && <p className={`workflow-note ${auditExportNotice.tone}`}>{auditExportNotice.message}</p>}
                       {!coverLetterExportState.canCopy && coverLetterExportState.canExport && (
                         <p className="workflow-note neutral">Clipboard copy is not available in this browser. TXT and DOCX export are still available.</p>
                       )}
+                      {exportFeedback && <InlineFeedbackMessage feedback={exportFeedback} />}
                       <div className="form-actions">
                         <button type="button" onClick={() => void copyCoverLetter()} disabled={!coverLetterExportState.canCopy || exportBusy !== null}>
                           Copy
@@ -1203,6 +1237,7 @@ function App() {
                             : "Run claim audit after the generated text is ready."}
                         </p>
                       </div>
+                      {auditExportNotice && <p className={`workflow-note ${auditExportNotice.tone}`}>{auditExportNotice.message}</p>}
                       {claimAudit.claims.length === 0 ? (
                         <p className="empty-state compact">No claim audit results yet.</p>
                       ) : (
@@ -1224,6 +1259,7 @@ function App() {
                       <h4>Export cover letter</h4>
                       <p>{coverLetterExportState.reason ?? claimAuditMessage(hasGeneratedDraft)}</p>
                     </div>
+                    <p className="workflow-note neutral">TXT and DOCX downloads become available after a non-empty generated draft is saved.</p>
                     <div className="form-actions">
                       <button type="button" disabled>Copy</button>
                       <button type="button" disabled>Download TXT</button>
@@ -1365,6 +1401,25 @@ function ErrorMessage(props: { error: ErrorPresentation; compact?: boolean }) {
           <summary>Technical details</summary>
           <ul>
             {props.error.details.map((detail, index) => (
+              <li key={`${detail}-${index}`}>{detail}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function InlineFeedbackMessage(props: { feedback: InlineFeedback }) {
+  return (
+    <div className={`workflow-note ${props.feedback.tone}`} role={props.feedback.tone === "error" ? "alert" : "status"}>
+      <strong>{props.feedback.title}</strong>
+      <p>{props.feedback.message}</p>
+      {props.feedback.details && props.feedback.details.length > 0 && (
+        <details>
+          <summary>Technical details</summary>
+          <ul>
+            {props.feedback.details.map((detail, index) => (
               <li key={`${detail}-${index}`}>{detail}</li>
             ))}
           </ul>

@@ -698,6 +698,7 @@ button:disabled {
   display: grid;
   grid-template-columns: repeat(2, minmax(240px, 1fr));
   gap: 18px;
+  align-items: start;
   padding: 14px;
   border: 1px solid #d9d7d0;
   border-radius: 8px;
@@ -708,12 +709,39 @@ button:disabled {
   min-height: 260px;
 }
 
+.draft-editor .field {
+  align-self: stretch;
+}
+
 .workflow-note {
   grid-column: 1 / -1;
   margin: 0;
   padding: 10px 12px;
   border-radius: 6px;
   line-height: 1.45;
+}
+
+.workflow-note strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.workflow-note p {
+  margin: 0;
+}
+
+.workflow-note details {
+  margin-top: 8px;
+}
+
+.workflow-note summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.workflow-note ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
 }
 
 .workflow-note.warning {
@@ -731,10 +759,21 @@ button:disabled {
   background: #eef2f5;
 }
 
+.workflow-note.error {
+  color: #7c241f;
+  background: #f8dedb;
+}
+
+.workflow-note.success {
+  color: #24533b;
+  background: #dff1e7;
+}
+
 .export-panel {
   display: grid;
   grid-column: 1 / -1;
   gap: 12px;
+  min-height: 190px;
   padding: 14px;
   border: 1px solid #d7dde2;
   border-radius: 8px;
@@ -749,6 +788,7 @@ button:disabled {
   display: grid;
   grid-column: 1 / -1;
   gap: 12px;
+  min-height: 160px;
 }
 
 .audit-list {
