@@ -1,6 +1,6 @@
 # Milestone 5 Workflow Polish
 
-Status: ready-for-agent
+Status: in-progress
 Type: AFK
 
 ## Parent
@@ -17,18 +17,18 @@ This slice should not add export, provider settings editing, streaming generatio
 
 ## Acceptance criteria
 
-- [ ] The home workbench shows the active provider, model, and availability in a compact status area.
-- [ ] The settings AI area shows read-only provider, endpoint where applicable, model, availability, and diagnostics result details.
-- [ ] The settings AI area has consistent loading, success, unavailable, and error states for diagnostics.
-- [ ] Application detail AI workflow actions show clear unavailable-provider errors when Ollama cannot be reached.
-- [ ] Application detail AI workflow actions show clear invalid-output errors when initial output and repair both fail.
-- [ ] Existing workflow state remains visible after an AI action fails.
-- [ ] The UI wording distinguishes provider unavailability from validation blockers such as missing job posting text or missing approved evidence.
-- [ ] The fake provider workflow remains clear and deterministic in the UI.
-- [ ] The frontend does not expose raw provider requests or responses.
-- [ ] The UI remains desktop-first and consistent with the existing application detail structure.
-- [ ] A small frontend test is added only if the existing frontend setup already supports it naturally.
-- [ ] No export, provider settings editing, streaming generation, draft history, or advanced application tracking is introduced.
+- [x] The home workbench shows the active provider, model, and availability in a compact status area.
+- [x] The settings AI area shows read-only provider, endpoint where applicable, model, availability, and diagnostics result details.
+- [x] The settings AI area has consistent loading, success, unavailable, and error states for diagnostics.
+- [x] Application detail AI workflow actions show clear unavailable-provider errors when Ollama cannot be reached.
+- [x] Application detail AI workflow actions show clear invalid-output errors when initial output and repair both fail.
+- [x] Existing workflow state remains visible after an AI action fails.
+- [x] The UI wording distinguishes provider unavailability from validation blockers such as missing job posting text or missing approved evidence.
+- [x] The fake provider workflow remains clear and deterministic in the UI.
+- [x] The frontend does not expose raw provider requests or responses.
+- [x] The UI remains desktop-first and consistent with the existing application detail structure.
+- [x] A small frontend test is added only if the existing frontend setup already supports it naturally.
+- [x] No export, provider settings editing, streaming generation, draft history, or advanced application tracking is introduced.
 
 ## Blocked by
 

@@ -209,6 +209,10 @@ button:disabled {
   margin: 0;
 }
 
+.status-details.compact {
+  gap: 8px;
+}
+
 .status-details div {
   display: grid;
   grid-template-columns: 120px minmax(0, 1fr);
@@ -263,6 +267,24 @@ button:disabled {
 
 .diagnostics-item p {
   margin: 0;
+}
+
+.panel .diagnostics-state {
+  margin: 0;
+  color: #64717c;
+  line-height: 1.45;
+}
+
+.panel .diagnostics-state.success {
+  color: #24533b;
+}
+
+.panel .diagnostics-state.warning {
+  color: #714d12;
+}
+
+.panel .diagnostics-state.error {
+  color: #7c241f;
 }
 
 .form-layout {
@@ -613,6 +635,11 @@ button:disabled {
 .workflow-note.warning {
   color: #714d12;
   background: #fff2d8;
+}
+
+.workflow-note.info {
+  color: #24533b;
+  background: #dff1e7;
 }
 
 .claim-audit {
