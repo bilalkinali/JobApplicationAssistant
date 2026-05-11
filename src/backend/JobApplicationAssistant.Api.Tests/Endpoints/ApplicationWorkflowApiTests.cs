@@ -981,6 +981,88 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task GetApplications_hides_archived_sessions_by_default_and_includes_them_when_requested()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        await CreateApplicationAsync(client, "We need .NET.", status: "Archived", companyName: "Archived Co");
+        var active = await CreateApplicationAsync(client, "We need React.", companyName: "Active Co");
+
+        var activeResponse = await client.GetAsync("/api/applications");
+        var allResponse = await client.GetAsync("/api/applications?includeArchived=true");
+
+        activeResponse.EnsureSuccessStatusCode();
+        allResponse.EnsureSuccessStatusCode();
+        var activeApplications = await activeResponse.Content.ReadFromJsonAsync<List<ApplicationResponse>>();
+        var allApplications = await allResponse.Content.ReadFromJsonAsync<List<ApplicationResponse>>();
+        Assert.NotNull(activeApplications);
+        Assert.NotNull(allApplications);
+        var listed = Assert.Single(activeApplications);
+        Assert.Equal(active.Id, listed.Id);
+        Assert.Equal(2, allApplications.Count);
+        Assert.Contains(allApplications, application => application.Status == "Archived");
+    }
+
+    [Fact]
+    public async Task GetApplications_filters_history_by_search_status_and_audit_readiness()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var draft = await CreateGeneratedDraftAsync(client);
+        await MarkDraftAuditedAsync(factory, draft.Id);
+        await CreateApplicationAsync(client, "We need React.", status: "Applied", companyName: "Tailspin", roleTitle: "Frontend Engineer");
+
+        var response = await client.GetAsync("/api/applications?search=fallback&status=ReadyForReview&readiness=Current");
+
+        response.EnsureSuccessStatusCode();
+        var applications = await response.Content.ReadFromJsonAsync<List<ApplicationResponse>>();
+        Assert.NotNull(applications);
+        var application = Assert.Single(applications);
+        Assert.Equal(draft.JobApplicationId, application.Id);
+        Assert.True(application.HasGeneratedDraft);
+        Assert.Equal("Current", application.AuditReadiness);
+    }
+
+    [Fact]
+    public async Task GetApplications_exposes_current_stale_missing_and_not_applicable_audit_readiness()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var current = await CreateApplicationAsync(client, "We need .NET.", companyName: "Current Audit");
+        var stale = await CreateApplicationAsync(client, "We need React.", companyName: "Stale Audit");
+        var missing = await CreateApplicationAsync(client, "We need SQL.", companyName: "Missing Audit");
+        var notApplicable = await CreateApplicationAsync(client, "We need Azure.", companyName: "No Draft");
+        await AddGeneratedDraftAsync(factory, current.Id);
+        await AddGeneratedDraftAsync(factory, stale.Id, isClaimAuditStale: true);
+        await AddGeneratedDraftAsync(factory, missing.Id, claimAudit: "{}", auditUpdatedAt: null);
+
+        var response = await client.GetAsync("/api/applications");
+
+        response.EnsureSuccessStatusCode();
+        var applications = await response.Content.ReadFromJsonAsync<List<ApplicationResponse>>();
+        Assert.NotNull(applications);
+        Assert.Equal("Current", applications.Single(application => application.Id == current.Id).AuditReadiness);
+        Assert.Equal("Stale", applications.Single(application => application.Id == stale.Id).AuditReadiness);
+        Assert.Equal("Missing", applications.Single(application => application.Id == missing.Id).AuditReadiness);
+        Assert.Equal("NotApplicable", applications.Single(application => application.Id == notApplicable.Id).AuditReadiness);
+    }
+
+    [Fact]
+    public async Task GetApplications_rejects_unknown_history_filters()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/api/applications?status=Unknown&readiness=AlmostReady");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains("status", error.Details.Keys);
+        Assert.Contains("readiness", error.Details.Keys);
+    }
+
+    [Fact]
     public async Task PutGeneratedDraft_saves_manual_edits_preserves_generation_metadata_and_marks_audit_stale()
     {
         await using var factory = new TestApplicationFactory();
@@ -1238,16 +1320,19 @@ public sealed class ApplicationWorkflowApiTests
     private static async Task<ApplicationResponse> CreateApplicationAsync(
         HttpClient client,
         string jobPostingText,
-        string selectedLanguage = "")
+        string selectedLanguage = "",
+        string status = "Draft",
+        string companyName = "Fallback Company",
+        string roleTitle = "Fallback Role")
     {
         var response = await client.PostAsJsonAsync(
             "/api/applications",
             new ApplicationRequest(
-                "Fallback Company",
-                "Fallback Role",
+                companyName,
+                roleTitle,
                 null,
                 null,
-                "Draft",
+                status,
                 jobPostingText,
                 null,
                 selectedLanguage));
@@ -1367,20 +1452,25 @@ public sealed class ApplicationWorkflowApiTests
 
     private static async Task<GeneratedDraftResponse> AddGeneratedDraftAsync(
         WebApplicationFactory<Program> factory,
-        Guid applicationId)
+        Guid applicationId,
+        string claimAudit = """{"status":"current"}""",
+        DateTimeOffset? auditUpdatedAt = default,
+        bool isClaimAuditStale = false)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var now = DateTimeOffset.UtcNow;
+        auditUpdatedAt ??= claimAudit == "{}" ? null : now;
         var draft = new GeneratedDraft
         {
             Id = Guid.NewGuid(),
             JobApplicationId = applicationId,
             CoverLetterText = "Existing cover letter.",
             ShortMotivationText = "Existing motivation.",
-            ClaimAudit = """{"status":"current"}""",
+            ClaimAudit = claimAudit,
             GeneratedAt = now,
-            AuditUpdatedAt = now,
+            AuditUpdatedAt = auditUpdatedAt,
+            IsClaimAuditStale = isClaimAuditStale,
             CreatedAt = now,
             UpdatedAt = now
         };

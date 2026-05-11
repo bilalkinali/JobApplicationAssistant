@@ -1,6 +1,6 @@
 # Application History Readiness and Filters
 
-Status: ready-for-agent
+Status: in-progress
 Type: AFK
 
 ## Parent
@@ -19,17 +19,17 @@ Use TDD for this slice: start with one failing behavior test for the public appl
 
 - [ ] The implementation starts with a failing test for one public application history behavior before production code changes.
 - [ ] Each additional history/filter behavior is added through a red-green-refactor cycle, one behavior at a time.
-- [ ] Tests verify observable behavior through public API responses and natural UI-facing contracts, not private implementation details.
-- [ ] The application history remains ordered by most recent update.
-- [ ] Each application history item exposes enough summary information for company, role, status, selected language, deadline, updated date, generated draft existence, and audit readiness.
-- [ ] Audit readiness distinguishes current, stale, missing, and not applicable states.
-- [ ] The frontend can search application history by company and role.
-- [ ] The frontend can filter application history by status.
-- [ ] The frontend can filter application history by draft/audit readiness.
-- [ ] Archived applications are hidden from the active history view unless explicitly included.
-- [ ] Filtered empty states distinguish no applications from no matching applications.
-- [ ] Existing application detail behavior continues to work with the application selected from history.
-- [ ] No export endpoints, draft history, application event history, custom DOCX templates, or advanced tracking are introduced.
+- [x] Tests verify observable behavior through public API responses and natural UI-facing contracts, not private implementation details.
+- [x] The application history remains ordered by most recent update.
+- [x] Each application history item exposes enough summary information for company, role, status, selected language, deadline, updated date, generated draft existence, and audit readiness.
+- [x] Audit readiness distinguishes current, stale, missing, and not applicable states.
+- [x] The frontend can search application history by company and role.
+- [x] The frontend can filter application history by status.
+- [x] The frontend can filter application history by draft/audit readiness.
+- [x] Archived applications are hidden from the active history view unless explicitly included.
+- [x] Filtered empty states distinguish no applications from no matching applications.
+- [x] Existing application detail behavior continues to work with the application selected from history.
+- [x] No export endpoints, draft history, application event history, custom DOCX templates, or advanced tracking are introduced.
 
 ## Blocked by
 

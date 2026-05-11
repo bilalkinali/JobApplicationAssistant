@@ -26,7 +26,9 @@ public sealed record ApplicationResponse(
     string ApprovedEvidence,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    GeneratedDraftResponse? GeneratedDraft);
+    GeneratedDraftResponse? GeneratedDraft,
+    bool HasGeneratedDraft,
+    string AuditReadiness);
 
 public sealed record ApprovedEvidenceRequest(string? ApprovedEvidence);
 

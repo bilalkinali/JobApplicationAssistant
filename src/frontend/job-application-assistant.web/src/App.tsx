@@ -35,6 +35,7 @@ const emptyProfileFact: ProfileFactForm = {
   forbiddenClaims: "[]"
 };
 const applicationStatuses = ["Draft", "PostingCaptured", "ReadyForReview", "Applied", "Archived"];
+const auditReadinessOptions = ["All", "Current", "Stale", "Missing", "NotApplicable"];
 const profileFactStatuses = ["Draft", "Approved", "Archived"];
 
 type ApiError = {
@@ -91,6 +92,8 @@ type ApplicationSession = ApplicationForm & {
   unmatchedRequirements: string;
   approvedEvidence: string;
   generatedDraft: GeneratedDraft | null;
+  hasGeneratedDraft: boolean;
+  auditReadiness: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -191,6 +194,8 @@ function App() {
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
   const [applicationSearch, setApplicationSearch] = useState("");
   const [applicationStatusFilter, setApplicationStatusFilter] = useState("All");
+  const [applicationReadinessFilter, setApplicationReadinessFilter] = useState("All");
+  const [includeArchivedApplications, setIncludeArchivedApplications] = useState(false);
   const [approvedEvidenceDraft, setApprovedEvidenceDraft] = useState<EvidenceMatch[]>([]);
   const [generatedDraftForm, setGeneratedDraftForm] = useState<GeneratedDraftForm>({
     coverLetterText: "",
@@ -218,14 +223,16 @@ function App() {
 
     return applications.filter((application) => {
       const matchesStatus = applicationStatusFilter === "All" || application.status === applicationStatusFilter;
+      const matchesReadiness =
+        applicationReadinessFilter === "All" || application.auditReadiness === applicationReadinessFilter;
       const matchesSearch =
         !search ||
         application.companyName.toLowerCase().includes(search) ||
         application.roleTitle.toLowerCase().includes(search);
 
-      return matchesStatus && matchesSearch;
+      return matchesStatus && matchesReadiness && matchesSearch;
     });
-  }, [applications, applicationSearch, applicationStatusFilter]);
+  }, [applications, applicationReadinessFilter, applicationSearch, applicationStatusFilter]);
   const jobSignals = useMemo(
     () => parseJobSignals(selectedApplication?.jobSignals),
     [selectedApplication?.jobSignals]
@@ -254,7 +261,6 @@ function App() {
   useEffect(() => {
     void loadProfile();
     void loadProfileFacts();
-    void loadApplications();
     void loadAiStatus();
   }, []);
 
@@ -280,12 +286,18 @@ function App() {
 
   async function loadApplications() {
     try {
-      const response = await apiGet<ApplicationSession[]>("/api/applications");
+      const response = await apiGet<ApplicationSession[]>(
+        `/api/applications?includeArchived=${includeArchivedApplications}`
+      );
       setApplications(response.map(toApplicationSession));
     } catch (apiError) {
       setError(formatError(apiError));
     }
   }
+
+  useEffect(() => {
+    void loadApplications();
+  }, [includeArchivedApplications]);
 
   async function loadProfileFacts() {
     try {
@@ -586,7 +598,13 @@ function App() {
     setApplications((current) =>
       current.map((application) =>
         application.id === draft.jobApplicationId
-          ? toApplicationSession({ ...application, generatedDraft: draft, updatedAt: draft.updatedAt })
+          ? toApplicationSession({
+              ...application,
+              generatedDraft: draft,
+              hasGeneratedDraft: true,
+              auditReadiness: auditReadinessForDraft(draft),
+              updatedAt: draft.updatedAt
+            })
           : application
       )
     );
@@ -789,6 +807,15 @@ function App() {
               <div className="filters">
                 <Field label="Search" value={applicationSearch} onChange={setApplicationSearch} />
                 <Select label="Status" value={applicationStatusFilter} options={["All", ...applicationStatuses]} onChange={setApplicationStatusFilter} />
+                <Select label="Draft/audit" value={applicationReadinessFilter} options={auditReadinessOptions} onChange={setApplicationReadinessFilter} />
+                <label className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={includeArchivedApplications}
+                    onChange={(event) => setIncludeArchivedApplications(event.target.checked)}
+                  />
+                  <span>Include archived</span>
+                </label>
               </div>
               <div className="session-list">
                 {filteredApplications.map((application) => (
@@ -800,7 +827,13 @@ function App() {
                   >
                     <strong>{application.companyName}</strong>
                     <span>{application.roleTitle}</span>
-                    <small>{application.status} - {application.selectedLanguage || application.detectedLanguage || "Language unset"} - Updated {formatDate(application.updatedAt)}</small>
+                    <small>
+                      {application.status} - {application.selectedLanguage || application.detectedLanguage || "Language unset"} - Updated {formatDate(application.updatedAt)}
+                    </small>
+                    <small>
+                      {application.deadline ? `Deadline ${formatDate(application.deadline)} - ` : ""}
+                      {application.hasGeneratedDraft ? "Draft ready" : "No draft"} - Audit {readinessLabel(application.auditReadiness)}
+                    </small>
                   </button>
                 ))}
                 {applications.length === 0 && <p className="empty-state">No application sessions yet.</p>}
@@ -1215,6 +1248,8 @@ function toApplicationSession(application: ApplicationSession): ApplicationSessi
     unmatchedRequirements: application.unmatchedRequirements || "[]",
     approvedEvidence: application.approvedEvidence || "[]",
     generatedDraft: application.generatedDraft ?? null,
+    hasGeneratedDraft: application.hasGeneratedDraft ?? Boolean(application.generatedDraft),
+    auditReadiness: application.auditReadiness ?? auditReadinessForDraft(application.generatedDraft),
     createdAt: application.createdAt,
     updatedAt: application.updatedAt
   };
@@ -1323,6 +1358,26 @@ function claimAuditMessage(hasGeneratedDraft: boolean): string {
   return hasGeneratedDraft
     ? "Run claim audit after reviewing the generated text."
     : "Generate a draft before running claim audit.";
+}
+
+function auditReadinessForDraft(draft: GeneratedDraft | null): string {
+  if (!draft) {
+    return "NotApplicable";
+  }
+
+  if (draft.isClaimAuditStale) {
+    return "Stale";
+  }
+
+  if (!draft.auditUpdatedAt || draft.claimAudit === "{}") {
+    return "Missing";
+  }
+
+  return "Current";
+}
+
+function readinessLabel(readiness: string): string {
+  return readiness === "NotApplicable" ? "not applicable" : readiness.toLowerCase();
 }
 
 function summarizeClaimAudit(audit: ClaimAudit) {
