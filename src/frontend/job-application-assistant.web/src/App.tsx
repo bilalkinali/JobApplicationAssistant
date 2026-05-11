@@ -1,9 +1,21 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
-  getAuditExportWarning,
+  getAuditExportNotice,
   getCoverLetterExportState,
   getCoverLetterText
 } from "./exportControls";
+import {
+  ErrorPresentation,
+  formatError,
+  plainError,
+  technicalDetails
+} from "./errorPresentation";
+import {
+  getDraftGenerationState,
+  getEvidenceMatchingState,
+  getJobAnalysisState,
+  getProfileReadiness
+} from "./readiness";
 import "./styles.css";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:5108";
@@ -42,12 +54,6 @@ const emptyProfileFact: ProfileFactForm = {
 const applicationStatuses = ["Draft", "PostingCaptured", "ReadyForReview", "Applied", "Archived"];
 const auditReadinessOptions = ["All", "Current", "Stale", "Missing", "NotApplicable"];
 const profileFactStatuses = ["Draft", "Approved", "Archived"];
-
-type ApiError = {
-  code: string;
-  message: string;
-  details?: Record<string, string[]>;
-};
 
 type ProfileForm = {
   fullName: string;
@@ -96,6 +102,7 @@ type ApplicationSession = ApplicationForm & {
   evidenceMatches: string;
   unmatchedRequirements: string;
   approvedEvidence: string;
+  customFacts: string;
   generatedDraft: GeneratedDraft | null;
   hasGeneratedDraft: boolean;
   auditReadiness: string;
@@ -151,6 +158,15 @@ type EvidenceMatch = {
   matchedTerms: string[];
 };
 
+type CustomFact = {
+  id: string;
+  title: string;
+  summary: string;
+  technologies?: string[];
+  allowedClaims?: string[];
+  status: "PendingConfirmation" | "Approved" | "Rejected" | string;
+};
+
 type UnmatchedRequirement = {
   id: string;
   signalId: string;
@@ -188,6 +204,13 @@ type AiDiagnosticCheck = {
   message: string;
 };
 
+type InlineFeedback = {
+  tone: "success" | "error";
+  title: string;
+  message: string;
+  details?: string[];
+};
+
 function App() {
   const [view, setView] = useState<View>("home");
   const [profile, setProfile] = useState<ProfileForm>(emptyProfile);
@@ -208,13 +231,14 @@ function App() {
   });
   const [workflowBusy, setWorkflowBusy] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState<"txt" | "docx" | null>(null);
+  const [exportFeedback, setExportFeedback] = useState<InlineFeedback | null>(null);
   const [isClipboardAvailable, setIsClipboardAvailable] = useState(false);
   const [aiStatus, setAiStatus] = useState<AiProviderStatus | null>(null);
   const [aiDiagnostics, setAiDiagnostics] = useState<AiDiagnostics | null>(null);
-  const [aiDiagnosticsError, setAiDiagnosticsError] = useState<string | null>(null);
+  const [aiDiagnosticsError, setAiDiagnosticsError] = useState<ErrorPresentation | null>(null);
   const [aiDiagnosticsBusy, setAiDiagnosticsBusy] = useState(false);
   const [aiDiagnosticsLastRanAt, setAiDiagnosticsLastRanAt] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorPresentation | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const selectedApplication = useMemo(
@@ -256,6 +280,10 @@ function App() {
     () => parseJsonArray<EvidenceMatch>(selectedApplication?.approvedEvidence),
     [selectedApplication?.approvedEvidence]
   );
+  const customFacts = useMemo(
+    () => parseJsonArray<CustomFact>(selectedApplication?.customFacts),
+    [selectedApplication?.customFacts]
+  );
   const claimAudit = useMemo(
     () => parseClaimAudit(selectedApplication?.generatedDraft?.claimAudit),
     [selectedApplication?.generatedDraft?.claimAudit]
@@ -277,10 +305,42 @@ function App() {
       }),
     [generatedDraftForm.coverLetterText, hasUnsavedDraftEdits, isClipboardAvailable, selectedApplication]
   );
-  const auditExportWarning = useMemo(
-    () => getAuditExportWarning(selectedApplication),
+  const auditExportNotice = useMemo(
+    () => getAuditExportNotice(selectedApplication),
     [selectedApplication]
   );
+  const profileReadiness = useMemo(
+    () => getProfileReadiness(profile, approvedProfileFacts.length),
+    [approvedProfileFacts.length, profile]
+  );
+  const jobAnalysisState = useMemo(
+    () =>
+      getJobAnalysisState({
+        selectedApplicationId,
+        hasSavedJobPosting
+      }),
+    [hasSavedJobPosting, selectedApplicationId]
+  );
+  const evidenceMatchingState = useMemo(
+    () =>
+      getEvidenceMatchingState({
+        selectedApplicationId,
+        hasJobSignals: jobSignals.signals.length > 0,
+        approvedProfileFactCount: approvedProfileFacts.length
+      }),
+    [approvedProfileFacts.length, jobSignals.signals.length, selectedApplicationId]
+  );
+  const draftGenerationState = useMemo(
+    () =>
+      getDraftGenerationState({
+        selectedApplicationId,
+        hasSavedJobPosting,
+        hasSavedApprovedEvidence
+      }),
+    [hasSavedApprovedEvidence, hasSavedJobPosting, selectedApplicationId]
+  );
+  const workflowBusyReason = workflowBusy ? "Wait for the current workflow action to finish." : null;
+  const exportBusyReason = exportBusy ? "Wait for the current export action to finish." : null;
 
   useEffect(() => {
     void loadProfile();
@@ -301,6 +361,7 @@ function App() {
       coverLetterText: selectedApplication?.generatedDraft?.coverLetterText ?? "",
       shortMotivationText: selectedApplication?.generatedDraft?.shortMotivationText ?? ""
     });
+    setExportFeedback(null);
   }, [selectedApplicationId, selectedApplication?.generatedDraft]);
 
   async function loadProfile() {
@@ -407,6 +468,10 @@ function App() {
       return;
     }
 
+    if (!window.confirm("Delete this profile fact? This permanently removes it from your evidence library.")) {
+      return;
+    }
+
     setError(null);
     setNotice(null);
 
@@ -422,6 +487,10 @@ function App() {
 
   async function deleteApplication() {
     if (!selectedApplicationId) {
+      return;
+    }
+
+    if (!window.confirm("Delete this application session? This permanently removes its workflow state.")) {
       return;
     }
 
@@ -441,7 +510,11 @@ function App() {
 
   async function markApplicationStatus(status: "Applied" | "Archived") {
     if (!selectedApplicationId) {
-      setError("Save the application before changing its final status.");
+      setError(plainError("Validation blocker", "Save the application before changing its final status."));
+      return;
+    }
+
+    if (status === "Archived" && !window.confirm("Archive this application session? It will move out of the active history unless archived sessions are included.")) {
       return;
     }
 
@@ -468,7 +541,7 @@ function App() {
 
   async function analyzeJob() {
     if (!selectedApplicationId) {
-      setError("Save the application before running job analysis.");
+      setError(plainError("Validation blocker", "Save the application before running job analysis."));
       return;
     }
 
@@ -489,7 +562,7 @@ function App() {
 
   async function matchEvidence() {
     if (!selectedApplicationId) {
-      setError("Save the application before matching evidence.");
+      setError(plainError("Validation blocker", "Save the application before matching evidence."));
       return;
     }
 
@@ -510,7 +583,7 @@ function App() {
 
   async function saveApprovedEvidence() {
     if (!selectedApplicationId) {
-      setError("Save the application before reviewing evidence.");
+      setError(plainError("Validation blocker", "Save the application before reviewing evidence."));
       return;
     }
 
@@ -535,7 +608,7 @@ function App() {
 
   async function generateDraft() {
     if (!selectedApplicationId) {
-      setError("Save the application before generating a draft.");
+      setError(plainError("Validation blocker", "Save the application before generating a draft."));
       return;
     }
 
@@ -556,7 +629,7 @@ function App() {
 
   async function saveGeneratedDraft() {
     if (!selectedApplicationId) {
-      setError("Save the application before editing a draft.");
+      setError(plainError("Validation blocker", "Save the application before editing a draft."));
       return;
     }
 
@@ -581,7 +654,7 @@ function App() {
 
   async function auditClaims() {
     if (!selectedApplicationId) {
-      setError("Save the application before auditing a draft.");
+      setError(plainError("Validation blocker", "Save the application before auditing a draft."));
       return;
     }
 
@@ -601,30 +674,51 @@ function App() {
   }
 
   async function copyCoverLetter() {
-    if (!coverLetterExportState.canCopy) {
-      setError(coverLetterExportState.reason ?? "Clipboard copy is not available in this browser.");
-      return;
-    }
-
     setError(null);
     setNotice(null);
 
+    if (!coverLetterExportState.canCopy) {
+      setExportFeedback({
+        tone: "error",
+        title: "Copy blocked",
+        message: coverLetterExportState.reason ?? "Clipboard copy is not available in this browser."
+      });
+      return;
+    }
+
+    setExportFeedback(null);
+
     try {
       await navigator.clipboard.writeText(getCoverLetterText(selectedApplication, generatedDraftForm.coverLetterText));
-      setNotice("Cover letter copied.");
-    } catch {
-      setError("Clipboard copy failed. You can still select and copy the cover letter manually.");
+      setExportFeedback({
+        tone: "success",
+        title: "Cover letter copied",
+        message: "The current edited cover letter text is on the clipboard."
+      });
+    } catch (apiError) {
+      setExportFeedback({
+        tone: "error",
+        title: "Clipboard copy failed",
+        message: "Clipboard copy failed. You can still select and copy the cover letter manually.",
+        details: technicalDetails(apiError)
+      });
     }
   }
 
   async function downloadCoverLetter(format: "txt" | "docx") {
+    setError(null);
+    setNotice(null);
+
     if (!selectedApplicationId || !coverLetterExportState.canExport) {
-      setError(coverLetterExportState.reason ?? "Select an application with a generated cover letter before exporting.");
+      setExportFeedback({
+        tone: "error",
+        title: "Export blocked",
+        message: coverLetterExportState.reason ?? "Select an application with a generated cover letter before exporting."
+      });
       return;
     }
 
-    setError(null);
-    setNotice(null);
+    setExportFeedback(null);
     setExportBusy(format);
 
     try {
@@ -645,9 +739,19 @@ function App() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      setNotice(format === "txt" ? "TXT cover letter downloaded." : "DOCX cover letter downloaded.");
+      setExportFeedback({
+        tone: "success",
+        title: `${format.toUpperCase()} cover letter downloaded`,
+        message: "The download used the current saved cover letter text without regenerating or re-running audit."
+      });
     } catch (apiError) {
-      setError(formatError(apiError));
+      const presentation = formatError(apiError);
+      setExportFeedback({
+        tone: "error",
+        title: presentation.title,
+        message: presentation.message,
+        details: presentation.details
+      });
     } finally {
       setExportBusy(null);
     }
@@ -657,7 +761,6 @@ function App() {
     setError(null);
     setNotice(null);
     setAiDiagnosticsError(null);
-    setAiDiagnostics(null);
     setAiDiagnosticsBusy(true);
 
     try {
@@ -790,15 +893,25 @@ function App() {
           </span>
         </header>
 
-        {error && <div className="message error">{error}</div>}
-        {notice && <div className="message success">{notice}</div>}
+        {error && <ErrorMessage error={error} />}
+        {notice && (
+          <div className="message success" role="status">
+            <strong>Success</strong>
+            <p>{notice}</p>
+          </div>
+        )}
 
         {view === "home" && (
           <div className="panel-grid">
             <article className="panel">
               <h3>Profile readiness</h3>
-              <p>{profile.fullName ? `${profile.fullName} has contact details saved.` : "Profile contact details are not saved yet."}</p>
-              <p>{approvedProfileFacts.length > 0 ? `${approvedProfileFacts.length} approved profile fact${approvedProfileFacts.length === 1 ? "" : "s"} ready as evidence.` : "No approved profile facts yet."}</p>
+              <p>{profileReadiness.contactMessage}</p>
+              <p>{profileReadiness.evidenceMessage}</p>
+              {profileReadiness.warnings.length > 0 && (
+                <button type="button" onClick={() => setView("profile")}>
+                  Review profile setup
+                </button>
+              )}
             </article>
             <article className="panel">
               <h3>New application</h3>
@@ -847,8 +960,11 @@ function App() {
             <form className="form-layout panel-form" onSubmit={saveProfile}>
               <div className="section-heading">
                 <h3>Contact and tone</h3>
-                <p>Used later when generated text needs profile context.</p>
+                <p>{profileReadiness.contactMessage}</p>
               </div>
+              {!profileReadiness.hasContactDetails && (
+                <p className="workflow-note warning">Contact setup is incomplete. You can keep editing applications, but later drafts and exports may miss useful applicant context.</p>
+              )}
               <Field label="Full name" required value={profile.fullName} onChange={(fullName) => setProfile({ ...profile, fullName })} />
               <Field label="Email" required type="email" value={profile.email} onChange={(email) => setProfile({ ...profile, email })} />
               <Field label="Phone" value={profile.phone} onChange={(phone) => setProfile({ ...profile, phone })} />
@@ -867,19 +983,23 @@ function App() {
             <section className="profile-facts-panel">
               <div className="section-heading">
                 <h3>Profile facts</h3>
-                <p>{approvedProfileFacts.length > 0 ? `${approvedProfileFacts.length} approved fact${approvedProfileFacts.length === 1 ? "" : "s"} available.` : "Add and approve facts before later generation work."}</p>
+                <p>{profileReadiness.evidenceMessage}</p>
               </div>
+              {!profileReadiness.hasApprovedEvidence && (
+                <p className="workflow-note warning">Approved evidence is required before evidence matching and draft generation. Draft or archived facts will not be used as proof.</p>
+              )}
               {profileFacts.length === 0 && <p className="empty-state">No profile facts yet.</p>}
               <div className="fact-list">
                 {profileFacts.map((fact) => (
                   <button
-                    className={fact.id === selectedProfileFactId ? "fact-card active" : `fact-card ${fact.status.toLowerCase()}`}
+                    className={`fact-card ${fact.status.toLowerCase()}${fact.id === selectedProfileFactId ? " active" : ""}`}
                     key={fact.id}
                     type="button"
                     onClick={() => openProfileFact(fact)}
                   >
                     <strong>{fact.title}</strong>
-                    <span>{fact.type} - {fact.status}</span>
+                    <span>{fact.type}</span>
+                    <StatusBadge tone={statusTone(fact.status)}>{profileFactStatusLabel(fact.status)}</StatusBadge>
                   </button>
                 ))}
               </div>
@@ -928,15 +1048,16 @@ function App() {
               <div className="session-list">
                 {filteredApplications.map((application) => (
                   <button
-                    className={application.id === selectedApplicationId ? "session active" : "session"}
+                    className={`session ${applicationStatusClass(application.status)}${application.id === selectedApplicationId ? " active" : ""}`}
                     key={application.id}
                     type="button"
                     onClick={() => void openApplication(application)}
                   >
+                    <StatusBadge tone={applicationHistoryTone(application.status)}>{applicationHistoryLabel(application.status)}</StatusBadge>
                     <strong>{application.companyName}</strong>
                     <span>{application.roleTitle}</span>
                     <small>
-                      {application.status} - {application.selectedLanguage || application.detectedLanguage || "Language unset"} - Updated {formatDate(application.updatedAt)}
+                      {applicationStatusLabel(application.status)} - {application.selectedLanguage || application.detectedLanguage || "Language unset"} - Updated {formatDate(application.updatedAt)}
                     </small>
                     <div className="session-badges">
                       {application.deadline && <span>Deadline {formatDate(application.deadline)}</span>}
@@ -945,8 +1066,8 @@ function App() {
                     </div>
                   </button>
                 ))}
-                {applications.length === 0 && <p className="empty-state">No application sessions yet.</p>}
-                {applications.length > 0 && filteredApplications.length === 0 && <p className="empty-state">No applications match the current filters.</p>}
+                {applications.length === 0 && <p className="empty-state">{applicationHistoryEmptyMessage(includeArchivedApplications)}</p>}
+                {applications.length > 0 && filteredApplications.length === 0 && <p className="empty-state">No applications match the current search, status, and draft/audit filters.</p>}
               </div>
             </section>
 
@@ -976,6 +1097,10 @@ function App() {
                     type="button"
                     onClick={() => void markApplicationStatus("Applied")}
                     disabled={selectedApplication?.status === "Applied" || workflowBusy !== null}
+                    title={disabledTitle(
+                      selectedApplication?.status === "Applied" || workflowBusy !== null,
+                      selectedApplication?.status === "Applied" ? "This application is already marked applied." : workflowBusyReason
+                    )}
                   >
                     Mark applied
                   </button>
@@ -984,6 +1109,10 @@ function App() {
                     type="button"
                     onClick={() => void markApplicationStatus("Archived")}
                     disabled={selectedApplication?.status === "Archived" || workflowBusy !== null}
+                    title={disabledTitle(
+                      selectedApplication?.status === "Archived" || workflowBusy !== null,
+                      selectedApplication?.status === "Archived" ? "This application is already archived." : workflowBusyReason
+                    )}
                   >
                     Archive
                   </button>
@@ -1000,13 +1129,34 @@ function App() {
                     {aiWorkflowStatusMessage(aiStatus)}
                   </p>
                 )}
+                {selectedApplication && (
+                  <div className="trust-chain" aria-label="Draft trust chain">
+                    <StatusBadge tone={savedApprovedEvidence.length > 0 ? "approved" : "pending"}>
+                      {approvedEvidenceCountLabel(savedApprovedEvidence.length)}
+                    </StatusBadge>
+                    <StatusBadge tone={hasGeneratedDraft ? "approved" : "draft"}>
+                      {hasGeneratedDraft ? "Draft saved" : "No draft"}
+                    </StatusBadge>
+                    <StatusBadge tone={auditReadinessTone(selectedApplication.auditReadiness)}>
+                      {auditReadinessLabel(selectedApplication.auditReadiness)}
+                    </StatusBadge>
+                    <StatusBadge tone={coverLetterExportState.canExport ? "approved" : "pending"}>
+                      {coverLetterExportState.canExport ? "Export ready" : "Export blocked"}
+                    </StatusBadge>
+                  </div>
+                )}
 
                 <div className="workflow-step">
                   <div>
                     <h4>1. Job analysis</h4>
-                    <p>{selectedApplicationId ? "Extract signals from the saved job posting." : "Save the application before analysis."}</p>
+                    <p>{jobAnalysisState.message}</p>
                   </div>
-                  <button type="button" onClick={analyzeJob} disabled={!selectedApplicationId || workflowBusy !== null}>
+                  <button
+                    type="button"
+                    onClick={analyzeJob}
+                    disabled={!jobAnalysisState.canRun || workflowBusy !== null}
+                    title={disabledTitle(!jobAnalysisState.canRun || workflowBusy !== null, workflowBusyReason ?? jobAnalysisState.message)}
+                  >
                     {workflowBusy === "analysis" ? "Analyzing..." : "Analyze job"}
                   </button>
                 </div>
@@ -1024,9 +1174,14 @@ function App() {
                 <div className="workflow-step">
                   <div>
                     <h4>2. Evidence matching</h4>
-                    <p>{approvedProfileFacts.length > 0 ? "Match analyzed signals against approved profile facts." : "Approve at least one profile fact before matching."}</p>
+                    <p>{evidenceMatchingState.message}</p>
                   </div>
-                  <button type="button" onClick={matchEvidence} disabled={!selectedApplicationId || jobSignals.signals.length === 0 || approvedProfileFacts.length === 0 || workflowBusy !== null}>
+                  <button
+                    type="button"
+                    onClick={matchEvidence}
+                    disabled={!evidenceMatchingState.canRun || workflowBusy !== null}
+                    title={disabledTitle(!evidenceMatchingState.canRun || workflowBusy !== null, workflowBusyReason ?? evidenceMatchingState.message)}
+                  >
                     {workflowBusy === "matching" ? "Matching..." : "Match evidence"}
                   </button>
                 </div>
@@ -1062,9 +1217,17 @@ function App() {
                 <div className="workflow-step">
                   <div>
                     <h4>3. Approved evidence</h4>
-                    <p>Save only the matched evidence that should be available to later generation steps.</p>
+                    <p>Save only evidence you approve as support for generated claims. Draft, archived, and removed evidence is not sent to draft generation.</p>
                   </div>
-                  <button type="button" onClick={saveApprovedEvidence} disabled={!selectedApplicationId || workflowBusy !== null}>
+                  <button
+                    type="button"
+                    onClick={saveApprovedEvidence}
+                    disabled={!selectedApplicationId || workflowBusy !== null}
+                    title={disabledTitle(
+                      !selectedApplicationId || workflowBusy !== null,
+                      workflowBusyReason ?? "Save the application before reviewing evidence."
+                    )}
+                  >
                     {workflowBusy === "review" ? "Saving..." : "Save approved evidence"}
                   </button>
                 </div>
@@ -1074,6 +1237,7 @@ function App() {
                   {approvedEvidenceDraft.map((match) => (
                     <article className="approved-item" key={match.id}>
                       <div>
+                        <StatusBadge tone="approved">Approved evidence</StatusBadge>
                         <strong>{match.signal}</strong>
                         <span>{match.profileFactTitle}</span>
                       </div>
@@ -1082,12 +1246,38 @@ function App() {
                   ))}
                 </div>
 
+                <section className="custom-facts-panel">
+                  <div className="section-heading">
+                    <h4>Job-local custom facts</h4>
+                    <p>Only approved job-local facts should support generated claims.</p>
+                  </div>
+                  {customFacts.length === 0 ? (
+                    <p className="empty-state compact">No job-local custom facts recorded.</p>
+                  ) : (
+                    <div className="custom-fact-list">
+                      {customFacts.map((fact) => (
+                        <article className={`custom-fact ${customFactStatusClass(fact.status)}`} key={fact.id}>
+                          <StatusBadge tone={customFactStatusTone(fact.status)}>{customFactStatusLabel(fact.status)}</StatusBadge>
+                          <strong>{fact.title}</strong>
+                          <p>{fact.summary}</p>
+                          {fact.technologies && fact.technologies.length > 0 && <small>{fact.technologies.join(", ")}</small>}
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
                 <div className="workflow-step">
                   <div>
                     <h4>4. Generated draft</h4>
-                    <p>{draftGenerationMessage(selectedApplicationId, hasSavedJobPosting, hasSavedApprovedEvidence)}</p>
+                    <p>{draftGenerationState.message}</p>
                   </div>
-                  <button type="button" onClick={generateDraft} disabled={!selectedApplicationId || !hasSavedJobPosting || !hasSavedApprovedEvidence || workflowBusy !== null}>
+                  <button
+                    type="button"
+                    onClick={generateDraft}
+                    disabled={!draftGenerationState.canRun || workflowBusy !== null}
+                    title={disabledTitle(!draftGenerationState.canRun || workflowBusy !== null, workflowBusyReason ?? draftGenerationState.message)}
+                  >
                     {workflowBusy === "draft" ? "Generating..." : "Generate draft"}
                   </button>
                 </div>
@@ -1102,44 +1292,79 @@ function App() {
                         {selectedApplication.generatedDraft.isClaimAuditStale ? " - Audit stale" : ""}
                       </p>
                     </div>
-                    {selectedApplication.generatedDraft.isClaimAuditStale && (
-                      <p className="workflow-note warning">Draft edits were saved after the last audit. Run claim audit again before using this text.</p>
-                    )}
+                    {auditExportNotice && <p className={`workflow-note ${auditExportNotice.tone}`}>{auditExportNotice.message}</p>}
                     <Textarea
                       label="Cover letter"
                       value={generatedDraftForm.coverLetterText}
-                      onChange={(coverLetterText) => setGeneratedDraftForm({ ...generatedDraftForm, coverLetterText })}
+                      onChange={(coverLetterText) => {
+                        setGeneratedDraftForm({ ...generatedDraftForm, coverLetterText });
+                        setExportFeedback(null);
+                      }}
                     />
                     <Textarea
                       label="Short motivation"
                       value={generatedDraftForm.shortMotivationText}
-                      onChange={(shortMotivationText) => setGeneratedDraftForm({ ...generatedDraftForm, shortMotivationText })}
+                      onChange={(shortMotivationText) => {
+                        setGeneratedDraftForm({ ...generatedDraftForm, shortMotivationText });
+                        setExportFeedback(null);
+                      }}
                     />
                     <div className="form-actions">
-                      <button className="primary-action" type="button" onClick={saveGeneratedDraft} disabled={workflowBusy !== null}>
+                      <button
+                        className="primary-action"
+                        type="button"
+                        onClick={saveGeneratedDraft}
+                        disabled={workflowBusy !== null}
+                        title={disabledTitle(workflowBusy !== null, workflowBusyReason)}
+                      >
                         {workflowBusy === "draft-edit" ? "Saving..." : "Save draft edits"}
                       </button>
-                      <button type="button" onClick={auditClaims} disabled={workflowBusy !== null}>
+                      <button
+                        type="button"
+                        onClick={auditClaims}
+                        disabled={workflowBusy !== null}
+                        title={disabledTitle(workflowBusy !== null, workflowBusyReason)}
+                      >
                         {workflowBusy === "audit" ? "Auditing..." : "Run claim audit"}
                       </button>
                     </div>
                     <section className="export-panel">
                       <div className="section-heading">
                         <h4>Export cover letter</h4>
-                        <p>{coverLetterExportState.reason ?? "Copy or download the current cover letter exactly as edited."}</p>
+                        <p>{coverLetterExportState.reason ?? "Copy or download the current saved cover letter exactly as edited."}</p>
                       </div>
-                      {auditExportWarning && <p className="workflow-note warning">{auditExportWarning}</p>}
+                      <p className="workflow-note info">Copy uses the visible edited text. TXT and DOCX downloads use the current saved draft edits and never regenerate or re-run claim audit.</p>
+                      {auditExportNotice && <p className={`workflow-note ${auditExportNotice.tone}`}>{auditExportNotice.message}</p>}
                       {!coverLetterExportState.canCopy && coverLetterExportState.canExport && (
                         <p className="workflow-note neutral">Clipboard copy is not available in this browser. TXT and DOCX export are still available.</p>
                       )}
+                      {exportFeedback && <InlineFeedbackMessage feedback={exportFeedback} />}
                       <div className="form-actions">
-                        <button type="button" onClick={() => void copyCoverLetter()} disabled={!coverLetterExportState.canCopy || exportBusy !== null}>
+                        <button
+                          type="button"
+                          onClick={() => void copyCoverLetter()}
+                          disabled={!coverLetterExportState.canCopy || exportBusy !== null}
+                          title={disabledTitle(
+                            !coverLetterExportState.canCopy || exportBusy !== null,
+                            exportBusyReason ?? coverLetterExportState.reason ?? "Clipboard copy is not available in this browser."
+                          )}
+                        >
                           Copy
                         </button>
-                        <button type="button" onClick={() => void downloadCoverLetter("txt")} disabled={!coverLetterExportState.canExport || exportBusy !== null}>
+                        <button
+                          type="button"
+                          onClick={() => void downloadCoverLetter("txt")}
+                          disabled={!coverLetterExportState.canExport || exportBusy !== null}
+                          title={disabledTitle(!coverLetterExportState.canExport || exportBusy !== null, exportBusyReason ?? coverLetterExportState.reason)}
+                        >
                           {exportBusy === "txt" ? "Downloading..." : "Download TXT"}
                         </button>
-                        <button type="button" onClick={() => void downloadCoverLetter("docx")} disabled={!coverLetterExportState.canExport || exportBusy !== null}>
+                        <button
+                          type="button"
+                          onClick={() => void downloadCoverLetter("docx")}
+                          disabled={!coverLetterExportState.canExport || exportBusy !== null}
+                          title={disabledTitle(!coverLetterExportState.canExport || exportBusy !== null, exportBusyReason ?? coverLetterExportState.reason)}
+                        >
                           {exportBusy === "docx" ? "Downloading..." : "Download DOCX"}
                         </button>
                       </div>
@@ -1153,6 +1378,7 @@ function App() {
                             : "Run claim audit after the generated text is ready."}
                         </p>
                       </div>
+                      {auditExportNotice && <p className={`workflow-note ${auditExportNotice.tone}`}>{auditExportNotice.message}</p>}
                       {claimAudit.claims.length === 0 ? (
                         <p className="empty-state compact">No claim audit results yet.</p>
                       ) : (
@@ -1174,10 +1400,11 @@ function App() {
                       <h4>Export cover letter</h4>
                       <p>{coverLetterExportState.reason ?? claimAuditMessage(hasGeneratedDraft)}</p>
                     </div>
+                    <p className="workflow-note neutral">TXT and DOCX downloads become available after a non-empty generated draft is saved.</p>
                     <div className="form-actions">
-                      <button type="button" disabled>Copy</button>
-                      <button type="button" disabled>Download TXT</button>
-                      <button type="button" disabled>Download DOCX</button>
+                      <button type="button" disabled title={coverLetterExportState.reason ?? "Generate a draft before copying."}>Copy</button>
+                      <button type="button" disabled title={coverLetterExportState.reason ?? "Generate a draft before downloading TXT."}>Download TXT</button>
+                      <button type="button" disabled title={coverLetterExportState.reason ?? "Generate a draft before downloading DOCX."}>Download DOCX</button>
                     </div>
                   </section>
                 )}
@@ -1225,7 +1452,7 @@ function App() {
             {!aiDiagnosticsBusy && !aiDiagnostics && !aiDiagnosticsError && (
               <p className="diagnostics-state">Diagnostics have not been run this session.</p>
             )}
-            {aiDiagnosticsError && <p className="diagnostics-state error">{aiDiagnosticsError}</p>}
+            {aiDiagnosticsError && <ErrorMessage error={aiDiagnosticsError} compact />}
             {aiDiagnostics && (
               <section className="diagnostics-list">
                 <h4>Diagnostics result</h4>
@@ -1303,6 +1530,48 @@ function Textarea(props: {
       <textarea required={props.required} value={props.value} onChange={(event) => props.onChange(event.target.value)} />
     </label>
   );
+}
+
+function ErrorMessage(props: { error: ErrorPresentation; compact?: boolean }) {
+  return (
+    <div className={props.compact ? "message error compact" : "message error"} role="alert">
+      <strong>{props.error.title}</strong>
+      <p>{props.error.message}</p>
+      {props.error.details && props.error.details.length > 0 && (
+        <details>
+          <summary>Technical details</summary>
+          <ul>
+            {props.error.details.map((detail, index) => (
+              <li key={`${detail}-${index}`}>{detail}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function InlineFeedbackMessage(props: { feedback: InlineFeedback }) {
+  return (
+    <div className={`workflow-note ${props.feedback.tone}`} role={props.feedback.tone === "error" ? "alert" : "status"}>
+      <strong>{props.feedback.title}</strong>
+      <p>{props.feedback.message}</p>
+      {props.feedback.details && props.feedback.details.length > 0 && (
+        <details>
+          <summary>Technical details</summary>
+          <ul>
+            {props.feedback.details.map((detail, index) => (
+              <li key={`${detail}-${index}`}>{detail}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function StatusBadge(props: { tone: string; children: string }) {
+  return <span className={`state-badge ${props.tone}`}>{props.children}</span>;
 }
 
 function SignalColumn(props: { title: string; values: string[] }) {
@@ -1406,6 +1675,7 @@ function toApplicationSession(application: ApplicationSession): ApplicationSessi
     evidenceMatches: application.evidenceMatches || "[]",
     unmatchedRequirements: application.unmatchedRequirements || "[]",
     approvedEvidence: application.approvedEvidence || "[]",
+    customFacts: application.customFacts || "[]",
     generatedDraft: application.generatedDraft ?? null,
     hasGeneratedDraft: application.hasGeneratedDraft ?? Boolean(application.generatedDraft),
     auditReadiness: application.auditReadiness ?? auditReadinessForDraft(application.generatedDraft),
@@ -1422,35 +1692,6 @@ function toApplicationPayload(application: ApplicationForm) {
     detectedLanguage: application.detectedLanguage || null,
     selectedLanguage: application.selectedLanguage || null
   };
-}
-
-function formatError(error: unknown): string {
-  const apiError = error as ApiError;
-  if (!apiError?.message) {
-    return error instanceof Error ? error.message : "The API request failed.";
-  }
-
-  const aiProviderMessages = apiError.details?.AiProvider;
-  if (aiProviderMessages?.length) {
-    const providerMessage = aiProviderMessages.join(" ");
-    if (providerMessage.toLowerCase().includes("unavailable")) {
-      return `AI provider unavailable: ${providerMessage} Check AI settings, then run diagnostics. Existing workflow state was kept.`;
-    }
-
-    if (isInvalidAiOutputMessage(providerMessage)) {
-      return `AI provider returned invalid output: ${providerMessage} Existing workflow state was kept.`;
-    }
-
-    return `AI provider failed: ${providerMessage} Existing workflow state was kept.`;
-  }
-
-  const details = apiError.details
-    ? Object.entries(apiError.details)
-        .flatMap(([field, messages]) => messages.map((message) => `${field}: ${message}`))
-        .join(" ")
-    : "";
-
-  return details ? `${apiError.message} ${details}` : apiError.message;
 }
 
 function fileNameFromContentDisposition(header: string | null, fallback: string): string {
@@ -1495,38 +1736,6 @@ function isFakeProvider(status: AiProviderStatus): boolean {
   return status.provider.toLowerCase() === "fake";
 }
 
-function isInvalidAiOutputMessage(message: string): boolean {
-  const normalized = message.toLowerCase();
-
-  return (
-    normalized.includes("invalid") ||
-    normalized.includes("malformed") ||
-    normalized.includes("empty response") ||
-    normalized.includes("incomplete") ||
-    normalized.includes("duplicate")
-  );
-}
-
-function draftGenerationMessage(
-  selectedApplicationId: string | null,
-  hasSavedJobPosting: boolean,
-  hasSavedApprovedEvidence: boolean
-): string {
-  if (!selectedApplicationId) {
-    return "Save the application before generating a draft.";
-  }
-
-  if (!hasSavedJobPosting) {
-    return "Add and save job posting text before generating a draft.";
-  }
-
-  if (!hasSavedApprovedEvidence) {
-    return "Save approved evidence before generating a draft.";
-  }
-
-  return "Generate or edit the current cover letter and short motivation.";
-}
-
 function claimAuditMessage(hasGeneratedDraft: boolean): string {
   return hasGeneratedDraft
     ? "Run claim audit after reviewing the generated text."
@@ -1551,6 +1760,144 @@ function auditReadinessForDraft(draft: GeneratedDraft | null): string {
 
 function readinessLabel(readiness: string): string {
   return readiness === "NotApplicable" ? "not applicable" : readiness.toLowerCase();
+}
+
+function approvedEvidenceCountLabel(count: number): string {
+  return count === 1 ? "1 approved evidence item" : `${count} approved evidence items`;
+}
+
+function auditReadinessLabel(readiness: string): string {
+  return `Audit ${readinessLabel(readiness)}`;
+}
+
+function auditReadinessTone(readiness: string): string {
+  switch (readiness) {
+    case "Current":
+      return "approved";
+    case "Stale":
+    case "Missing":
+      return "pending";
+    default:
+      return "neutral";
+  }
+}
+
+function applicationHistoryLabel(status: string): string {
+  if (status === "Applied") {
+    return "Applied";
+  }
+
+  if (status === "Archived") {
+    return "Archived";
+  }
+
+  return "Active";
+}
+
+function applicationHistoryTone(status: string): string {
+  if (status === "Applied") {
+    return "applied";
+  }
+
+  if (status === "Archived") {
+    return "archived";
+  }
+
+  return "active-work";
+}
+
+function applicationStatusClass(status: string): string {
+  if (status === "Applied") {
+    return "applied";
+  }
+
+  if (status === "Archived") {
+    return "archived";
+  }
+
+  return "active-work";
+}
+
+function applicationStatusLabel(status: string): string {
+  switch (status) {
+    case "PostingCaptured":
+      return "Posting captured";
+    case "ReadyForReview":
+      return "Ready for review";
+    default:
+      return status;
+  }
+}
+
+function profileFactStatusLabel(status: string): string {
+  switch (status) {
+    case "Draft":
+      return "Draft evidence";
+    case "Approved":
+      return "Approved evidence";
+    case "Archived":
+      return "Archived evidence";
+    default:
+      return status;
+  }
+}
+
+function customFactStatusLabel(status: string): string {
+  switch (status) {
+    case "PendingConfirmation":
+      return "Pending confirmation";
+    case "Approved":
+      return "Approved custom fact";
+    case "Rejected":
+      return "Rejected custom fact";
+    default:
+      return status;
+  }
+}
+
+function customFactStatusClass(status: string): string {
+  switch (status) {
+    case "PendingConfirmation":
+      return "pending";
+    case "Approved":
+      return "approved";
+    case "Rejected":
+      return "rejected";
+    default:
+      return "neutral";
+  }
+}
+
+function customFactStatusTone(status: string): string {
+  switch (status) {
+    case "PendingConfirmation":
+      return "pending";
+    case "Approved":
+      return "approved";
+    case "Rejected":
+      return "rejected";
+    default:
+      return "neutral";
+  }
+}
+
+function statusTone(status: string): string {
+  switch (status) {
+    case "Draft":
+      return "draft";
+    case "Approved":
+      return "approved";
+    case "Archived":
+      return "archived";
+    default:
+      return "neutral";
+  }
+}
+
+function applicationHistoryEmptyMessage(includeArchived: boolean): string {
+  return includeArchived
+    ? "No application sessions yet."
+    : "No active application sessions yet. Create one here, or include archived sessions to review older work.";
 }
 
 function summarizeClaimAudit(audit: ClaimAudit) {
@@ -1634,6 +1981,10 @@ function pageTitle(view: View): string {
 
 function titleCase(value: string): string {
   return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`;
+}
+
+function disabledTitle(isDisabled: boolean, reason: string | null | undefined): string | undefined {
+  return isDisabled && reason ? reason : undefined;
 }
 
 function formatDate(value: string): string {

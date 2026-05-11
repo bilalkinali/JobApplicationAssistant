@@ -15,6 +15,11 @@ export type CoverLetterExportState = {
   reason: string | null;
 };
 
+export type AuditExportNotice = {
+  tone: "warning" | "neutral";
+  message: string;
+};
+
 export type CoverLetterExportOptions = {
   clipboardAvailable?: boolean;
   currentCoverLetterText?: string;
@@ -58,17 +63,27 @@ export function getCoverLetterExportState(
 }
 
 export function getAuditExportWarning(application: ExportApplication | null | undefined): string | null {
+  return getAuditExportNotice(application)?.message ?? null;
+}
+
+export function getAuditExportNotice(application: ExportApplication | null | undefined): AuditExportNotice | null {
   const draft = application?.generatedDraft;
   if (!draft) {
     return null;
   }
 
   if (draft.isClaimAuditStale) {
-    return "Claim audit is stale. You can export, but re-run audit before sending if you want the latest trust check.";
+    return {
+      tone: "warning",
+      message: "Claim audit is stale. You can export, but re-run audit before sending if you want the latest trust check."
+    };
   }
 
   if (!draft.auditUpdatedAt || draft.claimAudit === "{}") {
-    return "Claim audit has not been run. You can export, but this draft has not been checked against approved evidence yet.";
+    return {
+      tone: "neutral",
+      message: "Claim audit has not been run. You can export, but this draft has not been checked against approved evidence yet."
+    };
   }
 
   return null;

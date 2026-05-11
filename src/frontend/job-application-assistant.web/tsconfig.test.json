@@ -7,5 +7,5 @@
     "outDir": "./dist-test",
     "rootDir": "./src"
   },
-  "include": ["src/exportControls.ts"]
+  "include": ["src/errorPresentation.ts", "src/exportControls.ts", "src/readiness.ts"]
 }

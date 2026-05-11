@@ -24,6 +24,7 @@ public sealed record ApplicationResponse(
     string EvidenceMatches,
     string UnmatchedRequirements,
     string ApprovedEvidence,
+    string CustomFacts,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     GeneratedDraftResponse? GeneratedDraft,
