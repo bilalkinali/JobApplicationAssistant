@@ -767,6 +767,182 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task GenerateDraft_with_ollama_persists_current_draft_and_records_successful_ai_run()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaDraftGenerationJson()) }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.", "English");
+        await MarkApplicationReadyForDraftAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var draft = await response.Content.ReadFromJsonAsync<GeneratedDraftResponse>();
+        Assert.NotNull(draft);
+        Assert.Equal("Ollama cover letter from approved API evidence.", draft.CoverLetterText);
+        Assert.Equal("Ollama short motivation.", draft.ShortMotivationText);
+        Assert.Null(draft.AuditUpdatedAt);
+
+        var ollamaRequestJson = await Assert.Single(handler.Requests).Content!.ReadAsStringAsync();
+        Assert.Contains("\"format\":\"json\"", ollamaRequestJson);
+        Assert.Contains("Return only strict JSON", ollamaRequestJson);
+        Assert.Contains("Approved API work", ollamaRequestJson);
+        Assert.Contains("honest learning area", ollamaRequestJson);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("DraftGeneration", run.Step);
+        Assert.Equal("Ollama", run.Provider);
+        Assert.Equal("Succeeded", run.Status);
+        Assert.Equal(1, run.AttemptCount);
+        Assert.Null(run.ErrorCode);
+    }
+
+    [Fact]
+    public async Task GenerateDraft_with_ollama_repairs_structurally_invalid_json_once()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent("""{"coverLetterText":"","shortMotivationText":""}""") },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaDraftGenerationJson()) }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.", "English");
+        await MarkApplicationReadyForDraftAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        Assert.Equal(2, handler.Requests.Count);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("RepairedSucceeded", run.Status);
+        Assert.Equal(2, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task GenerateDraft_with_ollama_repairs_malformed_json_once()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent("{ malformed") },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaDraftGenerationJson()) }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.", "English");
+        await MarkApplicationReadyForDraftAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        Assert.Equal(2, handler.Requests.Count);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("RepairedSucceeded", run.Status);
+        Assert.Equal(2, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task GenerateDraft_with_ollama_invalid_output_after_repair_records_failure_and_does_not_mutate_existing_draft()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent("{ malformed") },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent("""{"coverLetterText":"","shortMotivationText":""}""") }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.", "English");
+        await MarkApplicationReadyForDraftAsync(factory, application.Id);
+        var existingDraft = await AddGeneratedDraftAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var reopenedResponse = await client.GetAsync($"/api/applications/{application.Id}");
+        reopenedResponse.EnsureSuccessStatusCode();
+        var reopened = await reopenedResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(reopened);
+        Assert.NotNull(reopened.GeneratedDraft);
+        Assert.Equal(existingDraft.Id, reopened.GeneratedDraft.Id);
+        Assert.Equal(existingDraft.CoverLetterText, reopened.GeneratedDraft.CoverLetterText);
+        Assert.Equal(existingDraft.ShortMotivationText, reopened.GeneratedDraft.ShortMotivationText);
+        Assert.Equal(existingDraft.ClaimAudit, reopened.GeneratedDraft.ClaimAudit);
+        Assert.Equal(existingDraft.AuditUpdatedAt, reopened.GeneratedDraft.AuditUpdatedAt);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("InvalidOutput", run.ErrorCode);
+        Assert.Equal(2, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task GenerateDraft_with_unavailable_ollama_records_failure()
+    {
+        await using var factory = new TestApplicationFactory()
+            .WithOllamaResponses([new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                ReasonPhrase = "Service Unavailable"
+            }]);
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.", "English");
+        await MarkApplicationReadyForDraftAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+        Assert.Equal("DraftGeneration", run.Step);
+        Assert.Equal("Ollama", run.Provider);
+        Assert.Equal("llama3.1:8b", run.Model);
+        Assert.Equal(1, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task GenerateDraft_with_ollama_updates_existing_draft_as_latest_state()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaDraftGenerationJson()) }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.", "English");
+        await MarkApplicationReadyForDraftAsync(factory, application.Id);
+        var existingDraft = await AddGeneratedDraftAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var draft = await response.Content.ReadFromJsonAsync<GeneratedDraftResponse>();
+        Assert.NotNull(draft);
+        Assert.Equal(existingDraft.Id, draft.Id);
+        Assert.Equal(existingDraft.CreatedAt, draft.CreatedAt);
+        Assert.Equal("Ollama cover letter from approved API evidence.", draft.CoverLetterText);
+        Assert.Equal("Ollama short motivation.", draft.ShortMotivationText);
+        Assert.Equal("{}", draft.ClaimAudit);
+        Assert.Null(draft.AuditUpdatedAt);
+    }
+
+    [Fact]
     public async Task GetApplication_includes_current_generated_draft_when_one_exists()
     {
         await using var factory = new TestApplicationFactory();
@@ -918,6 +1094,147 @@ public sealed class ApplicationWorkflowApiTests
         Assert.False(reopened.GeneratedDraft.IsClaimAuditStale);
     }
 
+    [Fact]
+    public async Task AuditClaims_with_ollama_persists_structured_results_and_records_successful_ai_run()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaClaimAuditJson("match-dotnet-test")) }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var draft = await CreateGeneratedDraftForOllamaAuditAsync(factory, client, "match-dotnet-test");
+
+        var response = await client.PostAsync($"/api/applications/{draft.JobApplicationId}/audit-claims", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var audited = await response.Content.ReadFromJsonAsync<GeneratedDraftResponse>();
+        Assert.NotNull(audited);
+        Assert.NotNull(audited.AuditUpdatedAt);
+        Assert.False(audited.IsClaimAuditStale);
+        var audit = JsonSerializer.Deserialize<ClaimAuditResult>(audited.ClaimAudit, JsonOptions);
+        Assert.NotNull(audit);
+        Assert.Contains(audit.Claims, claim => claim.Status == "Supported" && claim.EvidenceIds.Contains("match-dotnet-test"));
+        Assert.Contains(audit.Claims, claim => claim.Status == "Unsupported");
+        Assert.Contains(audit.Claims, claim => claim.Status == "NeedsReview");
+
+        var ollamaRequestJson = await Assert.Single(handler.Requests).Content!.ReadAsStringAsync();
+        Assert.Contains("Return only strict JSON", ollamaRequestJson);
+        Assert.Contains("match-dotnet-test", ollamaRequestJson);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("ClaimAudit", run.Step);
+        Assert.Equal("Succeeded", run.Status);
+        Assert.Equal(1, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task AuditClaims_with_ollama_repairs_unknown_evidence_reference_once()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaClaimAuditJson("unknown-match")) },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaClaimAuditJson("match-dotnet-test")) }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var draft = await CreateGeneratedDraftForOllamaAuditAsync(factory, client, "match-dotnet-test");
+
+        var response = await client.PostAsync($"/api/applications/{draft.JobApplicationId}/audit-claims", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        Assert.Equal(2, handler.Requests.Count);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("RepairedSucceeded", run.Status);
+        Assert.Equal(2, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task AuditClaims_with_ollama_repairs_malformed_json_once()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent("{ malformed") },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaClaimAuditJson("match-dotnet-test")) }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var draft = await CreateGeneratedDraftForOllamaAuditAsync(factory, client, "match-dotnet-test");
+
+        var response = await client.PostAsync($"/api/applications/{draft.JobApplicationId}/audit-claims", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        Assert.Equal(2, handler.Requests.Count);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("RepairedSucceeded", run.Status);
+        Assert.Equal(2, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task AuditClaims_with_ollama_invalid_output_after_repair_records_failure_and_does_not_mutate_existing_audit()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent("{ malformed") },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent("""{"claims":[{"id":"claim-1","text":"Broken","status":"Maybe","evidenceIds":[]}]}""") }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var draft = await CreateGeneratedDraftForOllamaAuditAsync(factory, client, "match-dotnet-test");
+        await MarkDraftAuditedAsync(factory, draft.Id);
+
+        var response = await client.PostAsync($"/api/applications/{draft.JobApplicationId}/audit-claims", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var reopenedResponse = await client.GetAsync($"/api/applications/{draft.JobApplicationId}");
+        reopenedResponse.EnsureSuccessStatusCode();
+        var reopened = await reopenedResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(reopened?.GeneratedDraft);
+        Assert.Equal("""{"status":"current"}""", reopened.GeneratedDraft.ClaimAudit);
+        Assert.NotNull(reopened.GeneratedDraft.AuditUpdatedAt);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("InvalidOutput", run.ErrorCode);
+        Assert.Equal(2, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task AuditClaims_with_unavailable_ollama_records_failure()
+    {
+        await using var factory = new TestApplicationFactory()
+            .WithOllamaResponses([new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                ReasonPhrase = "Service Unavailable"
+            }]);
+        using var client = factory.CreateClient();
+        var draft = await CreateGeneratedDraftForOllamaAuditAsync(factory, client, "match-dotnet-test");
+
+        var response = await client.PostAsync($"/api/applications/{draft.JobApplicationId}/audit-claims", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+        Assert.Equal("ClaimAudit", run.Step);
+        Assert.Equal("Ollama", run.Provider);
+        Assert.Equal("llama3.1:8b", run.Model);
+        Assert.Equal(1, run.AttemptCount);
+    }
+
     private static async Task<ApplicationResponse> CreateApplicationAsync(
         HttpClient client,
         string jobPostingText,
@@ -961,6 +1278,129 @@ public sealed class ApplicationWorkflowApiTests
         return draft;
     }
 
+    private static async Task MarkApplicationReadyForDraftAsync(WebApplicationFactory<Program> factory, Guid applicationId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var application = await db.JobApplications.FindAsync(applicationId);
+        Assert.NotNull(application);
+        application.ApprovedEvidence = JsonSerializer.Serialize(
+            new[]
+            {
+                new EvidenceMatch(
+                    "match-dotnet-test",
+                    "dotnet",
+                    ".NET",
+                    "RequiredSkill",
+                    Guid.NewGuid(),
+                    "Approved API work",
+                    "Approved API work demonstrates .NET delivery.",
+                    [".NET"])
+            },
+            JsonOptions);
+        application.UnmatchedRequirements = JsonSerializer.Serialize(
+            new[]
+            {
+                new UnmatchedRequirement(
+                    "unmatched-kubernetes",
+                    "kubernetes",
+                    "Kubernetes",
+                    "PreferredSkill",
+                    "Mention Kubernetes as an honest learning area.")
+            },
+            JsonOptions);
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task<GeneratedDraftResponse> CreateGeneratedDraftForOllamaAuditAsync(
+        WebApplicationFactory<Program> factory,
+        HttpClient client,
+        string evidenceId)
+    {
+        var application = await CreateApplicationAsync(client, "We need .NET.", "English");
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var stored = await db.JobApplications.FindAsync(application.Id);
+        Assert.NotNull(stored);
+        stored.ApprovedEvidence = JsonSerializer.Serialize(
+            new[]
+            {
+                new EvidenceMatch(
+                    evidenceId,
+                    "dotnet",
+                    ".NET",
+                    "RequiredSkill",
+                    Guid.NewGuid(),
+                    "Approved API work",
+                    "Approved API work demonstrates .NET delivery.",
+                    [".NET"])
+            },
+            JsonOptions);
+        var now = DateTimeOffset.UtcNow;
+        var draft = new GeneratedDraft
+        {
+            Id = Guid.NewGuid(),
+            JobApplicationId = stored.Id,
+            CoverLetterText = "I delivered .NET APIs. I led Kubernetes operations. I may be a fit.",
+            ShortMotivationText = "I am interested in this .NET role.",
+            ClaimAudit = "{}",
+            GeneratedAt = now,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        db.GeneratedDrafts.Add(draft);
+        await db.SaveChangesAsync();
+
+        return new GeneratedDraftResponse(
+            draft.Id,
+            draft.JobApplicationId,
+            draft.CoverLetterText,
+            draft.ShortMotivationText,
+            draft.ClaimAudit,
+            draft.GeneratedAt,
+            draft.LastEditedAt,
+            draft.AuditUpdatedAt,
+            draft.CreatedAt,
+            draft.UpdatedAt,
+            draft.IsClaimAuditStale);
+    }
+
+    private static async Task<GeneratedDraftResponse> AddGeneratedDraftAsync(
+        WebApplicationFactory<Program> factory,
+        Guid applicationId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var draft = new GeneratedDraft
+        {
+            Id = Guid.NewGuid(),
+            JobApplicationId = applicationId,
+            CoverLetterText = "Existing cover letter.",
+            ShortMotivationText = "Existing motivation.",
+            ClaimAudit = """{"status":"current"}""",
+            GeneratedAt = now,
+            AuditUpdatedAt = now,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        db.GeneratedDrafts.Add(draft);
+        await db.SaveChangesAsync();
+
+        return new GeneratedDraftResponse(
+            draft.Id,
+            draft.JobApplicationId,
+            draft.CoverLetterText,
+            draft.ShortMotivationText,
+            draft.ClaimAudit,
+            draft.GeneratedAt,
+            draft.LastEditedAt,
+            draft.AuditUpdatedAt,
+            draft.CreatedAt,
+            draft.UpdatedAt,
+            draft.IsClaimAuditStale);
+    }
+
     private static async Task MarkApplicationAnalyzedAsync(WebApplicationFactory<Program> factory, Guid applicationId)
     {
         using var scope = factory.Services.CreateScope();
@@ -983,7 +1423,7 @@ public sealed class ApplicationWorkflowApiTests
         await db.SaveChangesAsync();
     }
 
-    private static async Task MarkDraftAuditedAsync(TestApplicationFactory factory, Guid draftId)
+    private static async Task MarkDraftAuditedAsync(WebApplicationFactory<Program> factory, Guid draftId)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
@@ -1057,6 +1497,40 @@ public sealed class ApplicationWorkflowApiTests
             {
               "signalId": "kubernetes",
               "recommendation": "Treat Kubernetes as an honest learning area."
+            }
+          ]
+        }
+        """;
+
+    private static string ValidOllamaDraftGenerationJson() =>
+        """
+        {
+          "coverLetterText": "Ollama cover letter from approved API evidence.",
+          "shortMotivationText": "Ollama short motivation."
+        }
+        """;
+
+    private static string ValidOllamaClaimAuditJson(string evidenceId) =>
+        $$"""
+        {
+          "claims": [
+            {
+              "id": "claim-1",
+              "text": "I delivered .NET APIs.",
+              "status": "Supported",
+              "evidenceIds": ["{{evidenceId}}"]
+            },
+            {
+              "id": "claim-2",
+              "text": "I led Kubernetes operations.",
+              "status": "Unsupported",
+              "evidenceIds": []
+            },
+            {
+              "id": "claim-3",
+              "text": "I may be a fit.",
+              "status": "NeedsReview",
+              "evidenceIds": []
             }
           ]
         }

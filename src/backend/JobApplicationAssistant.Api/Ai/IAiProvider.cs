@@ -75,7 +75,10 @@ public sealed record DraftGenerationInput(
 
 public sealed record DraftGenerationResult(
     string CoverLetterText,
-    string ShortMotivationText);
+    string ShortMotivationText)
+{
+    public int AttemptCount { get; init; } = 1;
+}
 
 public sealed record ClaimAuditInput(
     string CoverLetterText,
@@ -83,7 +86,10 @@ public sealed record ClaimAuditInput(
     IReadOnlyList<EvidenceMatch> ApprovedEvidence);
 
 public sealed record ClaimAuditResult(
-    IReadOnlyList<ClaimAuditClaim> Claims);
+    IReadOnlyList<ClaimAuditClaim> Claims)
+{
+    public int AttemptCount { get; init; } = 1;
+}
 
 public sealed record ClaimAuditClaim(
     string Id,

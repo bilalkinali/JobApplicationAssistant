@@ -1,6 +1,6 @@
 # Ollama Draft Generation and Claim Audit JSON Repair
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -17,25 +17,25 @@ This slice should not add export, streaming generation, draft history, provider 
 
 ## Acceptance criteria
 
-- [ ] Ollama draft generation is available through the existing draft generation workflow action when Ollama is configured.
-- [ ] The draft generation prompt is stored as a backend markdown file.
-- [ ] The Ollama draft generation request asks for strict JSON containing cover letter text and short motivation text.
-- [ ] Valid Ollama draft generation persists one latest-state `GeneratedDraft`.
-- [ ] Draft generation remains blocked with a plain validation error when there is no job posting text.
-- [ ] Draft generation remains blocked with a plain validation error when there is no approved evidence.
-- [ ] Draft generation output validation rejects missing or empty draft text.
-- [ ] Ollama claim audit is available through the existing claim audit workflow action when Ollama is configured.
-- [ ] The claim audit prompt is stored as a backend markdown file.
-- [ ] The Ollama claim audit request asks for strict JSON containing supported, unsupported, and needs-review claim results.
-- [ ] Valid Ollama claim audit stores structured audit results on the current generated draft.
-- [ ] Claim audit remains blocked with a plain validation error when no generated draft exists.
-- [ ] Claim audit output validation rejects unknown claim statuses and unknown evidence references.
-- [ ] Malformed JSON receives exactly one repair attempt for both operations.
-- [ ] Structurally invalid JSON receives exactly one repair attempt for both operations.
-- [ ] Existing draft and audit state are not mutated when output remains invalid after repair.
-- [ ] `AiRun` records success, repaired success, unavailable provider failure, and invalid output failure for both operations.
-- [ ] Backend tests cover valid generation, valid audit, unavailable provider, repair behavior, unchanged state on failure, and `AiRun` records.
-- [ ] No export, streaming generation, draft history, provider settings editing, or custom fact normalization is introduced.
+- [x] Ollama draft generation is available through the existing draft generation workflow action when Ollama is configured.
+- [x] The draft generation prompt is stored as a backend markdown file.
+- [x] The Ollama draft generation request asks for strict JSON containing cover letter text and short motivation text.
+- [x] Valid Ollama draft generation persists one latest-state `GeneratedDraft`.
+- [x] Draft generation remains blocked with a plain validation error when there is no job posting text.
+- [x] Draft generation remains blocked with a plain validation error when there is no approved evidence.
+- [x] Draft generation output validation rejects missing or empty draft text.
+- [x] Ollama claim audit is available through the existing claim audit workflow action when Ollama is configured.
+- [x] The claim audit prompt is stored as a backend markdown file.
+- [x] The Ollama claim audit request asks for strict JSON containing supported, unsupported, and needs-review claim results.
+- [x] Valid Ollama claim audit stores structured audit results on the current generated draft.
+- [x] Claim audit remains blocked with a plain validation error when no generated draft exists.
+- [x] Claim audit output validation rejects unknown claim statuses and unknown evidence references.
+- [x] Malformed JSON receives exactly one repair attempt for both operations.
+- [x] Structurally invalid JSON receives exactly one repair attempt for both operations.
+- [x] Existing draft and audit state are not mutated when output remains invalid after repair.
+- [x] `AiRun` records success, repaired success, unavailable provider failure, and invalid output failure for both operations.
+- [x] Backend tests cover valid generation, valid audit, unavailable provider, repair behavior, unchanged state on failure, and `AiRun` records.
+- [x] No export, streaming generation, draft history, provider settings editing, or custom fact normalization is introduced.
 
 ## Blocked by
 

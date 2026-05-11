@@ -8,6 +8,8 @@ public sealed class OllamaAiProvider : IAiProvider
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly string JobAnalysisPrompt = LoadPrompt("job-analysis.md");
     private static readonly string EvidenceMatchingPrompt = LoadPrompt("evidence-matching.md");
+    private static readonly string DraftGenerationPrompt = LoadPrompt("draft-generation.md");
+    private static readonly string ClaimAuditPrompt = LoadPrompt("claim-audit.md");
 
     private readonly HttpClient httpClient;
     private readonly AiOptions options;
@@ -105,11 +107,33 @@ public sealed class OllamaAiProvider : IAiProvider
         }
     }
 
-    public Task<DraftGenerationResult> GenerateDraftAsync(DraftGenerationInput input, CancellationToken ct) =>
-        throw new NotSupportedException("Ollama workflow operations are not implemented in this milestone slice.");
+    public async Task<DraftGenerationResult> GenerateDraftAsync(DraftGenerationInput input, CancellationToken ct)
+    {
+        var responseText = await GenerateAsync(BuildDraftGenerationPrompt(input), attemptCount: 1, ct);
+        try
+        {
+            return ParseDraftGeneration(responseText, attemptCount: 1);
+        }
+        catch (AiInvalidOutputException firstFailure)
+        {
+            var repairedText = await GenerateAsync(BuildDraftGenerationRepairPrompt(responseText, firstFailure.Message), attemptCount: 2, ct);
+            return ParseDraftGeneration(repairedText, attemptCount: 2);
+        }
+    }
 
-    public Task<ClaimAuditResult> AuditClaimsAsync(ClaimAuditInput input, CancellationToken ct) =>
-        throw new NotSupportedException("Ollama workflow operations are not implemented in this milestone slice.");
+    public async Task<ClaimAuditResult> AuditClaimsAsync(ClaimAuditInput input, CancellationToken ct)
+    {
+        var responseText = await GenerateAsync(BuildClaimAuditPrompt(input), attemptCount: 1, ct);
+        try
+        {
+            return ParseClaimAudit(responseText, input, attemptCount: 1);
+        }
+        catch (AiInvalidOutputException firstFailure)
+        {
+            var repairedText = await GenerateAsync(BuildClaimAuditRepairPrompt(responseText, firstFailure.Message), attemptCount: 2, ct);
+            return ParseClaimAudit(repairedText, input, attemptCount: 2);
+        }
+    }
 
     private AiDiagnosticsResult Unavailable(string message, IReadOnlyList<AiDiagnosticCheck> checks) =>
         new("Ollama", options.Model, options.Endpoint, false, message, checks);
@@ -333,6 +357,83 @@ public sealed class OllamaAiProvider : IAiProvider
         };
     }
 
+    private static DraftGenerationResult ParseDraftGeneration(string responseText, int attemptCount)
+    {
+        OllamaDraftGenerationResponse? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<OllamaDraftGenerationResponse>(responseText, JsonOptions);
+        }
+        catch (JsonException exception)
+        {
+            throw new AiInvalidOutputException("Ollama returned malformed draft generation JSON.", attemptCount, exception);
+        }
+
+        if (payload is null ||
+            string.IsNullOrWhiteSpace(payload.CoverLetterText) ||
+            string.IsNullOrWhiteSpace(payload.ShortMotivationText))
+        {
+            throw new AiInvalidOutputException("Ollama returned structurally invalid draft generation JSON.", attemptCount);
+        }
+
+        return new DraftGenerationResult(
+            payload.CoverLetterText.Trim(),
+            payload.ShortMotivationText.Trim())
+        {
+            AttemptCount = attemptCount
+        };
+    }
+
+    private static ClaimAuditResult ParseClaimAudit(string responseText, ClaimAuditInput input, int attemptCount)
+    {
+        OllamaClaimAuditResponse? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<OllamaClaimAuditResponse>(responseText, JsonOptions);
+        }
+        catch (JsonException exception)
+        {
+            throw new AiInvalidOutputException("Ollama returned malformed claim audit JSON.", attemptCount, exception);
+        }
+
+        if (payload?.Claims is null)
+        {
+            throw new AiInvalidOutputException("Ollama returned structurally invalid claim audit JSON.", attemptCount);
+        }
+
+        var approvedEvidenceIds = input.ApprovedEvidence
+            .Select(evidence => evidence.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var claims = new List<ClaimAuditClaim>();
+        var claimIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var claim in payload.Claims)
+        {
+            if (claim is null ||
+                string.IsNullOrWhiteSpace(claim.Id) ||
+                string.IsNullOrWhiteSpace(claim.Text) ||
+                string.IsNullOrWhiteSpace(claim.Status) ||
+                claim.EvidenceIds is null ||
+                !IsSupportedClaimStatus(claim.Status) ||
+                claim.EvidenceIds.Any(evidenceId => string.IsNullOrWhiteSpace(evidenceId) || !approvedEvidenceIds.Contains(evidenceId.Trim())) ||
+                !claimIds.Add(claim.Id.Trim()))
+            {
+                throw new AiInvalidOutputException("Ollama returned structurally invalid claim audit JSON.", attemptCount);
+            }
+
+            claims.Add(new ClaimAuditClaim(
+                claim.Id.Trim(),
+                claim.Text.Trim(),
+                NormalizeClaimStatus(claim.Status),
+                claim.EvidenceIds.Select(evidenceId => evidenceId.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList()));
+        }
+
+        return new ClaimAuditResult(claims)
+        {
+            AttemptCount = attemptCount
+        };
+    }
+
     private static string BuildJobAnalysisPrompt(JobAnalysisInput input) =>
         $"""
         {JobAnalysisPrompt}
@@ -377,6 +478,76 @@ public sealed class OllamaAiProvider : IAiProvider
         """;
     }
 
+    private static string BuildDraftGenerationPrompt(DraftGenerationInput input)
+    {
+        var approvedEvidence = input.ApprovedEvidence.Select(evidence => new
+        {
+            evidence.Id,
+            evidence.SignalId,
+            evidence.Signal,
+            evidence.Category,
+            evidence.ProfileFactTitle,
+            evidence.Summary,
+            evidence.MatchedTerms
+        });
+        var unmatchedRequirements = input.UnmatchedRequirements.Select(requirement => new
+        {
+            requirement.Id,
+            requirement.SignalId,
+            requirement.Requirement,
+            requirement.Category,
+            requirement.Recommendation
+        });
+
+        return $"""
+        {DraftGenerationPrompt}
+
+        Application context:
+        {JsonSerializer.Serialize(new
+        {
+            input.CompanyName,
+            input.RoleTitle,
+            input.SelectedLanguage,
+            input.ApplicantName,
+            input.TonePreference
+        }, JsonOptions)}
+
+        Approved evidence:
+        {JsonSerializer.Serialize(approvedEvidence, JsonOptions)}
+
+        Unmatched requirements:
+        {JsonSerializer.Serialize(unmatchedRequirements, JsonOptions)}
+        """;
+    }
+
+    private static string BuildClaimAuditPrompt(ClaimAuditInput input)
+    {
+        var approvedEvidence = input.ApprovedEvidence.Select(evidence => new
+        {
+            evidence.Id,
+            evidence.SignalId,
+            evidence.Signal,
+            evidence.Category,
+            evidence.ProfileFactTitle,
+            evidence.Summary,
+            evidence.MatchedTerms
+        });
+
+        return $"""
+        {ClaimAuditPrompt}
+
+        Draft:
+        {JsonSerializer.Serialize(new
+        {
+            input.CoverLetterText,
+            input.ShortMotivationText
+        }, JsonOptions)}
+
+        Approved evidence:
+        {JsonSerializer.Serialize(approvedEvidence, JsonOptions)}
+        """;
+    }
+
     private static string BuildRepairPrompt(string invalidJson, string validationError) =>
         $"""
         Repair this job analysis JSON so it matches the required contract exactly.
@@ -401,6 +572,30 @@ public sealed class OllamaAiProvider : IAiProvider
         {invalidJson}
         """;
 
+    private static string BuildDraftGenerationRepairPrompt(string invalidJson, string validationError) =>
+        $"""
+        Repair this draft generation JSON so it matches the required contract exactly.
+        Return only strict JSON. Do not include markdown.
+
+        Validation error:
+        {validationError}
+
+        Invalid JSON:
+        {invalidJson}
+        """;
+
+    private static string BuildClaimAuditRepairPrompt(string invalidJson, string validationError) =>
+        $"""
+        Repair this claim audit JSON so it matches the required contract exactly.
+        Return only strict JSON. Do not include markdown.
+
+        Validation error:
+        {validationError}
+
+        Invalid JSON:
+        {invalidJson}
+        """;
+
     private static bool IsSupportedLanguage(string language) =>
         string.Equals(language.Trim(), "English", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(language.Trim(), "Danish", StringComparison.OrdinalIgnoreCase);
@@ -412,6 +607,19 @@ public sealed class OllamaAiProvider : IAiProvider
         string.Equals(category.Trim(), "RequiredSkill", StringComparison.Ordinal) ||
         string.Equals(category.Trim(), "PreferredSkill", StringComparison.Ordinal) ||
         string.Equals(category.Trim(), "Responsibility", StringComparison.Ordinal);
+
+    private static bool IsSupportedClaimStatus(string status) =>
+        string.Equals(status.Trim(), "Supported", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status.Trim(), "Unsupported", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status.Trim(), "NeedsReview", StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeClaimStatus(string status) =>
+        status.Trim().ToLowerInvariant() switch
+        {
+            "supported" => "Supported",
+            "unsupported" => "Unsupported",
+            _ => "NeedsReview"
+        };
 
     private static string LoadPrompt(string fileName)
     {
@@ -457,4 +665,17 @@ public sealed class OllamaAiProvider : IAiProvider
     private sealed record OllamaUnmatchedRequirementResponse(
         string SignalId,
         string Recommendation);
+
+    private sealed record OllamaDraftGenerationResponse(
+        string CoverLetterText,
+        string ShortMotivationText);
+
+    private sealed record OllamaClaimAuditResponse(
+        IReadOnlyList<OllamaClaimAuditClaimResponse> Claims);
+
+    private sealed record OllamaClaimAuditClaimResponse(
+        string Id,
+        string Text,
+        string Status,
+        IReadOnlyList<string> EvidenceIds);
 }
