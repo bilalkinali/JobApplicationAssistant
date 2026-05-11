@@ -2,29 +2,84 @@ using JobApplicationAssistant.Api.Ai;
 using JobApplicationAssistant.Api.Contracts;
 using JobApplicationAssistant.Api.Data;
 using JobApplicationAssistant.Api.Domain;
+using JobApplicationAssistant.Api.Exports;
 using Microsoft.EntityFrameworkCore;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace JobApplicationAssistant.Api.Endpoints;
 
 public static class ApplicationEndpoints
 {
     private static readonly string[] ValidStatuses = ["Draft", "PostingCaptured", "ReadyForReview", "Applied", "Archived"];
+    private static readonly string[] ValidAuditReadiness = ["Current", "Stale", "Missing", "NotApplicable"];
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public static IEndpointRouteBuilder MapApplicationEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/applications");
 
-        group.MapGet(string.Empty, async (ApplicationDbContext db, CancellationToken ct) =>
+        group.MapGet(string.Empty, async (
+            string? search,
+            string? status,
+            string? readiness,
+            bool? includeArchived,
+            ApplicationDbContext db,
+            CancellationToken ct) =>
         {
-            var applications = await db.JobApplications
+            var normalizedStatus = NormalizeOptionalStatus(status);
+            var normalizedReadiness = NormalizeOptionalAuditReadiness(readiness);
+            if (normalizedStatus.IsInvalid || normalizedReadiness.IsInvalid)
+            {
+                var errors = new Dictionary<string, string[]>();
+                if (normalizedStatus.IsInvalid)
+                {
+                    errors[nameof(status)] = ["Status must be Draft, PostingCaptured, ReadyForReview, Applied, Archived, or All."];
+                }
+
+                if (normalizedReadiness.IsInvalid)
+                {
+                    errors[nameof(readiness)] = ["Readiness must be Current, Stale, Missing, NotApplicable, or All."];
+                }
+
+                return Results.BadRequest(ApiError.Validation(errors));
+            }
+
+            var query = db.JobApplications
                 .Include(application => application.GeneratedDraft)
+                .AsQueryable();
+
+            if (includeArchived != true)
+            {
+                query = query.Where(application => application.Status != "Archived");
+            }
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var normalizedSearch = search.Trim().ToLower();
+                query = query.Where(application =>
+                    application.CompanyName.ToLower().Contains(normalizedSearch) ||
+                    application.RoleTitle.ToLower().Contains(normalizedSearch));
+            }
+
+            if (normalizedStatus.Value is not null)
+            {
+                query = query.Where(application => application.Status == normalizedStatus.Value);
+            }
+
+            var applications = await query
                 .OrderByDescending(application => application.UpdatedAt)
-                .Select(application => ToResponse(application))
                 .ToListAsync(ct);
 
-            return Results.Ok(applications);
+            if (normalizedReadiness.Value is not null)
+            {
+                applications = applications
+                    .Where(application => GetAuditReadiness(application.GeneratedDraft) == normalizedReadiness.Value)
+                    .ToList();
+            }
+
+            return Results.Ok(applications.Select(ToResponse));
         });
 
         group.MapPost(string.Empty, async Task<IResult> (ApplicationRequest request, ApplicationDbContext db, CancellationToken ct) =>
@@ -111,6 +166,101 @@ public static class ApplicationEndpoints
             await db.SaveChangesAsync(ct);
 
             return Results.NoContent();
+        });
+
+        group.MapPut("/{id:guid}/status", async Task<IResult> (Guid id, ApplicationStatusRequest request, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var errors = ValidateFinalStatus(request);
+            if (errors.Count > 0)
+            {
+                return Results.BadRequest(ApiError.Validation(errors));
+            }
+
+            var application = await db.JobApplications
+                .Include(application => application.GeneratedDraft)
+                .FirstOrDefaultAsync(application => application.Id == id, ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            application.Status = NormalizeStatus(request.Status);
+            application.UpdatedAt = DateTimeOffset.UtcNow;
+
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(ToResponse(application));
+        });
+
+        group.MapGet("/{id:guid}/exports/cover-letter.txt", async Task<IResult> (Guid id, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var application = await db.JobApplications
+                .Include(application => application.GeneratedDraft)
+                .FirstOrDefaultAsync(application => application.Id == id, ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            if (application.GeneratedDraft is null)
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(ApplicationResponse.GeneratedDraft)] = ["Generate a draft before exporting the cover letter."]
+                }));
+            }
+
+            var coverLetterText = application.GeneratedDraft.CoverLetterText;
+            if (string.IsNullOrWhiteSpace(coverLetterText))
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(GeneratedDraftResponse.CoverLetterText)] = ["Cover letter text is required before export."]
+                }));
+            }
+
+            var fileName = BuildCoverLetterFileName(application);
+            return Results.File(
+                Encoding.UTF8.GetBytes(coverLetterText),
+                "text/plain; charset=utf-8",
+                fileName);
+        });
+
+        group.MapGet("/{id:guid}/exports/cover-letter.docx", async Task<IResult> (Guid id, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var application = await db.JobApplications
+                .Include(application => application.GeneratedDraft)
+                .FirstOrDefaultAsync(application => application.Id == id, ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            if (application.GeneratedDraft is null)
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(ApplicationResponse.GeneratedDraft)] = ["Generate a draft before exporting the cover letter."]
+                }));
+            }
+
+            var coverLetterText = application.GeneratedDraft.CoverLetterText;
+            if (string.IsNullOrWhiteSpace(coverLetterText))
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(GeneratedDraftResponse.CoverLetterText)] = ["Cover letter text is required before export."]
+                }));
+            }
+
+            var profile = await db.Profiles
+                .OrderBy(profile => profile.CreatedAt)
+                .FirstOrDefaultAsync(ct);
+            var fileName = BuildCoverLetterFileName(application, "docx");
+            return Results.File(
+                CoverLetterDocxExporter.Export(application, profile),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                fileName);
         });
 
         group.MapPost("/{id:guid}/analyze-job", async Task<IResult> (Guid id, ApplicationDbContext db, IAiProvider aiProvider, AiOptions aiOptions, CancellationToken ct) =>
@@ -562,7 +712,9 @@ public static class ApplicationEndpoints
             application.ApprovedEvidence,
             application.CreatedAt,
             application.UpdatedAt,
-            application.GeneratedDraft is null ? null : ToResponse(application.GeneratedDraft));
+            application.GeneratedDraft is null ? null : ToResponse(application.GeneratedDraft),
+            application.GeneratedDraft is not null,
+            GetAuditReadiness(application.GeneratedDraft));
 
     private static GeneratedDraftResponse ToResponse(GeneratedDraft draft) =>
         new(
@@ -604,6 +756,20 @@ public static class ApplicationEndpoints
         return errors;
     }
 
+    private static Dictionary<string, string[]> ValidateFinalStatus(ApplicationStatusRequest request)
+    {
+        var errors = new Dictionary<string, string[]>();
+        AddRequired(errors, nameof(request.Status), request.Status, 80);
+
+        if (!string.IsNullOrWhiteSpace(request.Status) &&
+            !IsFinalStatus(request.Status))
+        {
+            errors[nameof(request.Status)] = ["Status must be Applied or Archived."];
+        }
+
+        return errors;
+    }
+
     private static void AddRequired(Dictionary<string, string[]> errors, string field, string value, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -628,6 +794,72 @@ public static class ApplicationEndpoints
 
     private static string NormalizeStatus(string status) =>
         ValidStatuses.First(validStatus => string.Equals(validStatus, status.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsFinalStatus(string status) =>
+        string.Equals(status.Trim(), "Applied", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status.Trim(), "Archived", StringComparison.OrdinalIgnoreCase);
+
+    private static OptionalFilter NormalizeOptionalStatus(string? status) =>
+        NormalizeOptionalFilter(status, ValidStatuses);
+
+    private static OptionalFilter NormalizeOptionalAuditReadiness(string? readiness) =>
+        NormalizeOptionalFilter(readiness, ValidAuditReadiness);
+
+    private static OptionalFilter NormalizeOptionalFilter(string? value, IReadOnlyList<string> validValues)
+    {
+        if (string.IsNullOrWhiteSpace(value) ||
+            string.Equals(value.Trim(), "All", StringComparison.OrdinalIgnoreCase))
+        {
+            return new OptionalFilter(null, false);
+        }
+
+        var normalizedValue = validValues.FirstOrDefault(validValue =>
+            string.Equals(validValue, value.Trim(), StringComparison.OrdinalIgnoreCase));
+
+        return normalizedValue is null
+            ? new OptionalFilter(null, true)
+            : new OptionalFilter(normalizedValue, false);
+    }
+
+    private static string GetAuditReadiness(GeneratedDraft? draft)
+    {
+        if (draft is null)
+        {
+            return "NotApplicable";
+        }
+
+        if (draft.IsClaimAuditStale)
+        {
+            return "Stale";
+        }
+
+        if (draft.AuditUpdatedAt is null || draft.ClaimAudit == "{}")
+        {
+            return "Missing";
+        }
+
+        return "Current";
+    }
+
+    private static string BuildCoverLetterFileName(JobApplication application)
+        => BuildCoverLetterFileName(application, "txt");
+
+    private static string BuildCoverLetterFileName(JobApplication application, string extension)
+    {
+        var company = SlugifyFileNamePart(application.CompanyName);
+        var role = SlugifyFileNamePart(application.RoleTitle);
+        var name = string.Join('-', new[] { company, role }.Where(part => part.Length > 0));
+
+        return name.Length == 0
+            ? $"application-{application.Id:N}-cover-letter.{extension}"
+            : $"{name}-cover-letter.{extension}";
+    }
+
+    private static string SlugifyFileNamePart(string value)
+    {
+        var normalized = Regex.Replace(value.Trim().ToLowerInvariant(), @"[^a-z0-9]+", "-").Trim('-');
+        return normalized.Length > 60 ? normalized[..60].Trim('-') : normalized;
+    }
 
     private static ApprovedEvidenceValidation ValidateApprovedEvidence(ApprovedEvidenceRequest request, string evidenceMatchesJson)
     {
@@ -740,4 +972,6 @@ public static class ApplicationEndpoints
     private sealed record ApprovedEvidenceValidation(
         Dictionary<string, string[]> Errors,
         IReadOnlyList<EvidenceMatch> ApprovedEvidence);
+
+    private sealed record OptionalFilter(string? Value, bool IsInvalid);
 }

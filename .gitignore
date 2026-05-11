@@ -10,6 +10,7 @@ node_modules/
 dist/
 src/frontend/job-application-assistant.web/node_modules/
 src/frontend/job-application-assistant.web/dist/
+src/frontend/job-application-assistant.web/dist-test/
 .env
 .env.local
 .env.*.local

@@ -1,5 +1,7 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.IO.Compression;
 using System.Text.Json;
 using JobApplicationAssistant.Api.Ai;
 using JobApplicationAssistant.Api.Contracts;
@@ -981,6 +983,161 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task GetApplications_hides_archived_sessions_by_default_and_includes_them_when_requested()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        await CreateApplicationAsync(client, "We need .NET.", status: "Archived", companyName: "Archived Co");
+        var active = await CreateApplicationAsync(client, "We need React.", companyName: "Active Co");
+
+        var activeResponse = await client.GetAsync("/api/applications");
+        var allResponse = await client.GetAsync("/api/applications?includeArchived=true");
+
+        activeResponse.EnsureSuccessStatusCode();
+        allResponse.EnsureSuccessStatusCode();
+        var activeApplications = await activeResponse.Content.ReadFromJsonAsync<List<ApplicationResponse>>();
+        var allApplications = await allResponse.Content.ReadFromJsonAsync<List<ApplicationResponse>>();
+        Assert.NotNull(activeApplications);
+        Assert.NotNull(allApplications);
+        var listed = Assert.Single(activeApplications);
+        Assert.Equal(active.Id, listed.Id);
+        Assert.Equal(2, allApplications.Count);
+        Assert.Contains(allApplications, application => application.Status == "Archived");
+    }
+
+    [Fact]
+    public async Task GetApplications_filters_history_by_search_status_and_audit_readiness()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var draft = await CreateGeneratedDraftAsync(client);
+        await MarkDraftAuditedAsync(factory, draft.Id);
+        await CreateApplicationAsync(client, "We need React.", status: "Applied", companyName: "Tailspin", roleTitle: "Frontend Engineer");
+
+        var response = await client.GetAsync("/api/applications?search=fallback&status=ReadyForReview&readiness=Current");
+
+        response.EnsureSuccessStatusCode();
+        var applications = await response.Content.ReadFromJsonAsync<List<ApplicationResponse>>();
+        Assert.NotNull(applications);
+        var application = Assert.Single(applications);
+        Assert.Equal(draft.JobApplicationId, application.Id);
+        Assert.True(application.HasGeneratedDraft);
+        Assert.Equal("Current", application.AuditReadiness);
+    }
+
+    [Fact]
+    public async Task GetApplications_exposes_current_stale_missing_and_not_applicable_audit_readiness()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var current = await CreateApplicationAsync(client, "We need .NET.", companyName: "Current Audit");
+        var stale = await CreateApplicationAsync(client, "We need React.", companyName: "Stale Audit");
+        var missing = await CreateApplicationAsync(client, "We need SQL.", companyName: "Missing Audit");
+        var notApplicable = await CreateApplicationAsync(client, "We need Azure.", companyName: "No Draft");
+        await AddGeneratedDraftAsync(factory, current.Id);
+        await AddGeneratedDraftAsync(factory, stale.Id, isClaimAuditStale: true);
+        await AddGeneratedDraftAsync(factory, missing.Id, claimAudit: "{}", auditUpdatedAt: null);
+
+        var response = await client.GetAsync("/api/applications");
+
+        response.EnsureSuccessStatusCode();
+        var applications = await response.Content.ReadFromJsonAsync<List<ApplicationResponse>>();
+        Assert.NotNull(applications);
+        Assert.Equal("Current", applications.Single(application => application.Id == current.Id).AuditReadiness);
+        Assert.Equal("Stale", applications.Single(application => application.Id == stale.Id).AuditReadiness);
+        Assert.Equal("Missing", applications.Single(application => application.Id == missing.Id).AuditReadiness);
+        Assert.Equal("NotApplicable", applications.Single(application => application.Id == notApplicable.Id).AuditReadiness);
+    }
+
+    [Fact]
+    public async Task GetApplications_rejects_unknown_history_filters()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/api/applications?status=Unknown&readiness=AlmostReady");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains("status", error.Details.Keys);
+        Assert.Contains("readiness", error.Details.Keys);
+    }
+
+    [Fact]
+    public async Task PutApplicationStatus_marks_saved_application_applied_and_updates_history_metadata()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/applications/{application.Id}/status",
+            new ApplicationStatusRequest("Applied"));
+
+        response.EnsureSuccessStatusCode();
+        var applied = await response.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(applied);
+        Assert.Equal("Applied", applied.Status);
+        Assert.True(applied.UpdatedAt > application.UpdatedAt);
+
+        var historyResponse = await client.GetAsync("/api/applications?status=Applied");
+        historyResponse.EnsureSuccessStatusCode();
+        var history = await historyResponse.Content.ReadFromJsonAsync<List<ApplicationResponse>>();
+        Assert.NotNull(history);
+        var listed = Assert.Single(history);
+        Assert.Equal(application.Id, listed.Id);
+        Assert.Equal("Applied", listed.Status);
+        Assert.Equal(applied.UpdatedAt, listed.UpdatedAt);
+    }
+
+    [Fact]
+    public async Task PutApplicationStatus_marks_saved_application_archived_and_keeps_it_available_when_archived_sessions_are_included()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/applications/{application.Id}/status",
+            new ApplicationStatusRequest("Archived"));
+
+        response.EnsureSuccessStatusCode();
+        var archived = await response.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(archived);
+        Assert.Equal("Archived", archived.Status);
+        Assert.True(archived.UpdatedAt > application.UpdatedAt);
+
+        var activeResponse = await client.GetAsync("/api/applications");
+        var allResponse = await client.GetAsync("/api/applications?includeArchived=true");
+        activeResponse.EnsureSuccessStatusCode();
+        allResponse.EnsureSuccessStatusCode();
+        var active = await activeResponse.Content.ReadFromJsonAsync<List<ApplicationResponse>>();
+        var all = await allResponse.Content.ReadFromJsonAsync<List<ApplicationResponse>>();
+        Assert.NotNull(active);
+        Assert.NotNull(all);
+        Assert.DoesNotContain(active, item => item.Id == application.Id);
+        Assert.Contains(all, item => item.Id == application.Id && item.Status == "Archived");
+    }
+
+    [Fact]
+    public async Task PutApplicationStatus_rejects_non_final_or_unknown_status()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/applications/{application.Id}/status",
+            new ApplicationStatusRequest("ReadyForReview"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains(nameof(ApplicationStatusRequest.Status), error.Details.Keys);
+    }
+
+    [Fact]
     public async Task PutGeneratedDraft_saves_manual_edits_preserves_generation_metadata_and_marks_audit_stale()
     {
         await using var factory = new TestApplicationFactory();
@@ -1031,6 +1188,247 @@ public sealed class ApplicationWorkflowApiTests
         var error = await response.Content.ReadFromJsonAsync<ApiError>();
         Assert.NotNull(error);
         Assert.Contains(nameof(ApplicationResponse.GeneratedDraft), error.Details.Keys);
+    }
+
+    [Fact]
+    public async Task ExportCoverLetterTxt_returns_current_edited_cover_letter_with_text_headers_and_safe_filename()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(
+            client,
+            "We need .NET.",
+            companyName: "Northwind & Sons",
+            roleTitle: "Senior C# Engineer");
+        await AddGeneratedDraftAsync(factory, application.Id, coverLetterText: "Edited cover letter text.\r\nSecond line.");
+
+        var response = await client.GetAsync($"/api/applications/{application.Id}/exports/cover-letter.txt");
+
+        response.EnsureSuccessStatusCode();
+        Assert.Equal("text/plain", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("utf-8", response.Content.Headers.ContentType?.CharSet);
+        Assert.Equal("Edited cover letter text.\r\nSecond line.", await response.Content.ReadAsStringAsync());
+        var contentDisposition = response.Content.Headers.ContentDisposition;
+        Assert.NotNull(contentDisposition);
+        Assert.Equal("attachment", contentDisposition.DispositionType);
+        Assert.Equal("northwind-sons-senior-c-engineer-cover-letter.txt", GetFileName(contentDisposition));
+    }
+
+    [Fact]
+    public async Task ExportCoverLetterTxt_rejects_missing_application_generated_draft_and_empty_cover_letter()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var missingResponse = await client.GetAsync($"/api/applications/{Guid.NewGuid()}/exports/cover-letter.txt");
+
+        Assert.Equal(HttpStatusCode.NotFound, missingResponse.StatusCode);
+        var missingError = await missingResponse.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(missingError);
+        Assert.Equal("not_found", missingError.Code);
+
+        var withoutDraft = await CreateApplicationAsync(client, "We need .NET.");
+        var withoutDraftResponse = await client.GetAsync($"/api/applications/{withoutDraft.Id}/exports/cover-letter.txt");
+
+        Assert.Equal(HttpStatusCode.BadRequest, withoutDraftResponse.StatusCode);
+        var withoutDraftError = await withoutDraftResponse.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(withoutDraftError);
+        Assert.Contains(nameof(ApplicationResponse.GeneratedDraft), withoutDraftError.Details!.Keys);
+
+        var emptyDraftApplication = await CreateApplicationAsync(client, "We need React.");
+        await AddGeneratedDraftAsync(factory, emptyDraftApplication.Id, coverLetterText: "   ");
+        var emptyDraftResponse = await client.GetAsync($"/api/applications/{emptyDraftApplication.Id}/exports/cover-letter.txt");
+
+        Assert.Equal(HttpStatusCode.BadRequest, emptyDraftResponse.StatusCode);
+        var emptyDraftError = await emptyDraftResponse.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(emptyDraftError);
+        Assert.Contains(nameof(GeneratedDraftResponse.CoverLetterText), emptyDraftError.Details!.Keys);
+    }
+
+    [Fact]
+    public async Task ExportCoverLetterTxt_allows_stale_or_missing_claim_audit()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var stale = await CreateApplicationAsync(client, "We need .NET.", companyName: "Stale Co");
+        var missing = await CreateApplicationAsync(client, "We need React.", companyName: "Missing Co");
+        await AddGeneratedDraftAsync(factory, stale.Id, isClaimAuditStale: true, coverLetterText: "Stale audit cover letter.");
+        await AddGeneratedDraftAsync(factory, missing.Id, claimAudit: "{}", auditUpdatedAt: null, coverLetterText: "Missing audit cover letter.");
+
+        var staleResponse = await client.GetAsync($"/api/applications/{stale.Id}/exports/cover-letter.txt");
+        var missingResponse = await client.GetAsync($"/api/applications/{missing.Id}/exports/cover-letter.txt");
+
+        staleResponse.EnsureSuccessStatusCode();
+        missingResponse.EnsureSuccessStatusCode();
+        Assert.Equal("Stale audit cover letter.", await staleResponse.Content.ReadAsStringAsync());
+        Assert.Equal("Missing audit cover letter.", await missingResponse.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task ExportCoverLetterTxt_uses_application_id_filename_fallback_when_metadata_is_not_filename_safe()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(
+            client,
+            "We need .NET.",
+            companyName: "!!!",
+            roleTitle: "!!!");
+        await AddGeneratedDraftAsync(factory, application.Id);
+
+        var response = await client.GetAsync($"/api/applications/{application.Id}/exports/cover-letter.txt");
+
+        response.EnsureSuccessStatusCode();
+        var contentDisposition = response.Content.Headers.ContentDisposition;
+        Assert.NotNull(contentDisposition);
+        Assert.Equal($"application-{application.Id:N}-cover-letter.txt", GetFileName(contentDisposition));
+    }
+
+    [Fact]
+    public async Task ExportCoverLetterDocx_returns_valid_document_with_current_cover_letter_context_profile_and_safe_filename()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        await client.PutAsJsonAsync(
+            "/api/profile",
+            new ProfileRequest(
+                "Alex Applicant",
+                "alex@example.com",
+                "+45 12 34 56 78",
+                "Copenhagen",
+                "https://www.linkedin.com/in/alex",
+                null,
+                null,
+                "English",
+                null,
+                null));
+        var application = await CreateApplicationAsync(
+            client,
+            "We need .NET.",
+            companyName: "Northwind & Sons",
+            roleTitle: "Senior C# Engineer");
+        await AddGeneratedDraftAsync(factory, application.Id, coverLetterText: "Edited cover letter text.\r\nSecond line.");
+
+        var response = await client.GetAsync($"/api/applications/{application.Id}/exports/cover-letter.docx");
+
+        response.EnsureSuccessStatusCode();
+        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", response.Content.Headers.ContentType?.MediaType);
+        var contentDisposition = response.Content.Headers.ContentDisposition;
+        Assert.NotNull(contentDisposition);
+        Assert.Equal("attachment", contentDisposition.DispositionType);
+        Assert.Equal("northwind-sons-senior-c-engineer-cover-letter.docx", GetFileName(contentDisposition));
+        var documentText = await ReadDocxDocumentXmlAsync(response);
+        Assert.Contains("Alex Applicant", documentText);
+        Assert.Contains("alex@example.com", documentText);
+        Assert.Contains("+45 12 34 56 78", documentText);
+        Assert.Contains("Copenhagen", documentText);
+        Assert.Contains("https://www.linkedin.com/in/alex", documentText);
+        Assert.Contains("Northwind &amp; Sons", documentText);
+        Assert.Contains("Senior C# Engineer", documentText);
+        Assert.Contains("Edited cover letter text.", documentText);
+        Assert.Contains("Second line.", documentText);
+    }
+
+    [Fact]
+    public async Task ExportCoverLetterDocx_rejects_missing_application_generated_draft_and_empty_cover_letter()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var missingResponse = await client.GetAsync($"/api/applications/{Guid.NewGuid()}/exports/cover-letter.docx");
+
+        Assert.Equal(HttpStatusCode.NotFound, missingResponse.StatusCode);
+        var missingError = await missingResponse.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(missingError);
+        Assert.Equal("not_found", missingError.Code);
+
+        var withoutDraft = await CreateApplicationAsync(client, "We need .NET.");
+        var withoutDraftResponse = await client.GetAsync($"/api/applications/{withoutDraft.Id}/exports/cover-letter.docx");
+
+        Assert.Equal(HttpStatusCode.BadRequest, withoutDraftResponse.StatusCode);
+        var withoutDraftError = await withoutDraftResponse.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(withoutDraftError);
+        Assert.Contains(nameof(ApplicationResponse.GeneratedDraft), withoutDraftError.Details!.Keys);
+
+        var emptyDraftApplication = await CreateApplicationAsync(client, "We need React.");
+        await AddGeneratedDraftAsync(factory, emptyDraftApplication.Id, coverLetterText: "   ");
+        var emptyDraftResponse = await client.GetAsync($"/api/applications/{emptyDraftApplication.Id}/exports/cover-letter.docx");
+
+        Assert.Equal(HttpStatusCode.BadRequest, emptyDraftResponse.StatusCode);
+        var emptyDraftError = await emptyDraftResponse.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(emptyDraftError);
+        Assert.Contains(nameof(GeneratedDraftResponse.CoverLetterText), emptyDraftError.Details!.Keys);
+    }
+
+    [Fact]
+    public async Task ExportCoverLetterDocx_allows_stale_or_missing_claim_audit_without_calling_ai()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>());
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var stale = await CreateApplicationAsync(client, "We need .NET.", companyName: "Stale Co");
+        var missing = await CreateApplicationAsync(client, "We need React.", companyName: "Missing Co");
+        await AddGeneratedDraftAsync(factory, stale.Id, isClaimAuditStale: true, coverLetterText: "Stale audit cover letter.");
+        await AddGeneratedDraftAsync(factory, missing.Id, claimAudit: "{}", auditUpdatedAt: null, coverLetterText: "Missing audit cover letter.");
+
+        var staleResponse = await client.GetAsync($"/api/applications/{stale.Id}/exports/cover-letter.docx");
+        var missingResponse = await client.GetAsync($"/api/applications/{missing.Id}/exports/cover-letter.docx");
+
+        staleResponse.EnsureSuccessStatusCode();
+        missingResponse.EnsureSuccessStatusCode();
+        Assert.Contains("Stale audit cover letter.", await ReadDocxDocumentXmlAsync(staleResponse));
+        Assert.Contains("Missing audit cover letter.", await ReadDocxDocumentXmlAsync(missingResponse));
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ExportCoverLetterDocx_tolerates_missing_optional_profile_contact_fields()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        await client.PutAsJsonAsync(
+            "/api/profile",
+            new ProfileRequest(
+                "Alex Applicant",
+                "alex@example.com",
+                null,
+                null,
+                null,
+                null,
+                null,
+                "English",
+                null,
+                null));
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+        await AddGeneratedDraftAsync(factory, application.Id, coverLetterText: "Cover letter with sparse contact info.");
+
+        var response = await client.GetAsync($"/api/applications/{application.Id}/exports/cover-letter.docx");
+
+        response.EnsureSuccessStatusCode();
+        var documentText = await ReadDocxDocumentXmlAsync(response);
+        Assert.Contains("Alex Applicant", documentText);
+        Assert.Contains("alex@example.com", documentText);
+        Assert.Contains("Cover letter with sparse contact info.", documentText);
+    }
+
+    [Fact]
+    public async Task ExportCoverLetterDocx_uses_application_id_filename_fallback_when_metadata_is_not_filename_safe()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(
+            client,
+            "We need .NET.",
+            companyName: "!!!",
+            roleTitle: "!!!");
+        await AddGeneratedDraftAsync(factory, application.Id);
+
+        var response = await client.GetAsync($"/api/applications/{application.Id}/exports/cover-letter.docx");
+
+        response.EnsureSuccessStatusCode();
+        var contentDisposition = response.Content.Headers.ContentDisposition;
+        Assert.NotNull(contentDisposition);
+        Assert.Equal($"application-{application.Id:N}-cover-letter.docx", GetFileName(contentDisposition));
     }
 
     [Fact]
@@ -1238,16 +1636,19 @@ public sealed class ApplicationWorkflowApiTests
     private static async Task<ApplicationResponse> CreateApplicationAsync(
         HttpClient client,
         string jobPostingText,
-        string selectedLanguage = "")
+        string selectedLanguage = "",
+        string status = "Draft",
+        string companyName = "Fallback Company",
+        string roleTitle = "Fallback Role")
     {
         var response = await client.PostAsJsonAsync(
             "/api/applications",
             new ApplicationRequest(
-                "Fallback Company",
-                "Fallback Role",
+                companyName,
+                roleTitle,
                 null,
                 null,
-                "Draft",
+                status,
                 jobPostingText,
                 null,
                 selectedLanguage));
@@ -1367,20 +1768,26 @@ public sealed class ApplicationWorkflowApiTests
 
     private static async Task<GeneratedDraftResponse> AddGeneratedDraftAsync(
         WebApplicationFactory<Program> factory,
-        Guid applicationId)
+        Guid applicationId,
+        string claimAudit = """{"status":"current"}""",
+        DateTimeOffset? auditUpdatedAt = default,
+        bool isClaimAuditStale = false,
+        string coverLetterText = "Existing cover letter.")
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var now = DateTimeOffset.UtcNow;
+        auditUpdatedAt ??= claimAudit == "{}" ? null : now;
         var draft = new GeneratedDraft
         {
             Id = Guid.NewGuid(),
             JobApplicationId = applicationId,
-            CoverLetterText = "Existing cover letter.",
+            CoverLetterText = coverLetterText,
             ShortMotivationText = "Existing motivation.",
-            ClaimAudit = """{"status":"current"}""",
+            ClaimAudit = claimAudit,
             GeneratedAt = now,
-            AuditUpdatedAt = now,
+            AuditUpdatedAt = auditUpdatedAt,
+            IsClaimAuditStale = isClaimAuditStale,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -1399,6 +1806,19 @@ public sealed class ApplicationWorkflowApiTests
             draft.CreatedAt,
             draft.UpdatedAt,
             draft.IsClaimAuditStale);
+    }
+
+    private static string? GetFileName(ContentDispositionHeaderValue contentDisposition) =>
+        contentDisposition.FileNameStar ?? contentDisposition.FileName?.Trim('"');
+
+    private static async Task<string> ReadDocxDocumentXmlAsync(HttpResponseMessage response)
+    {
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        var document = archive.GetEntry("word/document.xml");
+        Assert.NotNull(document);
+        using var reader = new StreamReader(document.Open());
+        return await reader.ReadToEndAsync();
     }
 
     private static async Task MarkApplicationAnalyzedAsync(WebApplicationFactory<Program> factory, Guid applicationId)

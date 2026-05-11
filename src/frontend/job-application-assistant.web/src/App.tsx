@@ -1,4 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  getAuditExportWarning,
+  getCoverLetterExportState,
+  getCoverLetterText
+} from "./exportControls";
 import "./styles.css";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:5108";
@@ -35,6 +40,7 @@ const emptyProfileFact: ProfileFactForm = {
   forbiddenClaims: "[]"
 };
 const applicationStatuses = ["Draft", "PostingCaptured", "ReadyForReview", "Applied", "Archived"];
+const auditReadinessOptions = ["All", "Current", "Stale", "Missing", "NotApplicable"];
 const profileFactStatuses = ["Draft", "Approved", "Archived"];
 
 type ApiError = {
@@ -91,6 +97,8 @@ type ApplicationSession = ApplicationForm & {
   unmatchedRequirements: string;
   approvedEvidence: string;
   generatedDraft: GeneratedDraft | null;
+  hasGeneratedDraft: boolean;
+  auditReadiness: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -191,12 +199,16 @@ function App() {
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
   const [applicationSearch, setApplicationSearch] = useState("");
   const [applicationStatusFilter, setApplicationStatusFilter] = useState("All");
+  const [applicationReadinessFilter, setApplicationReadinessFilter] = useState("All");
+  const [includeArchivedApplications, setIncludeArchivedApplications] = useState(false);
   const [approvedEvidenceDraft, setApprovedEvidenceDraft] = useState<EvidenceMatch[]>([]);
   const [generatedDraftForm, setGeneratedDraftForm] = useState<GeneratedDraftForm>({
     coverLetterText: "",
     shortMotivationText: ""
   });
   const [workflowBusy, setWorkflowBusy] = useState<string | null>(null);
+  const [exportBusy, setExportBusy] = useState<"txt" | "docx" | null>(null);
+  const [isClipboardAvailable, setIsClipboardAvailable] = useState(false);
   const [aiStatus, setAiStatus] = useState<AiProviderStatus | null>(null);
   const [aiDiagnostics, setAiDiagnostics] = useState<AiDiagnostics | null>(null);
   const [aiDiagnosticsError, setAiDiagnosticsError] = useState<string | null>(null);
@@ -218,14 +230,16 @@ function App() {
 
     return applications.filter((application) => {
       const matchesStatus = applicationStatusFilter === "All" || application.status === applicationStatusFilter;
+      const matchesReadiness =
+        applicationReadinessFilter === "All" || application.auditReadiness === applicationReadinessFilter;
       const matchesSearch =
         !search ||
         application.companyName.toLowerCase().includes(search) ||
         application.roleTitle.toLowerCase().includes(search);
 
-      return matchesStatus && matchesSearch;
+      return matchesStatus && matchesReadiness && matchesSearch;
     });
-  }, [applications, applicationSearch, applicationStatusFilter]);
+  }, [applications, applicationReadinessFilter, applicationSearch, applicationStatusFilter]);
   const jobSignals = useMemo(
     () => parseJobSignals(selectedApplication?.jobSignals),
     [selectedApplication?.jobSignals]
@@ -250,12 +264,32 @@ function App() {
   const hasSavedApprovedEvidence = savedApprovedEvidence.length > 0;
   const hasGeneratedDraft = Boolean(selectedApplication?.generatedDraft);
   const auditSummary = useMemo(() => summarizeClaimAudit(claimAudit), [claimAudit]);
+  const hasUnsavedDraftEdits =
+    Boolean(selectedApplication?.generatedDraft) &&
+    (generatedDraftForm.coverLetterText !== selectedApplication?.generatedDraft?.coverLetterText ||
+      generatedDraftForm.shortMotivationText !== selectedApplication?.generatedDraft?.shortMotivationText);
+  const coverLetterExportState = useMemo(
+    () =>
+      getCoverLetterExportState(selectedApplication, {
+        clipboardAvailable: isClipboardAvailable,
+        currentCoverLetterText: generatedDraftForm.coverLetterText,
+        hasUnsavedChanges: hasUnsavedDraftEdits
+      }),
+    [generatedDraftForm.coverLetterText, hasUnsavedDraftEdits, isClipboardAvailable, selectedApplication]
+  );
+  const auditExportWarning = useMemo(
+    () => getAuditExportWarning(selectedApplication),
+    [selectedApplication]
+  );
 
   useEffect(() => {
     void loadProfile();
     void loadProfileFacts();
-    void loadApplications();
     void loadAiStatus();
+  }, []);
+
+  useEffect(() => {
+    setIsClipboardAvailable(Boolean(navigator.clipboard?.writeText));
   }, []);
 
   useEffect(() => {
@@ -280,12 +314,18 @@ function App() {
 
   async function loadApplications() {
     try {
-      const response = await apiGet<ApplicationSession[]>("/api/applications");
+      const response = await apiGet<ApplicationSession[]>(
+        `/api/applications?includeArchived=${includeArchivedApplications}`
+      );
       setApplications(response.map(toApplicationSession));
     } catch (apiError) {
       setError(formatError(apiError));
     }
   }
+
+  useEffect(() => {
+    void loadApplications();
+  }, [includeArchivedApplications]);
 
   async function loadProfileFacts() {
     try {
@@ -394,6 +434,33 @@ function App() {
       setSelectedApplicationId(null);
       await loadApplications();
       setNotice("Application deleted.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    }
+  }
+
+  async function markApplicationStatus(status: "Applied" | "Archived") {
+    if (!selectedApplicationId) {
+      setError("Save the application before changing its final status.");
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+
+    try {
+      const saved = await apiSend<ApplicationSession>(
+        `/api/applications/${selectedApplicationId}/status`,
+        "PUT",
+        { status }
+      );
+      replaceApplication(saved);
+      await loadApplications();
+      if (status === "Archived" && !includeArchivedApplications) {
+        setSelectedApplicationId(null);
+        setApplicationForm(emptyApplication);
+      }
+      setNotice(status === "Applied" ? "Application marked applied." : "Application archived.");
     } catch (apiError) {
       setError(formatError(apiError));
     }
@@ -533,6 +600,59 @@ function App() {
     }
   }
 
+  async function copyCoverLetter() {
+    if (!coverLetterExportState.canCopy) {
+      setError(coverLetterExportState.reason ?? "Clipboard copy is not available in this browser.");
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+
+    try {
+      await navigator.clipboard.writeText(getCoverLetterText(selectedApplication, generatedDraftForm.coverLetterText));
+      setNotice("Cover letter copied.");
+    } catch {
+      setError("Clipboard copy failed. You can still select and copy the cover letter manually.");
+    }
+  }
+
+  async function downloadCoverLetter(format: "txt" | "docx") {
+    if (!selectedApplicationId || !coverLetterExportState.canExport) {
+      setError(coverLetterExportState.reason ?? "Select an application with a generated cover letter before exporting.");
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setExportBusy(format);
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/applications/${selectedApplicationId}/exports/cover-letter.${format}`);
+      if (!response.ok) {
+        throw await response.json();
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileNameFromContentDisposition(
+        response.headers.get("content-disposition"),
+        `cover-letter.${format}`
+      );
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setNotice(format === "txt" ? "TXT cover letter downloaded." : "DOCX cover letter downloaded.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    } finally {
+      setExportBusy(null);
+    }
+  }
+
   async function runAiDiagnostics() {
     setError(null);
     setNotice(null);
@@ -586,7 +706,13 @@ function App() {
     setApplications((current) =>
       current.map((application) =>
         application.id === draft.jobApplicationId
-          ? toApplicationSession({ ...application, generatedDraft: draft, updatedAt: draft.updatedAt })
+          ? toApplicationSession({
+              ...application,
+              generatedDraft: draft,
+              hasGeneratedDraft: true,
+              auditReadiness: auditReadinessForDraft(draft),
+              updatedAt: draft.updatedAt
+            })
           : application
       )
     );
@@ -789,6 +915,15 @@ function App() {
               <div className="filters">
                 <Field label="Search" value={applicationSearch} onChange={setApplicationSearch} />
                 <Select label="Status" value={applicationStatusFilter} options={["All", ...applicationStatuses]} onChange={setApplicationStatusFilter} />
+                <Select label="Draft/audit" value={applicationReadinessFilter} options={auditReadinessOptions} onChange={setApplicationReadinessFilter} />
+                <label className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={includeArchivedApplications}
+                    onChange={(event) => setIncludeArchivedApplications(event.target.checked)}
+                  />
+                  <span>Include archived</span>
+                </label>
               </div>
               <div className="session-list">
                 {filteredApplications.map((application) => (
@@ -800,7 +935,14 @@ function App() {
                   >
                     <strong>{application.companyName}</strong>
                     <span>{application.roleTitle}</span>
-                    <small>{application.status} - {application.selectedLanguage || application.detectedLanguage || "Language unset"} - Updated {formatDate(application.updatedAt)}</small>
+                    <small>
+                      {application.status} - {application.selectedLanguage || application.detectedLanguage || "Language unset"} - Updated {formatDate(application.updatedAt)}
+                    </small>
+                    <div className="session-badges">
+                      {application.deadline && <span>Deadline {formatDate(application.deadline)}</span>}
+                      <span className={application.hasGeneratedDraft ? "ready" : "muted"}>{application.hasGeneratedDraft ? "Draft ready" : "No draft"}</span>
+                      <span className={`audit-${application.auditReadiness.toLowerCase()}`}>Audit {readinessLabel(application.auditReadiness)}</span>
+                    </div>
                   </button>
                 ))}
                 {applications.length === 0 && <p className="empty-state">No application sessions yet.</p>}
@@ -828,6 +970,25 @@ function App() {
                   <button className="danger-action" type="button" onClick={deleteApplication}>Delete</button>
                 )}
               </div>
+              {selectedApplicationId && (
+                <div className="final-status-actions" aria-label="Final application status actions">
+                  <button
+                    type="button"
+                    onClick={() => void markApplicationStatus("Applied")}
+                    disabled={selectedApplication?.status === "Applied" || workflowBusy !== null}
+                  >
+                    Mark applied
+                  </button>
+                  <button
+                    className="danger-action"
+                    type="button"
+                    onClick={() => void markApplicationStatus("Archived")}
+                    disabled={selectedApplication?.status === "Archived" || workflowBusy !== null}
+                  >
+                    Archive
+                  </button>
+                </div>
+              )}
 
               <section className="workflow-panel">
                 <div className="section-heading">
@@ -962,6 +1123,27 @@ function App() {
                         {workflowBusy === "audit" ? "Auditing..." : "Run claim audit"}
                       </button>
                     </div>
+                    <section className="export-panel">
+                      <div className="section-heading">
+                        <h4>Export cover letter</h4>
+                        <p>{coverLetterExportState.reason ?? "Copy or download the current cover letter exactly as edited."}</p>
+                      </div>
+                      {auditExportWarning && <p className="workflow-note warning">{auditExportWarning}</p>}
+                      {!coverLetterExportState.canCopy && coverLetterExportState.canExport && (
+                        <p className="workflow-note neutral">Clipboard copy is not available in this browser. TXT and DOCX export are still available.</p>
+                      )}
+                      <div className="form-actions">
+                        <button type="button" onClick={() => void copyCoverLetter()} disabled={!coverLetterExportState.canCopy || exportBusy !== null}>
+                          Copy
+                        </button>
+                        <button type="button" onClick={() => void downloadCoverLetter("txt")} disabled={!coverLetterExportState.canExport || exportBusy !== null}>
+                          {exportBusy === "txt" ? "Downloading..." : "Download TXT"}
+                        </button>
+                        <button type="button" onClick={() => void downloadCoverLetter("docx")} disabled={!coverLetterExportState.canExport || exportBusy !== null}>
+                          {exportBusy === "docx" ? "Downloading..." : "Download DOCX"}
+                        </button>
+                      </div>
+                    </section>
                     <section className="claim-audit">
                       <div className="section-heading">
                         <h4>Claim audit</h4>
@@ -987,7 +1169,17 @@ function App() {
                     </section>
                   </section>
                 ) : (
-                  <p className="empty-state compact">{claimAuditMessage(hasGeneratedDraft)}</p>
+                  <section className="export-panel disabled">
+                    <div className="section-heading">
+                      <h4>Export cover letter</h4>
+                      <p>{coverLetterExportState.reason ?? claimAuditMessage(hasGeneratedDraft)}</p>
+                    </div>
+                    <div className="form-actions">
+                      <button type="button" disabled>Copy</button>
+                      <button type="button" disabled>Download TXT</button>
+                      <button type="button" disabled>Download DOCX</button>
+                    </div>
+                  </section>
                 )}
               </section>
             </form>
@@ -1215,6 +1407,8 @@ function toApplicationSession(application: ApplicationSession): ApplicationSessi
     unmatchedRequirements: application.unmatchedRequirements || "[]",
     approvedEvidence: application.approvedEvidence || "[]",
     generatedDraft: application.generatedDraft ?? null,
+    hasGeneratedDraft: application.hasGeneratedDraft ?? Boolean(application.generatedDraft),
+    auditReadiness: application.auditReadiness ?? auditReadinessForDraft(application.generatedDraft),
     createdAt: application.createdAt,
     updatedAt: application.updatedAt
   };
@@ -1257,6 +1451,20 @@ function formatError(error: unknown): string {
     : "";
 
   return details ? `${apiError.message} ${details}` : apiError.message;
+}
+
+function fileNameFromContentDisposition(header: string | null, fallback: string): string {
+  if (!header) {
+    return fallback;
+  }
+
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1]);
+  }
+
+  const fileNameMatch = /filename="?([^";]+)"?/i.exec(header);
+  return fileNameMatch?.[1] ?? fallback;
 }
 
 function providerSummary(status: AiProviderStatus): string {
@@ -1323,6 +1531,26 @@ function claimAuditMessage(hasGeneratedDraft: boolean): string {
   return hasGeneratedDraft
     ? "Run claim audit after reviewing the generated text."
     : "Generate a draft before running claim audit.";
+}
+
+function auditReadinessForDraft(draft: GeneratedDraft | null): string {
+  if (!draft) {
+    return "NotApplicable";
+  }
+
+  if (draft.isClaimAuditStale) {
+    return "Stale";
+  }
+
+  if (!draft.auditUpdatedAt || draft.claimAudit === "{}") {
+    return "Missing";
+  }
+
+  return "Current";
+}
+
+function readinessLabel(readiness: string): string {
+  return readiness === "NotApplicable" ? "not applicable" : readiness.toLowerCase();
 }
 
 function summarizeClaimAudit(audit: ClaimAudit) {
