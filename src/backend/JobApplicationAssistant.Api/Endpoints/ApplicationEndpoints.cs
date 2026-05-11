@@ -19,6 +19,7 @@ public static class ApplicationEndpoints
         group.MapGet(string.Empty, async (ApplicationDbContext db, CancellationToken ct) =>
         {
             var applications = await db.JobApplications
+                .Include(application => application.GeneratedDraft)
                 .OrderByDescending(application => application.UpdatedAt)
                 .Select(application => ToResponse(application))
                 .ToListAsync(ct);

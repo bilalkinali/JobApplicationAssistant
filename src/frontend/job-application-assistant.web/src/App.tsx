@@ -223,6 +223,10 @@ function App() {
     () => parseClaimAudit(selectedApplication?.generatedDraft?.claimAudit),
     [selectedApplication?.generatedDraft?.claimAudit]
   );
+  const hasSavedJobPosting = Boolean(selectedApplication?.jobPostingText.trim());
+  const hasSavedApprovedEvidence = savedApprovedEvidence.length > 0;
+  const hasGeneratedDraft = Boolean(selectedApplication?.generatedDraft);
+  const auditSummary = useMemo(() => summarizeClaimAudit(claimAudit), [claimAudit]);
 
   useEffect(() => {
     void loadProfile();
@@ -741,8 +745,8 @@ function App() {
 
               <section className="workflow-panel">
                 <div className="section-heading">
-                  <h3>Fake AI workflow</h3>
-                  <p>Analyze the posting, match approved profile facts, then save the evidence that may be used later.</p>
+                  <h3>Application text workflow</h3>
+                  <p>Move from job analysis to approved evidence, generated text, and claim audit before final use.</p>
                 </div>
 
                 <div className="workflow-step">
@@ -829,9 +833,9 @@ function App() {
                 <div className="workflow-step">
                   <div>
                     <h4>4. Generated draft</h4>
-                    <p>{savedApprovedEvidence.length > 0 ? "Generate or edit the current cover letter and short motivation." : "Save approved evidence before generating a draft."}</p>
+                    <p>{draftGenerationMessage(selectedApplicationId, hasSavedJobPosting, hasSavedApprovedEvidence)}</p>
                   </div>
-                  <button type="button" onClick={generateDraft} disabled={!selectedApplicationId || savedApprovedEvidence.length === 0 || workflowBusy !== null}>
+                  <button type="button" onClick={generateDraft} disabled={!selectedApplicationId || !hasSavedJobPosting || !hasSavedApprovedEvidence || workflowBusy !== null}>
                     {workflowBusy === "draft" ? "Generating..." : "Generate draft"}
                   </button>
                 </div>
@@ -846,6 +850,9 @@ function App() {
                         {selectedApplication.generatedDraft.isClaimAuditStale ? " - Audit stale" : ""}
                       </p>
                     </div>
+                    {selectedApplication.generatedDraft.isClaimAuditStale && (
+                      <p className="workflow-note warning">Draft edits were saved after the last audit. Run claim audit again before using this text.</p>
+                    )}
                     <Textarea
                       label="Cover letter"
                       value={generatedDraftForm.coverLetterText}
@@ -867,7 +874,11 @@ function App() {
                     <section className="claim-audit">
                       <div className="section-heading">
                         <h4>Claim audit</h4>
-                        <p>{selectedApplication.generatedDraft.auditUpdatedAt ? `Updated ${formatDate(selectedApplication.generatedDraft.auditUpdatedAt)}` : "Not audited yet"}</p>
+                        <p>
+                          {selectedApplication.generatedDraft.auditUpdatedAt
+                            ? `Updated ${formatDate(selectedApplication.generatedDraft.auditUpdatedAt)} - ${auditSummary.supported} supported, ${auditSummary.unsupported} unsupported, ${auditSummary.needsReview} needs review`
+                            : "Run claim audit after the generated text is ready."}
+                        </p>
                       </div>
                       {claimAudit.claims.length === 0 ? (
                         <p className="empty-state compact">No claim audit results yet.</p>
@@ -885,7 +896,7 @@ function App() {
                     </section>
                   </section>
                 ) : (
-                  <p className="empty-state compact">No generated draft yet.</p>
+                  <p className="empty-state compact">{claimAuditMessage(hasGeneratedDraft)}</p>
                 )}
               </section>
             </form>
@@ -1090,6 +1101,53 @@ function formatError(error: unknown): string {
     : "";
 
   return details ? `${apiError.message} ${details}` : apiError.message;
+}
+
+function draftGenerationMessage(
+  selectedApplicationId: string | null,
+  hasSavedJobPosting: boolean,
+  hasSavedApprovedEvidence: boolean
+): string {
+  if (!selectedApplicationId) {
+    return "Save the application before generating a draft.";
+  }
+
+  if (!hasSavedJobPosting) {
+    return "Add and save job posting text before generating a draft.";
+  }
+
+  if (!hasSavedApprovedEvidence) {
+    return "Save approved evidence before generating a draft.";
+  }
+
+  return "Generate or edit the current cover letter and short motivation.";
+}
+
+function claimAuditMessage(hasGeneratedDraft: boolean): string {
+  return hasGeneratedDraft
+    ? "Run claim audit after reviewing the generated text."
+    : "Generate a draft before running claim audit.";
+}
+
+function summarizeClaimAudit(audit: ClaimAudit) {
+  return audit.claims.reduce(
+    (summary, claim) => {
+      if (claim.status === "Supported") {
+        return { ...summary, supported: summary.supported + 1 };
+      }
+
+      if (claim.status === "Unsupported") {
+        return { ...summary, unsupported: summary.unsupported + 1 };
+      }
+
+      if (claim.status === "NeedsReview") {
+        return { ...summary, needsReview: summary.needsReview + 1 };
+      }
+
+      return summary;
+    },
+    { supported: 0, unsupported: 0, needsReview: 0 }
+  );
 }
 
 function parseJobSignals(value: string | undefined): JobSignalsDocument {
