@@ -1,6 +1,6 @@
 # Milestone 6 Export and History Polish
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -17,18 +17,18 @@ Use TDD where practical for this slice: add behavior tests for any public backen
 
 ## Acceptance criteria
 
-- [ ] Tests focus on observable behavior and stable contracts rather than private component or module details.
-- [ ] The application history view presents status, archive visibility, draft readiness, and audit readiness coherently.
-- [ ] The draft/export area clearly warns when claim audit is stale.
-- [ ] The draft/export area clearly warns when claim audit has not been run.
-- [ ] Stale or missing audit warnings do not block TXT or DOCX export when a current draft exists.
-- [ ] Export actions are disabled or explained when no generated draft exists.
-- [ ] Export actions are disabled or explained when cover letter text is empty.
-- [ ] The user can copy the current cover letter text when a generated draft exists and browser support is available.
-- [ ] TXT and DOCX download actions use the backend export endpoints.
-- [ ] Export errors are shown plainly without hiding the current draft.
-- [ ] The UI remains desktop-first and consistent with the existing workbench.
-- [ ] No PDF export, custom DOCX templates, draft history, application event history, advanced tracking, or new AI behavior is introduced.
+- [x] Tests focus on observable behavior and stable contracts rather than private component or module details.
+- [x] The application history view presents status, archive visibility, draft readiness, and audit readiness coherently.
+- [x] The draft/export area clearly warns when claim audit is stale.
+- [x] The draft/export area clearly warns when claim audit has not been run.
+- [x] Stale or missing audit warnings do not block TXT or DOCX export when a current draft exists.
+- [x] Export actions are disabled or explained when no generated draft exists.
+- [x] Export actions are disabled or explained when cover letter text is empty.
+- [x] The user can copy the current cover letter text when a generated draft exists and browser support is available.
+- [x] TXT and DOCX download actions use the backend export endpoints.
+- [x] Export errors are shown plainly without hiding the current draft.
+- [x] The UI remains desktop-first and consistent with the existing workbench.
+- [x] No PDF export, custom DOCX templates, draft history, application event history, advanced tracking, or new AI behavior is introduced.
 
 ## Blocked by
 

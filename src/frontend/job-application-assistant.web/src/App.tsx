@@ -1,4 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  getAuditExportWarning,
+  getCoverLetterExportState,
+  getCoverLetterText
+} from "./exportControls";
 import "./styles.css";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:5108";
@@ -202,6 +207,8 @@ function App() {
     shortMotivationText: ""
   });
   const [workflowBusy, setWorkflowBusy] = useState<string | null>(null);
+  const [exportBusy, setExportBusy] = useState<"txt" | "docx" | null>(null);
+  const [isClipboardAvailable, setIsClipboardAvailable] = useState(false);
   const [aiStatus, setAiStatus] = useState<AiProviderStatus | null>(null);
   const [aiDiagnostics, setAiDiagnostics] = useState<AiDiagnostics | null>(null);
   const [aiDiagnosticsError, setAiDiagnosticsError] = useState<string | null>(null);
@@ -257,11 +264,32 @@ function App() {
   const hasSavedApprovedEvidence = savedApprovedEvidence.length > 0;
   const hasGeneratedDraft = Boolean(selectedApplication?.generatedDraft);
   const auditSummary = useMemo(() => summarizeClaimAudit(claimAudit), [claimAudit]);
+  const hasUnsavedDraftEdits =
+    Boolean(selectedApplication?.generatedDraft) &&
+    (generatedDraftForm.coverLetterText !== selectedApplication?.generatedDraft?.coverLetterText ||
+      generatedDraftForm.shortMotivationText !== selectedApplication?.generatedDraft?.shortMotivationText);
+  const coverLetterExportState = useMemo(
+    () =>
+      getCoverLetterExportState(selectedApplication, {
+        clipboardAvailable: isClipboardAvailable,
+        currentCoverLetterText: generatedDraftForm.coverLetterText,
+        hasUnsavedChanges: hasUnsavedDraftEdits
+      }),
+    [generatedDraftForm.coverLetterText, hasUnsavedDraftEdits, isClipboardAvailable, selectedApplication]
+  );
+  const auditExportWarning = useMemo(
+    () => getAuditExportWarning(selectedApplication),
+    [selectedApplication]
+  );
 
   useEffect(() => {
     void loadProfile();
     void loadProfileFacts();
     void loadAiStatus();
+  }, []);
+
+  useEffect(() => {
+    setIsClipboardAvailable(Boolean(navigator.clipboard?.writeText));
   }, []);
 
   useEffect(() => {
@@ -572,6 +600,59 @@ function App() {
     }
   }
 
+  async function copyCoverLetter() {
+    if (!coverLetterExportState.canCopy) {
+      setError(coverLetterExportState.reason ?? "Clipboard copy is not available in this browser.");
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+
+    try {
+      await navigator.clipboard.writeText(getCoverLetterText(selectedApplication, generatedDraftForm.coverLetterText));
+      setNotice("Cover letter copied.");
+    } catch {
+      setError("Clipboard copy failed. You can still select and copy the cover letter manually.");
+    }
+  }
+
+  async function downloadCoverLetter(format: "txt" | "docx") {
+    if (!selectedApplicationId || !coverLetterExportState.canExport) {
+      setError(coverLetterExportState.reason ?? "Select an application with a generated cover letter before exporting.");
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setExportBusy(format);
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/applications/${selectedApplicationId}/exports/cover-letter.${format}`);
+      if (!response.ok) {
+        throw await response.json();
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileNameFromContentDisposition(
+        response.headers.get("content-disposition"),
+        `cover-letter.${format}`
+      );
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setNotice(format === "txt" ? "TXT cover letter downloaded." : "DOCX cover letter downloaded.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    } finally {
+      setExportBusy(null);
+    }
+  }
+
   async function runAiDiagnostics() {
     setError(null);
     setNotice(null);
@@ -857,10 +938,11 @@ function App() {
                     <small>
                       {application.status} - {application.selectedLanguage || application.detectedLanguage || "Language unset"} - Updated {formatDate(application.updatedAt)}
                     </small>
-                    <small>
-                      {application.deadline ? `Deadline ${formatDate(application.deadline)} - ` : ""}
-                      {application.hasGeneratedDraft ? "Draft ready" : "No draft"} - Audit {readinessLabel(application.auditReadiness)}
-                    </small>
+                    <div className="session-badges">
+                      {application.deadline && <span>Deadline {formatDate(application.deadline)}</span>}
+                      <span className={application.hasGeneratedDraft ? "ready" : "muted"}>{application.hasGeneratedDraft ? "Draft ready" : "No draft"}</span>
+                      <span className={`audit-${application.auditReadiness.toLowerCase()}`}>Audit {readinessLabel(application.auditReadiness)}</span>
+                    </div>
                   </button>
                 ))}
                 {applications.length === 0 && <p className="empty-state">No application sessions yet.</p>}
@@ -1041,6 +1123,27 @@ function App() {
                         {workflowBusy === "audit" ? "Auditing..." : "Run claim audit"}
                       </button>
                     </div>
+                    <section className="export-panel">
+                      <div className="section-heading">
+                        <h4>Export cover letter</h4>
+                        <p>{coverLetterExportState.reason ?? "Copy or download the current cover letter exactly as edited."}</p>
+                      </div>
+                      {auditExportWarning && <p className="workflow-note warning">{auditExportWarning}</p>}
+                      {!coverLetterExportState.canCopy && coverLetterExportState.canExport && (
+                        <p className="workflow-note neutral">Clipboard copy is not available in this browser. TXT and DOCX export are still available.</p>
+                      )}
+                      <div className="form-actions">
+                        <button type="button" onClick={() => void copyCoverLetter()} disabled={!coverLetterExportState.canCopy || exportBusy !== null}>
+                          Copy
+                        </button>
+                        <button type="button" onClick={() => void downloadCoverLetter("txt")} disabled={!coverLetterExportState.canExport || exportBusy !== null}>
+                          {exportBusy === "txt" ? "Downloading..." : "Download TXT"}
+                        </button>
+                        <button type="button" onClick={() => void downloadCoverLetter("docx")} disabled={!coverLetterExportState.canExport || exportBusy !== null}>
+                          {exportBusy === "docx" ? "Downloading..." : "Download DOCX"}
+                        </button>
+                      </div>
+                    </section>
                     <section className="claim-audit">
                       <div className="section-heading">
                         <h4>Claim audit</h4>
@@ -1066,7 +1169,17 @@ function App() {
                     </section>
                   </section>
                 ) : (
-                  <p className="empty-state compact">{claimAuditMessage(hasGeneratedDraft)}</p>
+                  <section className="export-panel disabled">
+                    <div className="section-heading">
+                      <h4>Export cover letter</h4>
+                      <p>{coverLetterExportState.reason ?? claimAuditMessage(hasGeneratedDraft)}</p>
+                    </div>
+                    <div className="form-actions">
+                      <button type="button" disabled>Copy</button>
+                      <button type="button" disabled>Download TXT</button>
+                      <button type="button" disabled>Download DOCX</button>
+                    </div>
+                  </section>
                 )}
               </section>
             </form>
@@ -1338,6 +1451,20 @@ function formatError(error: unknown): string {
     : "";
 
   return details ? `${apiError.message} ${details}` : apiError.message;
+}
+
+function fileNameFromContentDisposition(header: string | null, fallback: string): string {
+  if (!header) {
+    return fallback;
+  }
+
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1]);
+  }
+
+  const fileNameMatch = /filename="?([^";]+)"?/i.exec(header);
+  return fileNameMatch?.[1] ?? fallback;
 }
 
 function providerSummary(status: AiProviderStatus): string {

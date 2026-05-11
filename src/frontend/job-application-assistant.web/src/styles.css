@@ -508,6 +508,43 @@ button:disabled {
   line-height: 1.35;
 }
 
+.session-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.session-badges span {
+  padding: 3px 7px;
+  border: 1px solid #d7dde2;
+  border-radius: 999px;
+  color: #3f4a54;
+  background: #f7f8f5;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.session-badges .ready,
+.session-badges .audit-current {
+  border-color: #b8ddcd;
+  color: #24533b;
+  background: #e7f5ee;
+}
+
+.session-badges .muted,
+.session-badges .audit-notapplicable {
+  color: #64717c;
+  background: #f1f2ef;
+}
+
+.session-badges .audit-stale,
+.session-badges .audit-missing {
+  border-color: #e4c06e;
+  color: #714d12;
+  background: #fff2d8;
+}
+
 .empty-state {
   margin: 0;
   padding: 16px;
@@ -660,6 +697,25 @@ button:disabled {
 .workflow-note.info {
   color: #24533b;
   background: #dff1e7;
+}
+
+.workflow-note.neutral {
+  color: #3c4a55;
+  background: #eef2f5;
+}
+
+.export-panel {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #d7dde2;
+  border-radius: 8px;
+  background: #f7f8f5;
+}
+
+.export-panel.disabled {
+  background: #ffffff;
 }
 
 .claim-audit {
