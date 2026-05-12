@@ -1,6 +1,6 @@
 # Gap-Aware Draft Generation
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,16 +15,16 @@ Draft generation should receive approved profile facts, approved job-local custo
 
 ## Acceptance criteria
 
-- [ ] Draft generation receives saved gap decisions for the application.
-- [ ] Draft generation receives approved job-local custom facts for the application.
-- [ ] Draft generation excludes draft, rejected, or unapproved job-local custom facts.
-- [ ] `Ignore` gap decisions tell generation not to address the requirement unless other approved evidence supports it.
-- [ ] `MentionAsLearningInterest` gap decisions are available as cautious context but are not passed as approved evidence.
-- [ ] `CoveredByCustomFact` gap decisions support generation only through the linked approved job-local custom fact.
-- [ ] Fake AI remains deterministic when gap decisions and job-local custom facts are present.
-- [ ] Real provider prompt/input contracts preserve the rule that concrete claims require approved evidence.
-- [ ] Backend tests cover generation inputs for ignored gaps, learning-interest gaps, approved custom facts, and unapproved custom facts.
-- [ ] No combined draft-and-audit action, copy/export guided action, provider redesign, or profile import is introduced.
+- [x] Draft generation receives saved gap decisions for the application.
+- [x] Draft generation receives approved job-local custom facts for the application.
+- [x] Draft generation excludes draft, rejected, or unapproved job-local custom facts.
+- [x] `Ignore` gap decisions tell generation not to address the requirement unless other approved evidence supports it.
+- [x] `MentionAsLearningInterest` gap decisions are available as cautious context but are not passed as approved evidence.
+- [x] `CoveredByCustomFact` gap decisions support generation only through the linked approved job-local custom fact.
+- [x] Fake AI remains deterministic when gap decisions and job-local custom facts are present.
+- [x] Real provider prompt/input contracts preserve the rule that concrete claims require approved evidence.
+- [x] Backend tests cover generation inputs for ignored gaps, learning-interest gaps, approved custom facts, and unapproved custom facts.
+- [x] No combined draft-and-audit action, copy/export guided action, provider redesign, or profile import is introduced.
 
 ## Blocked by
 
