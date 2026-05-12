@@ -1,8 +1,6 @@
 # Agent Instructions
 
-Do only what I explicitly ask.
-
-Do not start dev servers, run builds, run tests, run lint, install dependencies, open browsers, or perform extra verification unless I explicitly ask for that action.
+Keep progress updates minimal. Do not narrate every file read or command. Only report blockers, assumptions, or final result.
 
 When implementation is requested, make the requested code changes only and stop.
 

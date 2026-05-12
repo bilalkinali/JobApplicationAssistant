@@ -1110,6 +1110,107 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task GenerateDraft_with_ollama_sends_gap_decisions_and_only_approved_custom_facts()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaDraftGenerationJson()) }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET, Azure, Docker, and Kubernetes.", "English");
+        var approvedCustomFactId = Guid.NewGuid();
+        var pendingCustomFactId = Guid.NewGuid();
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var stored = await db.JobApplications.FindAsync(application.Id);
+            Assert.NotNull(stored);
+            stored.ApprovedEvidence = JsonSerializer.Serialize(
+                new[]
+                {
+                    new EvidenceMatch(
+                        "match-dotnet-test",
+                        "dotnet",
+                        ".NET",
+                        "RequiredSkill",
+                        Guid.NewGuid(),
+                        "Approved API work",
+                        "Approved API work demonstrates .NET delivery.",
+                        [".NET"])
+                },
+                JsonOptions);
+            stored.UnmatchedRequirements = JsonSerializer.Serialize(
+                new[]
+                {
+                    new UnmatchedRequirement("unmatched-kubernetes", "kubernetes", "Kubernetes", "PreferredSkill", "Ignore unsupported Kubernetes."),
+                    new UnmatchedRequirement("unmatched-azure", "azure", "Azure", "PreferredSkill", "Mention Azure as learning interest."),
+                    new UnmatchedRequirement("unmatched-docker", "docker", "Docker", "PreferredSkill", "Covered by approved custom fact."),
+                    new UnmatchedRequirement("unmatched-react", "react", "React", "RequiredSkill", "Pending custom fact is not approved.")
+                },
+                JsonOptions);
+            stored.GapDecisions = JsonSerializer.Serialize(
+                new[]
+                {
+                    new GapDecisionTestItem("unmatched-kubernetes", "Ignore", null),
+                    new GapDecisionTestItem("unmatched-azure", "MentionAsLearningInterest", null),
+                    new GapDecisionTestItem("unmatched-docker", "CoveredByCustomFact", approvedCustomFactId),
+                    new GapDecisionTestItem("unmatched-react", "CoveredByCustomFact", pendingCustomFactId)
+                },
+                JsonOptions);
+            stored.CustomFacts = JsonSerializer.Serialize(
+                new[]
+                {
+                    new CustomFactTestItem(
+                        approvedCustomFactId,
+                        "unmatched-docker",
+                        "Approved Docker deployment",
+                        "Shipped a Docker-based deployment for a client.",
+                        ["Docker"],
+                        ["Shipped Docker deployment"],
+                        "Approved",
+                        DateTimeOffset.UtcNow,
+                        DateTimeOffset.UtcNow),
+                    new CustomFactTestItem(
+                        pendingCustomFactId,
+                        "unmatched-react",
+                        "Pending React claim",
+                        "Pending React work should not be supplied.",
+                        ["React"],
+                        ["Built React UI"],
+                        "PendingConfirmation",
+                        DateTimeOffset.UtcNow,
+                        null)
+                },
+                JsonOptions);
+            await db.SaveChangesAsync();
+        }
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var ollamaRequestJson = await Assert.Single(handler.Requests).Content!.ReadAsStringAsync();
+        Assert.Contains("Ignore", ollamaRequestJson);
+        Assert.Contains("MentionAsLearningInterest", ollamaRequestJson);
+        Assert.Contains("CoveredByCustomFact", ollamaRequestJson);
+        Assert.DoesNotContain("Ignore unsupported Kubernetes.", ollamaRequestJson);
+        Assert.DoesNotContain(pendingCustomFactId.ToString(), ollamaRequestJson);
+        Assert.Contains("Approved Docker deployment", ollamaRequestJson);
+        Assert.Contains("Shipped a Docker-based deployment for a client.", ollamaRequestJson);
+        Assert.DoesNotContain("Covered by approved custom fact.", ollamaRequestJson);
+        Assert.DoesNotContain("Pending React claim", ollamaRequestJson);
+        Assert.DoesNotContain("Pending React work should not be supplied.", ollamaRequestJson);
+
+        using var runScope = factory.Services.CreateScope();
+        var runDb = runScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(runDb.AiRuns);
+        Assert.Contains("\"unmatchedRequirementCount\":1", run.InputSummary);
+        Assert.Contains("\"gapDecisionCount\":3", run.InputSummary);
+        Assert.Contains("\"approvedCustomFactCount\":1", run.InputSummary);
+    }
+
+    [Fact]
     public async Task GenerateDraft_with_ollama_repairs_structurally_invalid_json_once()
     {
         var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
@@ -2212,7 +2313,19 @@ public sealed class ApplicationWorkflowApiTests
 
     private sealed record GapDecisionTestItem(
         string UnmatchedRequirementId,
-        string Decision);
+        string Decision,
+        Guid? CustomFactId = null);
+
+    private sealed record CustomFactTestItem(
+        Guid Id,
+        string UnmatchedRequirementId,
+        string Title,
+        string Summary,
+        IReadOnlyList<string> Technologies,
+        IReadOnlyList<string> AllowedClaims,
+        string Status,
+        DateTimeOffset CreatedAt,
+        DateTimeOffset? ReviewedAt);
 
     private static async Task MarkDraftAuditedAsync(WebApplicationFactory<Program> factory, Guid draftId)
     {

@@ -498,6 +498,21 @@ public sealed class OllamaAiProvider : IAiProvider
             requirement.Category,
             requirement.Recommendation
         });
+        var gapDecisions = input.GapDecisions.Select(decision => new
+        {
+            decision.UnmatchedRequirementId,
+            decision.Decision,
+            decision.CustomFactId
+        });
+        var approvedCustomFacts = input.ApprovedCustomFacts.Select(fact => new
+        {
+            fact.Id,
+            fact.UnmatchedRequirementId,
+            fact.Title,
+            fact.Summary,
+            fact.Technologies,
+            fact.AllowedClaims
+        });
 
         return $"""
         {DraftGenerationPrompt}
@@ -517,6 +532,12 @@ public sealed class OllamaAiProvider : IAiProvider
 
         Unmatched requirements:
         {JsonSerializer.Serialize(unmatchedRequirements, JsonOptions)}
+
+        Gap decisions:
+        {JsonSerializer.Serialize(gapDecisions, JsonOptions)}
+
+        Approved job-local custom facts:
+        {JsonSerializer.Serialize(approvedCustomFacts, JsonOptions)}
         """;
     }
 

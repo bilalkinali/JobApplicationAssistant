@@ -751,6 +751,12 @@ public static class ApplicationEndpoints
                 .OrderBy(profile => profile.CreatedAt)
                 .FirstOrDefaultAsync(ct);
             var unmatchedRequirements = ReadUnmatchedRequirements(application.UnmatchedRequirements);
+            var savedGapDecisions = ReadGapDecisions(application.GapDecisions, new Dictionary<string, string[]>())
+                .Select(decision => new DraftGapDecision(decision.UnmatchedRequirementId, decision.Decision, decision.CustomFactId))
+                .ToList();
+            var approvedCustomFacts = ReadApprovedCustomFactsForDraft(application);
+            var gapDecisions = SelectGapDecisionsForDraft(savedGapDecisions, approvedCustomFacts);
+            var draftUnmatchedRequirements = SelectUnmatchedRequirementsForDraft(unmatchedRequirements, gapDecisions);
             var tonePreference = string.Equals(application.SelectedLanguage, "Danish", StringComparison.OrdinalIgnoreCase)
                 ? profile?.DanishTone
                 : profile?.EnglishTone;
@@ -767,7 +773,9 @@ public static class ApplicationEndpoints
                 InputSummary = JsonSerializer.Serialize(new
                 {
                     ApprovedEvidenceCount = approvedEvidence.Count,
-                    UnmatchedRequirementCount = unmatchedRequirements.Count
+                    UnmatchedRequirementCount = draftUnmatchedRequirements.Count,
+                    GapDecisionCount = gapDecisions.Count,
+                    ApprovedCustomFactCount = approvedCustomFacts.Count
                 }, JsonOptions)
             };
             db.AiRuns.Add(run);
@@ -783,7 +791,9 @@ public static class ApplicationEndpoints
                         profile?.FullName,
                         tonePreference,
                         approvedEvidence,
-                        unmatchedRequirements),
+                        draftUnmatchedRequirements,
+                        gapDecisions,
+                        approvedCustomFacts),
                     ct);
             }
             catch (AiProviderException exception)
@@ -1472,6 +1482,74 @@ public static class ApplicationEndpoints
         }
 
         return approvedEvidence;
+    }
+
+    private static IReadOnlyList<DraftCustomFact> ReadApprovedCustomFactsForDraft(JobApplication application)
+    {
+        var approvedCustomFactsById = ReadCustomFacts(application.CustomFacts)
+            .Where(fact => string.Equals(fact.Status, "Approved", StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(fact => fact.Id, fact => fact);
+        var decisions = ReadGapDecisions(application.GapDecisions, new Dictionary<string, string[]>())
+            .Where(decision =>
+                string.Equals(decision.Decision, "CoveredByCustomFact", StringComparison.OrdinalIgnoreCase) &&
+                decision.CustomFactId is not null &&
+                approvedCustomFactsById.ContainsKey(decision.CustomFactId.Value));
+        var facts = new List<DraftCustomFact>();
+
+        foreach (var decision in decisions)
+        {
+            var customFact = approvedCustomFactsById[decision.CustomFactId!.Value];
+            if (!string.Equals(customFact.UnmatchedRequirementId, decision.UnmatchedRequirementId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            facts.Add(new DraftCustomFact(
+                customFact.Id,
+                customFact.UnmatchedRequirementId,
+                customFact.Title,
+                customFact.Summary,
+                customFact.Technologies,
+                customFact.AllowedClaims));
+        }
+
+        return facts
+            .DistinctBy(fact => fact.Id)
+            .ToList();
+    }
+
+    private static IReadOnlyList<UnmatchedRequirement> SelectUnmatchedRequirementsForDraft(
+        IReadOnlyList<UnmatchedRequirement> unmatchedRequirements,
+        IReadOnlyList<DraftGapDecision> gapDecisions)
+    {
+        if (gapDecisions.Count == 0)
+        {
+            return unmatchedRequirements;
+        }
+
+        var learningInterestIds = gapDecisions
+            .Where(decision => string.Equals(decision.Decision, "MentionAsLearningInterest", StringComparison.OrdinalIgnoreCase))
+            .Select(decision => decision.UnmatchedRequirementId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return unmatchedRequirements
+            .Where(requirement => learningInterestIds.Contains(requirement.Id))
+            .ToList();
+    }
+
+    private static IReadOnlyList<DraftGapDecision> SelectGapDecisionsForDraft(
+        IReadOnlyList<DraftGapDecision> gapDecisions,
+        IReadOnlyList<DraftCustomFact> approvedCustomFacts)
+    {
+        var approvedCustomFactIds = approvedCustomFacts
+            .Select(fact => fact.Id)
+            .ToHashSet();
+
+        return gapDecisions
+            .Where(decision =>
+                !string.Equals(decision.Decision, "CoveredByCustomFact", StringComparison.OrdinalIgnoreCase) ||
+                (decision.CustomFactId is not null && approvedCustomFactIds.Contains(decision.CustomFactId.Value)))
+            .ToList();
     }
 
     private static List<CustomFact> ReadCustomFacts(string customFacts)

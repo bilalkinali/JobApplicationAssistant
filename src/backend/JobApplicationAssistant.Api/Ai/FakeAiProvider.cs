@@ -149,16 +149,33 @@ public sealed partial class FakeAiProvider : IAiProvider
         var evidenceLines = input.ApprovedEvidence
             .Select(evidence => $"- {evidence.ProfileFactTitle}: {evidence.Summary}")
             .ToList();
-        var gapLines = input.UnmatchedRequirements
-            .Select(requirement => $"- I would treat {requirement.Requirement} as an area to learn, not as existing experience.")
+        var requirementsById = input.UnmatchedRequirements.ToDictionary(
+            requirement => requirement.Id,
+            StringComparer.OrdinalIgnoreCase);
+        var approvedCustomFactIds = input.ApprovedCustomFacts
+            .Select(fact => fact.Id)
+            .ToHashSet();
+        var gapLines = input.GapDecisions
+            .Select(decision => GapDecisionLine(decision, requirementsById, approvedCustomFactIds))
+            .Where(line => line is not null)
+            .Select(line => line!)
             .ToList();
+        if (input.GapDecisions.Count == 0)
+        {
+            gapLines = input.UnmatchedRequirements
+                .Select(requirement => $"- I would treat {requirement.Requirement} as an area to learn, not as existing experience.")
+                .ToList();
+        }
         var evidenceText = string.Join(Environment.NewLine, evidenceLines);
         var gapText = gapLines.Count == 0
-            ? "- I will keep the application focused on the reviewed evidence."
+            ? "- I will not address ignored or covered gaps unless reviewed evidence supports them."
             : string.Join(Environment.NewLine, gapLines);
         var toneText = string.IsNullOrWhiteSpace(input.TonePreference)
             ? "plain and evidence-led"
             : input.TonePreference.Trim();
+        var motivationGapText = gapLines.Count == 0
+            ? "I will keep unsupported gaps out of concrete claims."
+            : "I will describe selected unmatched requirements honestly as learning areas.";
 
         var coverLetter = $"""
             Language: {language}
@@ -178,10 +195,28 @@ public sealed partial class FakeAiProvider : IAiProvider
 
         var shortMotivation = $"""
             Language: {language}
-            I am interested in the {input.RoleTitle} role at {input.CompanyName} because my reviewed evidence includes {string.Join(", ", input.ApprovedEvidence.Select(evidence => evidence.ProfileFactTitle))}. I will describe unmatched requirements honestly as learning areas.
+            I am interested in the {input.RoleTitle} role at {input.CompanyName} because my reviewed evidence includes {string.Join(", ", input.ApprovedEvidence.Select(evidence => evidence.ProfileFactTitle))}. {motivationGapText}
             """;
 
         return Task.FromResult(new DraftGenerationResult(coverLetter, shortMotivation));
+    }
+
+    private static string? GapDecisionLine(
+        DraftGapDecision decision,
+        IReadOnlyDictionary<string, UnmatchedRequirement> requirementsById,
+        ISet<Guid> approvedCustomFactIds)
+    {
+        if (!requirementsById.TryGetValue(decision.UnmatchedRequirementId, out var requirement))
+        {
+            return null;
+        }
+
+        return decision.Decision switch
+        {
+            "MentionAsLearningInterest" => $"- I would treat {requirement.Requirement} as an area to learn, not as existing experience.",
+            "CoveredByCustomFact" when decision.CustomFactId is not null && approvedCustomFactIds.Contains(decision.CustomFactId.Value) => null,
+            _ => null
+        };
     }
 
     public Task<ClaimAuditResult> AuditClaimsAsync(ClaimAuditInput input, CancellationToken ct)
