@@ -1,6 +1,6 @@
 # Reviewed Job-Local Custom Facts
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,17 +15,17 @@ The user should be able to add an application-scoped custom fact from the eviden
 
 ## Acceptance criteria
 
-- [ ] Evidence review lets the user add a job-local custom fact for an unmatched requirement.
-- [ ] Job-local custom facts are scoped to one application.
-- [ ] Job-local custom facts require review before they can support generated claims.
-- [ ] The user can approve a job-local custom fact.
-- [ ] The user can reject a job-local custom fact.
-- [ ] An unmatched requirement can be marked `CoveredByCustomFact` only when it is linked to an approved job-local custom fact.
-- [ ] Approved job-local custom facts are available as evidence only for their owning application.
-- [ ] Draft, rejected, or unapproved job-local custom facts are excluded from approved evidence.
-- [ ] Job-local custom facts do not appear as reusable profile facts or evidence for other applications.
-- [ ] Backend and frontend tests cover creation, review, approval, rejection, gap coverage, and application scoping.
-- [ ] No assisted profile import, automatic custom fact approval, full fact history, or separate gap planning system is introduced.
+- [x] Evidence review lets the user add a job-local custom fact for an unmatched requirement.
+- [x] Job-local custom facts are scoped to one application.
+- [x] Job-local custom facts require review before they can support generated claims.
+- [x] The user can approve a job-local custom fact.
+- [x] The user can reject a job-local custom fact.
+- [x] An unmatched requirement can be marked `CoveredByCustomFact` only when it is linked to an approved job-local custom fact.
+- [x] Approved job-local custom facts are available as evidence only for their owning application.
+- [x] Draft, rejected, or unapproved job-local custom facts are excluded from approved evidence.
+- [x] Job-local custom facts do not appear as reusable profile facts or evidence for other applications.
+- [x] Backend and frontend tests cover creation, review, approval, rejection, gap coverage, and application scoping.
+- [x] No assisted profile import, automatic custom fact approval, full fact history, or separate gap planning system is introduced.
 
 ## Blocked by
 

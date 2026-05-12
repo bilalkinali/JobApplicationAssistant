@@ -43,6 +43,15 @@ public sealed record ApprovedEvidenceRequest(string? ApprovedEvidence);
 
 public sealed record GapDecisionsRequest(string? GapDecisions);
 
+public sealed record CustomFactRequest(
+    string? UnmatchedRequirementId,
+    string? Title,
+    string? Summary,
+    string[]? Technologies,
+    string[]? AllowedClaims);
+
+public sealed record CustomFactStatusRequest(string? Status);
+
 public sealed record ApplicationStatusRequest(string Status);
 
 public sealed record GeneratedDraftEditRequest(

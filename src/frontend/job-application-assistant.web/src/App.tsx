@@ -170,11 +170,21 @@ type EvidenceMatch = {
 
 type CustomFact = {
   id: string;
+  unmatchedRequirementId: string;
   title: string;
   summary: string;
   technologies?: string[];
   allowedClaims?: string[];
   status: "PendingConfirmation" | "Approved" | "Rejected" | string;
+  createdAt: string;
+  reviewedAt: string | null;
+};
+
+type CustomFactDraft = {
+  title: string;
+  summary: string;
+  technologies: string;
+  allowedClaims: string;
 };
 
 type UnmatchedRequirement = {
@@ -185,11 +195,12 @@ type UnmatchedRequirement = {
   recommendation: string;
 };
 
-type GapDecisionValue = "Ignore" | "MentionAsLearningInterest";
+type GapDecisionValue = "Ignore" | "MentionAsLearningInterest" | "CoveredByCustomFact";
 
 type GapDecision = {
   unmatchedRequirementId: string;
   decision: GapDecisionValue;
+  customFactId?: string;
 };
 
 type ClaimAudit = {
@@ -243,6 +254,7 @@ function App() {
   const [includeArchivedApplications, setIncludeArchivedApplications] = useState(false);
   const [approvedEvidenceDraft, setApprovedEvidenceDraft] = useState<EvidenceMatch[]>([]);
   const [gapDecisionsDraft, setGapDecisionsDraft] = useState<GapDecision[]>([]);
+  const [customFactDrafts, setCustomFactDrafts] = useState<Record<string, CustomFactDraft>>({});
   const [generatedDraftForm, setGeneratedDraftForm] = useState<GeneratedDraftForm>({
     coverLetterText: "",
     shortMotivationText: ""
@@ -303,20 +315,24 @@ function App() {
     () => parseJsonArray<GapDecision>(selectedApplication?.gapDecisions),
     [selectedApplication?.gapDecisions]
   );
-  const currentGapDecisionCount = useMemo(
-    () => countCurrentGapDecisions(savedGapDecisions, unmatchedRequirements),
-    [savedGapDecisions, unmatchedRequirements]
-  );
   const customFacts = useMemo(
     () => parseJsonArray<CustomFact>(selectedApplication?.customFacts),
     [selectedApplication?.customFacts]
+  );
+  const savedApprovedCustomFactEvidenceCount = useMemo(
+    () => countApprovedCustomFactEvidence(savedGapDecisions, unmatchedRequirements, customFacts),
+    [customFacts, savedGapDecisions, unmatchedRequirements]
+  );
+  const currentGapDecisionCount = useMemo(
+    () => countCurrentGapDecisions(savedGapDecisions, unmatchedRequirements, customFacts),
+    [customFacts, savedGapDecisions, unmatchedRequirements]
   );
   const claimAudit = useMemo(
     () => parseClaimAudit(selectedApplication?.generatedDraft?.claimAudit),
     [selectedApplication?.generatedDraft?.claimAudit]
   );
   const hasSavedJobPosting = Boolean(selectedApplication?.jobPostingText.trim());
-  const hasSavedApprovedEvidence = savedApprovedEvidence.length > 0;
+  const hasSavedApprovedEvidence = savedApprovedEvidence.length + savedApprovedCustomFactEvidenceCount > 0;
   const hasGeneratedDraft = Boolean(selectedApplication?.generatedDraft);
   const auditSummary = useMemo(() => summarizeClaimAudit(claimAudit), [claimAudit]);
   const hasUnsavedDraftEdits =
@@ -375,7 +391,7 @@ function App() {
         hasSavedJobPosting,
         preparationStatus: selectedApplication?.preparationStatus ?? "NotStarted",
         approvedProfileFactCount: approvedProfileFacts.length,
-        savedApprovedEvidenceCount: savedApprovedEvidence.length,
+        savedApprovedEvidenceCount: savedApprovedEvidence.length + savedApprovedCustomFactEvidenceCount,
         unmatchedRequirementCount: unmatchedRequirements.length,
         savedGapDecisionCount: currentGapDecisionCount,
         hasGeneratedDraft
@@ -386,6 +402,7 @@ function App() {
       hasGeneratedDraft,
       hasSavedJobPosting,
       savedApprovedEvidence.length,
+      savedApprovedCustomFactEvidenceCount,
       selectedApplication?.preparationStatus,
       selectedApplicationId,
       unmatchedRequirements.length
@@ -411,6 +428,10 @@ function App() {
   useEffect(() => {
     setGapDecisionsDraft(savedGapDecisions);
   }, [selectedApplicationId, savedGapDecisions]);
+
+  useEffect(() => {
+    setCustomFactDrafts({});
+  }, [selectedApplicationId]);
 
   useEffect(() => {
     setGeneratedDraftForm({
@@ -693,6 +714,65 @@ function App() {
     }
   }
 
+  async function createCustomFact(unmatchedRequirementId: string) {
+    if (!selectedApplicationId) {
+      setError(plainError("Validation blocker", "Save the application before adding job-local facts."));
+      return;
+    }
+
+    const draft = customFactDrafts[unmatchedRequirementId] ?? emptyCustomFactDraft();
+
+    setError(null);
+    setNotice(null);
+    setWorkflowBusy(`custom-fact-${unmatchedRequirementId}`);
+
+    try {
+      const saved = await apiSend<ApplicationSession>(
+        `/api/applications/${selectedApplicationId}/custom-facts`,
+        "POST",
+        {
+          unmatchedRequirementId,
+          title: draft.title,
+          summary: draft.summary,
+          technologies: splitLines(draft.technologies),
+          allowedClaims: splitLines(draft.allowedClaims)
+        }
+      );
+      replaceApplication(saved);
+      setCustomFactDrafts((current) => ({ ...current, [unmatchedRequirementId]: emptyCustomFactDraft() }));
+      setNotice("Job-local custom fact added for review.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    } finally {
+      setWorkflowBusy(null);
+    }
+  }
+
+  async function updateCustomFactStatus(customFactId: string, status: "Approved" | "Rejected") {
+    if (!selectedApplicationId) {
+      setError(plainError("Validation blocker", "Save the application before reviewing job-local facts."));
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setWorkflowBusy(`custom-fact-status-${customFactId}`);
+
+    try {
+      const saved = await apiSend<ApplicationSession>(
+        `/api/applications/${selectedApplicationId}/custom-facts/${customFactId}/status`,
+        "PUT",
+        { status }
+      );
+      replaceApplication(saved);
+      setNotice(status === "Approved" ? "Job-local custom fact approved." : "Job-local custom fact rejected.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    } finally {
+      setWorkflowBusy(null);
+    }
+  }
+
   async function generateDraft() {
     if (!selectedApplicationId) {
       setError(plainError("Validation blocker", "Save the application before generating a draft."));
@@ -951,11 +1031,22 @@ function App() {
     setApprovedEvidenceDraft((current) => current.filter((item) => item.id !== matchId));
   }
 
-  function decideGap(unmatchedRequirementId: string, decision: GapDecisionValue) {
+  function decideGap(unmatchedRequirementId: string, decision: GapDecisionValue, customFactId?: string) {
     setGapDecisionsDraft((current) => [
       ...current.filter((item) => item.unmatchedRequirementId !== unmatchedRequirementId),
-      { unmatchedRequirementId, decision }
+      { unmatchedRequirementId, decision, customFactId }
     ]);
+  }
+
+  function updateCustomFactDraft(unmatchedRequirementId: string, changes: Partial<CustomFactDraft>) {
+    setCustomFactDrafts((current) => ({
+      ...current,
+      [unmatchedRequirementId]: {
+        ...emptyCustomFactDraft(),
+        ...current[unmatchedRequirementId],
+        ...changes
+      }
+    }));
   }
 
   function startNewApplication() {
@@ -1284,8 +1375,8 @@ function App() {
                     <StatusBadge tone={preparationStatusTone(selectedApplication.preparationStatus)}>
                       {preparationStatusLabel(selectedApplication.preparationStatus)}
                     </StatusBadge>
-                    <StatusBadge tone={savedApprovedEvidence.length > 0 ? "approved" : "pending"}>
-                      {approvedEvidenceCountLabel(savedApprovedEvidence.length)}
+                    <StatusBadge tone={hasSavedApprovedEvidence ? "approved" : "pending"}>
+                      {approvedEvidenceCountLabel(savedApprovedEvidence.length + savedApprovedCustomFactEvidenceCount)}
                     </StatusBadge>
                     <StatusBadge tone={hasGeneratedDraft ? "approved" : "draft"}>
                       {hasGeneratedDraft ? "Draft saved" : "No draft"}
@@ -1361,6 +1452,9 @@ function App() {
                     {unmatchedRequirements.length === 0 && <p className="empty-state compact">No unmatched requirements recorded.</p>}
                     {unmatchedRequirements.map((requirement) => {
                       const gapDecision = gapDecisionForRequirement(gapDecisionsDraft, requirement.id);
+                      const requirementCustomFacts = customFactsForRequirement(customFacts, requirement.id);
+                      const approvedCustomFacts = requirementCustomFacts.filter((fact) => fact.status === "Approved");
+                      const customFactDraft = customFactDrafts[requirement.id] ?? emptyCustomFactDraft();
 
                       return (
                         <article className="evidence-card muted" key={requirement.id}>
@@ -1391,7 +1485,81 @@ function App() {
                             >
                               Mention as learning interest
                             </button>
+                            {approvedCustomFacts.map((fact) => (
+                              <button
+                                type="button"
+                                className={gapDecision?.decision === "CoveredByCustomFact" && gapDecision.customFactId === fact.id ? "selected" : ""}
+                                key={fact.id}
+                                onClick={() => decideGap(requirement.id, "CoveredByCustomFact", fact.id)}
+                              >
+                                Cover with {fact.title}
+                              </button>
+                            ))}
                           </div>
+
+                          <div className="custom-fact-editor">
+                            <Input
+                              label="Custom fact title"
+                              value={customFactDraft.title}
+                              onChange={(title) => updateCustomFactDraft(requirement.id, { title })}
+                            />
+                            <Textarea
+                              label="Custom fact summary"
+                              value={customFactDraft.summary}
+                              onChange={(summary) => updateCustomFactDraft(requirement.id, { summary })}
+                            />
+                            <Textarea
+                              label="Technologies"
+                              value={customFactDraft.technologies}
+                              onChange={(technologies) => updateCustomFactDraft(requirement.id, { technologies })}
+                            />
+                            <Textarea
+                              label="Allowed claims"
+                              value={customFactDraft.allowedClaims}
+                              onChange={(allowedClaims) => updateCustomFactDraft(requirement.id, { allowedClaims })}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => createCustomFact(requirement.id)}
+                              disabled={workflowBusy !== null}
+                              title={disabledTitle(workflowBusy !== null, workflowBusyReason)}
+                            >
+                              {workflowBusy === `custom-fact-${requirement.id}` ? "Adding..." : "Add job-local fact"}
+                            </button>
+                          </div>
+
+                          {requirementCustomFacts.length > 0 && (
+                            <div className="custom-fact-list compact">
+                              {requirementCustomFacts.map((fact) => (
+                                <article className={`custom-fact ${customFactStatusClass(fact.status)}`} key={fact.id}>
+                                  <StatusBadge tone={customFactStatusTone(fact.status)}>{customFactStatusLabel(fact.status)}</StatusBadge>
+                                  <strong>{fact.title}</strong>
+                                  <p>{fact.summary}</p>
+                                  {fact.technologies && fact.technologies.length > 0 && <small>{fact.technologies.join(", ")}</small>}
+                                  {fact.status === "PendingConfirmation" && (
+                                    <div className="custom-fact-actions">
+                                      <button
+                                        type="button"
+                                        onClick={() => updateCustomFactStatus(fact.id, "Approved")}
+                                        disabled={workflowBusy !== null}
+                                        title={disabledTitle(workflowBusy !== null, workflowBusyReason)}
+                                      >
+                                        Approve
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => updateCustomFactStatus(fact.id, "Rejected")}
+                                        disabled={workflowBusy !== null}
+                                        title={disabledTitle(workflowBusy !== null, workflowBusyReason)}
+                                      >
+                                        Reject
+                                      </button>
+                                    </div>
+                                  )}
+                                </article>
+                              ))}
+                            </div>
+                          )}
                         </article>
                       );
                     })}
@@ -1437,13 +1605,13 @@ function App() {
                     const requirement = unmatchedRequirements.find((item) => item.id === decision.unmatchedRequirementId);
 
                     return (
-                      <article className={`gap-decision-item ${decision.decision === "Ignore" ? "ignored" : "learning"}`} key={decision.unmatchedRequirementId}>
+                      <article className={`gap-decision-item ${gapDecisionClass(decision)}`} key={decision.unmatchedRequirementId}>
                         <div>
-                          <StatusBadge tone={decision.decision === "Ignore" ? "neutral" : "pending"}>
+                          <StatusBadge tone={gapDecisionTone(decision)}>
                             {gapDecisionLabel(decision.decision)}
                           </StatusBadge>
                           <strong>{requirement?.requirement ?? decision.unmatchedRequirementId}</strong>
-                          <span>{decision.decision === "Ignore" ? "Will not be called out in the review guidance." : "May be framed cautiously as interest, not proof."}</span>
+                          <span>{gapDecisionSummary(decision, customFacts)}</span>
                         </div>
                       </article>
                     );
@@ -2040,28 +2208,81 @@ function applicationStatusLabel(status: string): string {
 function applicationNextActionLabel(application: ApplicationSession, approvedProfileFactCount: number): string {
   const unmatchedRequirements = parseJsonArray<UnmatchedRequirement>(application.unmatchedRequirements);
   const gapDecisions = parseJsonArray<GapDecision>(application.gapDecisions);
+  const customFacts = parseJsonArray<CustomFact>(application.customFacts);
 
   return getGuidedNextAction({
     selectedApplicationId: application.id,
     hasSavedJobPosting: Boolean(application.jobPostingText.trim()),
     preparationStatus: application.preparationStatus,
     approvedProfileFactCount,
-    savedApprovedEvidenceCount: parseJsonArray<EvidenceMatch>(application.approvedEvidence).length,
+    savedApprovedEvidenceCount:
+      parseJsonArray<EvidenceMatch>(application.approvedEvidence).length +
+      countApprovedCustomFactEvidence(gapDecisions, unmatchedRequirements, customFacts),
     unmatchedRequirementCount: unmatchedRequirements.length,
-    savedGapDecisionCount: countCurrentGapDecisions(gapDecisions, unmatchedRequirements),
+    savedGapDecisionCount: countCurrentGapDecisions(gapDecisions, unmatchedRequirements, customFacts),
     hasGeneratedDraft: application.hasGeneratedDraft
   }).title;
 }
 
-function countCurrentGapDecisions(decisions: GapDecision[], requirements: UnmatchedRequirement[]): number {
+function countCurrentGapDecisions(
+  decisions: GapDecision[],
+  requirements: UnmatchedRequirement[],
+  customFacts: CustomFact[] = []
+): number {
   const requirementIds = new Set(requirements.map((requirement) => requirement.id));
+  const approvedCustomFactsById = new Map(
+    customFacts
+      .filter((fact) => fact.status === "Approved")
+      .map((fact) => [fact.id, fact])
+  );
   const decidedRequirementIds = new Set(
     decisions
-      .filter((decision) => requirementIds.has(decision.unmatchedRequirementId))
+      .filter((decision) => {
+        if (!requirementIds.has(decision.unmatchedRequirementId)) {
+          return false;
+        }
+
+        if (decision.decision !== "CoveredByCustomFact") {
+          return true;
+        }
+
+        const customFact = decision.customFactId ? approvedCustomFactsById.get(decision.customFactId) : null;
+        return customFact?.unmatchedRequirementId === decision.unmatchedRequirementId;
+      })
       .map((decision) => decision.unmatchedRequirementId)
   );
 
   return decidedRequirementIds.size;
+}
+
+function countApprovedCustomFactEvidence(
+  decisions: GapDecision[],
+  requirements: UnmatchedRequirement[],
+  customFacts: CustomFact[]
+): number {
+  const requirementIds = new Set(requirements.map((requirement) => requirement.id));
+  const approvedCustomFactsById = new Map(
+    customFacts
+      .filter((fact) => fact.status === "Approved")
+      .map((fact) => [fact.id, fact])
+  );
+
+  return new Set(
+    decisions
+      .filter((decision) => {
+        if (decision.decision !== "CoveredByCustomFact" || !requirementIds.has(decision.unmatchedRequirementId)) {
+          return false;
+        }
+
+        const customFact = decision.customFactId ? approvedCustomFactsById.get(decision.customFactId) : null;
+        return customFact?.unmatchedRequirementId === decision.unmatchedRequirementId;
+      })
+      .map((decision) => decision.unmatchedRequirementId)
+  ).size;
+}
+
+function customFactsForRequirement(facts: CustomFact[], unmatchedRequirementId: string): CustomFact[] {
+  return facts.filter((fact) => fact.unmatchedRequirementId === unmatchedRequirementId);
 }
 
 function gapDecisionForRequirement(decisions: GapDecision[], unmatchedRequirementId: string): GapDecision | undefined {
@@ -2074,9 +2295,59 @@ function gapDecisionLabel(decision: GapDecisionValue): string {
       return "Ignored gap";
     case "MentionAsLearningInterest":
       return "Learning interest";
+    case "CoveredByCustomFact":
+      return "Covered by custom fact";
     default:
       return decision;
   }
+}
+
+function gapDecisionTone(decision: GapDecision): string {
+  if (decision.decision === "Ignore") {
+    return "neutral";
+  }
+
+  return decision.decision === "CoveredByCustomFact" ? "approved" : "pending";
+}
+
+function gapDecisionClass(decision: GapDecision): string {
+  switch (decision.decision) {
+    case "Ignore":
+      return "ignored";
+    case "CoveredByCustomFact":
+      return "covered";
+    default:
+      return "learning";
+  }
+}
+
+function gapDecisionSummary(decision: GapDecision, customFacts: CustomFact[]): string {
+  switch (decision.decision) {
+    case "Ignore":
+      return "Will not be called out in the review guidance.";
+    case "CoveredByCustomFact": {
+      const customFact = customFacts.find((fact) => fact.id === decision.customFactId);
+      return customFact ? `Supported by approved job-local fact: ${customFact.title}.` : "Requires an approved job-local custom fact.";
+    }
+    default:
+      return "May be framed cautiously as interest, not proof.";
+  }
+}
+
+function emptyCustomFactDraft(): CustomFactDraft {
+  return {
+    title: "",
+    summary: "",
+    technologies: "",
+    allowedClaims: ""
+  };
+}
+
+function splitLines(value: string): string[] {
+  return value
+    .split(/\r?\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function guidedActionButtonLabel(label: string, kind: string, workflowBusy: string | null): string {

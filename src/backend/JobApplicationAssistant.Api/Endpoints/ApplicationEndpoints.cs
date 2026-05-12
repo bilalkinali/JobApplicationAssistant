@@ -398,6 +398,7 @@ public static class ApplicationEndpoints
             application.UnmatchedRequirements = JsonSerializer.Serialize(matchingResult.UnmatchedRequirements, JsonOptions);
             application.ApprovedEvidence = "[]";
             application.GapDecisions = "[]";
+            application.CustomFacts = "[]";
             application.Status = "PreparedForEvidenceReview";
             application.LastPreparedAt = now;
             application.PreparationStatus = "PreparedForEvidenceReview";
@@ -490,6 +491,7 @@ public static class ApplicationEndpoints
             application.UnmatchedRequirements = "[]";
             application.ApprovedEvidence = "[]";
             application.GapDecisions = "[]";
+            application.CustomFacts = "[]";
             application.PreparationStatus = "NotStarted";
             application.LastPreparedAt = null;
             application.Status = application.Status == "Draft" ? "PostingCaptured" : application.Status;
@@ -580,6 +582,7 @@ public static class ApplicationEndpoints
             application.UnmatchedRequirements = JsonSerializer.Serialize(result.UnmatchedRequirements, JsonOptions);
             application.ApprovedEvidence = "[]";
             application.GapDecisions = "[]";
+            application.CustomFacts = "[]";
             application.Status = application.Status is "Draft" or "PostingCaptured" ? "ReadyForReview" : application.Status;
             application.UpdatedAt = DateTimeOffset.UtcNow;
             run.Status = result.AttemptCount > 1 ? "RepairedSucceeded" : "Succeeded";
@@ -627,7 +630,7 @@ public static class ApplicationEndpoints
                 return Results.NotFound(ApiError.NotFound("Application session was not found."));
             }
 
-            var validation = ValidateGapDecisions(request, application.UnmatchedRequirements);
+            var validation = ValidateGapDecisions(request, application.UnmatchedRequirements, application.CustomFacts);
             if (validation.Errors.Count > 0)
             {
                 return Results.BadRequest(ApiError.Validation(validation.Errors));
@@ -635,6 +638,81 @@ public static class ApplicationEndpoints
 
             application.GapDecisions = JsonSerializer.Serialize(validation.GapDecisions, JsonOptions);
             application.Status = application.Status is "Draft" or "PostingCaptured" ? "ReadyForReview" : application.Status;
+            application.UpdatedAt = DateTimeOffset.UtcNow;
+
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(ToResponse(application));
+        });
+
+        group.MapPost("/{id:guid}/custom-facts", async Task<IResult> (Guid id, CustomFactRequest request, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var application = await db.JobApplications.FindAsync([id], ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            var validation = ValidateCustomFact(request, application.UnmatchedRequirements);
+            if (validation.Errors.Count > 0 || validation.CustomFact is null)
+            {
+                return Results.BadRequest(ApiError.Validation(validation.Errors));
+            }
+
+            var customFacts = ReadCustomFacts(application.CustomFacts);
+            customFacts.Add(validation.CustomFact);
+            application.CustomFacts = JsonSerializer.Serialize(customFacts, JsonOptions);
+            application.UpdatedAt = DateTimeOffset.UtcNow;
+
+            await db.SaveChangesAsync(ct);
+
+            return Results.Created($"/api/applications/{application.Id}/custom-facts/{validation.CustomFact.Id}", ToResponse(application));
+        });
+
+        group.MapPut("/{id:guid}/custom-facts/{customFactId:guid}/status", async Task<IResult> (
+            Guid id,
+            Guid customFactId,
+            CustomFactStatusRequest request,
+            ApplicationDbContext db,
+            CancellationToken ct) =>
+        {
+            var application = await db.JobApplications.FindAsync([id], ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            var status = NormalizeCustomFactStatus(request.Status);
+            if (status is null)
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(request.Status)] = ["Status must be Approved or Rejected."]
+                }));
+            }
+
+            var customFacts = ReadCustomFacts(application.CustomFacts);
+            var factIndex = customFacts.FindIndex(fact => fact.Id == customFactId);
+            if (factIndex < 0)
+            {
+                return Results.NotFound(ApiError.NotFound("Job-local custom fact was not found."));
+            }
+
+            customFacts[factIndex] = customFacts[factIndex] with
+            {
+                Status = status,
+                ReviewedAt = DateTimeOffset.UtcNow
+            };
+            application.CustomFacts = JsonSerializer.Serialize(customFacts, JsonOptions);
+            if (status == "Rejected")
+            {
+                application.GapDecisions = JsonSerializer.Serialize(
+                    ReadGapDecisions(application.GapDecisions, new Dictionary<string, string[]>())
+                        .Where(decision => decision.CustomFactId != customFactId)
+                        .ToList(),
+                    JsonOptions);
+            }
+
             application.UpdatedAt = DateTimeOffset.UtcNow;
 
             await db.SaveChangesAsync(ct);
@@ -660,7 +738,7 @@ public static class ApplicationEndpoints
                 }));
             }
 
-            var approvedEvidence = ReadEvidenceMatches(application.ApprovedEvidence);
+            var approvedEvidence = ReadApprovedEvidenceForApplication(application);
             if (approvedEvidence.Count == 0)
             {
                 return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
@@ -810,7 +888,7 @@ public static class ApplicationEndpoints
             }
 
             var draft = application.GeneratedDraft;
-            var approvedEvidence = ReadEvidenceMatches(application.ApprovedEvidence);
+            var approvedEvidence = ReadApprovedEvidenceForApplication(application);
             var run = new AiRun
             {
                 Id = Guid.NewGuid(),
@@ -1093,11 +1171,15 @@ public static class ApplicationEndpoints
         return new ApprovedEvidenceValidation(errors, approvedEvidence);
     }
 
-    private static GapDecisionValidation ValidateGapDecisions(GapDecisionsRequest request, string unmatchedRequirementsJson)
+    private static GapDecisionValidation ValidateGapDecisions(
+        GapDecisionsRequest request,
+        string unmatchedRequirementsJson,
+        string customFactsJson)
     {
         var errors = new Dictionary<string, string[]>();
         var decisions = ReadGapDecisions(request.GapDecisions, errors);
         var currentRequirements = ReadUnmatchedRequirements(unmatchedRequirementsJson);
+        var customFacts = ReadCustomFacts(customFactsJson);
 
         if (errors.Count > 0)
         {
@@ -1117,12 +1199,64 @@ public static class ApplicationEndpoints
             return new GapDecisionValidation(errors, []);
         }
 
+        var approvedCustomFactsById = customFacts
+            .Where(fact => string.Equals(fact.Status, "Approved", StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(fact => fact.Id, fact => fact);
+        var invalidCustomFactDecision = decisions.Any(decision =>
+            string.Equals(decision.Decision, "CoveredByCustomFact", StringComparison.OrdinalIgnoreCase) &&
+            (decision.CustomFactId is null ||
+            !approvedCustomFactsById.TryGetValue(decision.CustomFactId.Value, out var customFact) ||
+            !string.Equals(customFact.UnmatchedRequirementId, decision.UnmatchedRequirementId, StringComparison.OrdinalIgnoreCase)));
+
+        if (invalidCustomFactDecision)
+        {
+            errors[nameof(request.GapDecisions)] = ["CoveredByCustomFact decisions must link to an approved job-local custom fact for the same unmatched requirement."];
+            return new GapDecisionValidation(errors, []);
+        }
+
         var normalizedDecisions = decisions
             .GroupBy(decision => decision.UnmatchedRequirementId, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.Last())
             .ToList();
 
         return new GapDecisionValidation(errors, normalizedDecisions);
+    }
+
+    private static CustomFactValidation ValidateCustomFact(CustomFactRequest request, string unmatchedRequirementsJson)
+    {
+        var errors = new Dictionary<string, string[]>();
+        var unmatchedRequirementId = NormalizeOptional(request.UnmatchedRequirementId);
+        var title = NormalizeOptional(request.Title);
+        var summary = NormalizeOptional(request.Summary);
+
+        AddRequired(errors, nameof(request.UnmatchedRequirementId), request.UnmatchedRequirementId ?? string.Empty, 120);
+        AddRequired(errors, nameof(request.Title), request.Title ?? string.Empty, 200);
+        AddRequired(errors, nameof(request.Summary), request.Summary ?? string.Empty, 4000);
+
+        var currentRequirements = ReadUnmatchedRequirements(unmatchedRequirementsJson);
+        if (unmatchedRequirementId is not null &&
+            !currentRequirements.Any(requirement => string.Equals(requirement.Id, unmatchedRequirementId, StringComparison.OrdinalIgnoreCase)))
+        {
+            errors[nameof(request.UnmatchedRequirementId)] = ["Job-local custom facts must refer to a current unmatched requirement."];
+        }
+
+        if (errors.Count > 0 || unmatchedRequirementId is null || title is null || summary is null)
+        {
+            return new CustomFactValidation(errors, null);
+        }
+
+        return new CustomFactValidation(
+            errors,
+            new CustomFact(
+                Guid.NewGuid(),
+                unmatchedRequirementId,
+                title,
+                summary,
+                NormalizeStringList(request.Technologies),
+                NormalizeStringList(request.AllowedClaims),
+                "PendingConfirmation",
+                DateTimeOffset.UtcNow,
+                null));
     }
 
     private static IReadOnlyList<string> ReadApprovedEvidenceIds(string? value, Dictionary<string, string[]> errors)
@@ -1198,11 +1332,25 @@ public static class ApplicationEndpoints
                 var decision = NormalizeGapDecision(decisionProperty.GetString());
                 if (decision is null)
                 {
-                    errors[nameof(GapDecisionsRequest.GapDecisions)] = ["Gap decision must be Ignore or MentionAsLearningInterest."];
+                    errors[nameof(GapDecisionsRequest.GapDecisions)] = ["Gap decision must be Ignore, MentionAsLearningInterest, or CoveredByCustomFact."];
                     return [];
                 }
 
-                decisions.Add(new GapDecision(idProperty.GetString()!.Trim(), decision));
+                Guid? customFactId = null;
+                if (string.Equals(decision, "CoveredByCustomFact", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!element.TryGetProperty("customFactId", out var customFactIdProperty) ||
+                        customFactIdProperty.ValueKind != JsonValueKind.String ||
+                        !Guid.TryParse(customFactIdProperty.GetString(), out var parsedCustomFactId))
+                    {
+                        errors[nameof(GapDecisionsRequest.GapDecisions)] = ["CoveredByCustomFact decisions must include customFactId."];
+                        return [];
+                    }
+
+                    customFactId = parsedCustomFactId;
+                }
+
+                decisions.Add(new GapDecision(idProperty.GetString()!.Trim(), decision, customFactId));
             }
 
             return decisions;
@@ -1225,9 +1373,32 @@ public static class ApplicationEndpoints
         {
             var decision when string.Equals(decision, "Ignore", StringComparison.OrdinalIgnoreCase) => "Ignore",
             var decision when string.Equals(decision, "MentionAsLearningInterest", StringComparison.OrdinalIgnoreCase) => "MentionAsLearningInterest",
+            var decision when string.Equals(decision, "CoveredByCustomFact", StringComparison.OrdinalIgnoreCase) => "CoveredByCustomFact",
             _ => null
         };
     }
+
+    private static string? NormalizeCustomFactStatus(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim() switch
+        {
+            var status when string.Equals(status, "Approved", StringComparison.OrdinalIgnoreCase) => "Approved",
+            var status when string.Equals(status, "Rejected", StringComparison.OrdinalIgnoreCase) => "Rejected",
+            _ => null
+        };
+    }
+
+    private static IReadOnlyList<string> NormalizeStringList(IReadOnlyList<string>? values) =>
+        values?
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
 
     private static IReadOnlyList<JobSignal> ReadJobSignals(string jobSignals)
     {
@@ -1266,15 +1437,79 @@ public static class ApplicationEndpoints
         }
     }
 
+    private static IReadOnlyList<EvidenceMatch> ReadApprovedEvidenceForApplication(JobApplication application)
+    {
+        var approvedEvidence = ReadEvidenceMatches(application.ApprovedEvidence).ToList();
+        var unmatchedById = ReadUnmatchedRequirements(application.UnmatchedRequirements)
+            .ToDictionary(requirement => requirement.Id, StringComparer.OrdinalIgnoreCase);
+        var approvedCustomFactsById = ReadCustomFacts(application.CustomFacts)
+            .Where(fact => string.Equals(fact.Status, "Approved", StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(fact => fact.Id, fact => fact);
+        var decisions = ReadGapDecisions(application.GapDecisions, new Dictionary<string, string[]>())
+            .Where(decision =>
+                string.Equals(decision.Decision, "CoveredByCustomFact", StringComparison.OrdinalIgnoreCase) &&
+                decision.CustomFactId is not null &&
+                approvedCustomFactsById.ContainsKey(decision.CustomFactId.Value));
+
+        foreach (var decision in decisions)
+        {
+            var customFact = approvedCustomFactsById[decision.CustomFactId!.Value];
+            if (!unmatchedById.TryGetValue(decision.UnmatchedRequirementId, out var requirement) ||
+                !string.Equals(customFact.UnmatchedRequirementId, requirement.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            approvedEvidence.Add(new EvidenceMatch(
+                $"custom-fact-{customFact.Id:N}",
+                requirement.SignalId,
+                requirement.Requirement,
+                requirement.Category,
+                customFact.Id,
+                customFact.Title,
+                customFact.Summary,
+                customFact.Technologies));
+        }
+
+        return approvedEvidence;
+    }
+
+    private static List<CustomFact> ReadCustomFacts(string customFacts)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<CustomFact>>(customFacts, JsonOptions) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
     private sealed record ApprovedEvidenceValidation(
         Dictionary<string, string[]> Errors,
         IReadOnlyList<EvidenceMatch> ApprovedEvidence);
 
-    private sealed record GapDecision(string UnmatchedRequirementId, string Decision);
+    private sealed record GapDecision(string UnmatchedRequirementId, string Decision, Guid? CustomFactId = null);
 
     private sealed record GapDecisionValidation(
         Dictionary<string, string[]> Errors,
         IReadOnlyList<GapDecision> GapDecisions);
+
+    private sealed record CustomFact(
+        Guid Id,
+        string UnmatchedRequirementId,
+        string Title,
+        string Summary,
+        IReadOnlyList<string> Technologies,
+        IReadOnlyList<string> AllowedClaims,
+        string Status,
+        DateTimeOffset CreatedAt,
+        DateTimeOffset? ReviewedAt);
+
+    private sealed record CustomFactValidation(
+        Dictionary<string, string[]> Errors,
+        CustomFact? CustomFact);
 
     private sealed record OptionalFilter(string? Value, bool IsInvalid);
 }
