@@ -343,9 +343,6 @@ public static class ApplicationEndpoints
             application.DetectedLanguage = analysisResult.DetectedLanguage;
             application.SelectedLanguage = analysisResult.SelectedLanguage;
             application.JobSignals = JsonSerializer.Serialize(analysisResult.JobSignals, JsonOptions);
-            application.EvidenceMatches = "[]";
-            application.UnmatchedRequirements = "[]";
-            application.ApprovedEvidence = "[]";
             application.Status = application.Status == "Draft" ? "PostingCaptured" : application.Status;
             application.UpdatedAt = DateTimeOffset.UtcNow;
             analysisRun.Status = analysisResult.AttemptCount > 1 ? "RepairedSucceeded" : "Succeeded";
@@ -391,7 +388,8 @@ public static class ApplicationEndpoints
 
                 return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
                 {
-                    ["AiProvider"] = [exception.Message]
+                    ["AiProvider"] = [exception.Message],
+                    ["Preparation"] = ["Job analysis completed, but evidence matching failed. Retry preparation before reviewing evidence."]
                 }));
             }
 

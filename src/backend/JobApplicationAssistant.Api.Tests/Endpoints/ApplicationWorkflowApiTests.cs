@@ -430,6 +430,11 @@ public sealed class ApplicationWorkflowApiTests
         var response = await client.PostAsync($"/api/applications/{application.Id}/prepare", null);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains("AiProvider", error.Details!.Keys);
+        Assert.Contains("unavailable", error.Details["AiProvider"][0], StringComparison.OrdinalIgnoreCase);
+
         var reopenedResponse = await client.GetAsync($"/api/applications/{application.Id}");
         reopenedResponse.EnsureSuccessStatusCode();
         var reopened = await reopenedResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
@@ -440,6 +445,17 @@ public sealed class ApplicationWorkflowApiTests
         Assert.Equal("{}", reopened.JobSignals);
         Assert.Equal("FailedProviderUnavailable", reopened.PreparationStatus);
         Assert.Null(reopened.LastPreparedAt);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("JobAnalysis", run.Step);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+        Assert.Equal("Ollama", run.Provider);
+        Assert.Equal("llama3.1:8b", run.Model);
+        Assert.Equal(1, run.AttemptCount);
+        Assert.NotNull(run.CompletedAt);
     }
 
     [Fact]
@@ -458,6 +474,11 @@ public sealed class ApplicationWorkflowApiTests
         var response = await client.PostAsync($"/api/applications/{application.Id}/prepare", null);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains("AiProvider", error.Details!.Keys);
+        Assert.Contains("invalid", error.Details["AiProvider"][0], StringComparison.OrdinalIgnoreCase);
+
         var reopenedResponse = await client.GetAsync($"/api/applications/{application.Id}");
         reopenedResponse.EnsureSuccessStatusCode();
         var reopened = await reopenedResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
@@ -468,6 +489,17 @@ public sealed class ApplicationWorkflowApiTests
         Assert.Equal("{}", reopened.JobSignals);
         Assert.Equal("FailedInvalidProviderOutput", reopened.PreparationStatus);
         Assert.Null(reopened.LastPreparedAt);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("JobAnalysis", run.Step);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("InvalidOutput", run.ErrorCode);
+        Assert.Equal("Ollama", run.Provider);
+        Assert.Equal("llama3.1:8b", run.Model);
+        Assert.Equal(2, run.AttemptCount);
+        Assert.NotNull(run.CompletedAt);
     }
 
     [Fact]
@@ -482,10 +514,23 @@ public sealed class ApplicationWorkflowApiTests
         using var client = factory.CreateClient();
         await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
         var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        await SetEvidenceReviewStateAsync(
+            factory,
+            application.Id,
+            """[{"id":"existing-match","signalId":"legacy","profileFactId":"00000000-0000-0000-0000-000000000001","summary":"Existing match","matchedTerms":["Legacy"]}]""",
+            """[{"id":"existing-unmatched","signalId":"legacy-gap","requirement":"Legacy gap","recommendation":"Existing recommendation"}]""",
+            """[{"id":"existing-approved"}]""");
+        var existingDraft = await AddGeneratedDraftAsync(factory, application.Id);
 
         var response = await client.PostAsync($"/api/applications/{application.Id}/prepare", null);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains("AiProvider", error.Details!.Keys);
+        Assert.Contains("Preparation", error.Details.Keys);
+        Assert.Contains("Retry preparation before reviewing evidence.", error.Details["Preparation"][0]);
+
         var reopenedResponse = await client.GetAsync($"/api/applications/{application.Id}");
         reopenedResponse.EnsureSuccessStatusCode();
         var reopened = await reopenedResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
@@ -499,8 +544,24 @@ public sealed class ApplicationWorkflowApiTests
         var signals = JsonSerializer.Deserialize<JobSignalsDocument>(reopened.JobSignals, JsonOptions);
         Assert.NotNull(signals);
         Assert.Contains(".NET", signals.RequiredSkills);
-        Assert.Equal("[]", reopened.EvidenceMatches);
-        Assert.Equal("[]", reopened.ApprovedEvidence);
+        Assert.Contains("existing-match", reopened.EvidenceMatches);
+        Assert.Contains("existing-unmatched", reopened.UnmatchedRequirements);
+        Assert.Contains("existing-approved", reopened.ApprovedEvidence);
+        Assert.NotNull(reopened.GeneratedDraft);
+        Assert.Equal(existingDraft.Id, reopened.GeneratedDraft.Id);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var runs = db.AiRuns.OrderBy(run => run.StartedAt).ToList();
+        Assert.Equal(2, runs.Count);
+        Assert.Equal("JobAnalysis", runs[0].Step);
+        Assert.Equal("Succeeded", runs[0].Status);
+        Assert.Null(runs[0].ErrorCode);
+        Assert.NotNull(runs[0].CompletedAt);
+        Assert.Equal("EvidenceMatching", runs[1].Step);
+        Assert.Equal("Failed", runs[1].Status);
+        Assert.Equal("ProviderUnavailable", runs[1].ErrorCode);
+        Assert.NotNull(runs[1].CompletedAt);
     }
 
     [Fact]
@@ -2040,6 +2101,23 @@ public sealed class ApplicationWorkflowApiTests
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var application = await db.JobApplications.FindAsync(applicationId);
         Assert.NotNull(application);
+        application.ApprovedEvidence = approvedEvidence;
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SetEvidenceReviewStateAsync(
+        WebApplicationFactory<Program> factory,
+        Guid applicationId,
+        string evidenceMatches,
+        string unmatchedRequirements,
+        string approvedEvidence)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var application = await db.JobApplications.FindAsync(applicationId);
+        Assert.NotNull(application);
+        application.EvidenceMatches = evidenceMatches;
+        application.UnmatchedRequirements = unmatchedRequirements;
         application.ApprovedEvidence = approvedEvidence;
         await db.SaveChangesAsync();
     }
