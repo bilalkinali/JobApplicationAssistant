@@ -880,6 +880,94 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task PutGapDecisions_persists_current_unmatched_requirement_decisions()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        await SetEvidenceReviewStateAsync(
+            factory,
+            application.Id,
+            "[]",
+            JsonSerializer.Serialize(
+                new[]
+                {
+                    new UnmatchedRequirement(
+                        "unmatched-dotnet",
+                        "dotnet",
+                        ".NET",
+                        "RequiredSkill",
+                        "Ignore if not relevant."),
+                    new UnmatchedRequirement(
+                        "unmatched-kubernetes",
+                        "kubernetes",
+                        "Kubernetes",
+                        "PreferredSkill",
+                        "Mention as learning interest.")
+                },
+                JsonOptions),
+            "[]");
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/applications/{application.Id}/gap-decisions",
+            new GapDecisionsRequest(
+                """
+                [
+                  {"unmatchedRequirementId":"unmatched-dotnet","decision":"Ignore"},
+                  {"unmatchedRequirementId":"unmatched-kubernetes","decision":"Ignore"},
+                  {"unmatchedRequirementId":"unmatched-kubernetes","decision":"MentionAsLearningInterest"}
+                ]
+                """));
+
+        response.EnsureSuccessStatusCode();
+        var updateResponse = await client.PutAsJsonAsync(
+            $"/api/applications/{application.Id}/gap-decisions",
+            new GapDecisionsRequest(
+                """
+                [
+                  {"unmatchedRequirementId":"unmatched-dotnet","decision":"MentionAsLearningInterest"},
+                  {"unmatchedRequirementId":"unmatched-kubernetes","decision":"Ignore"}
+                ]
+                """));
+        updateResponse.EnsureSuccessStatusCode();
+        var reopened = await client.GetFromJsonAsync<ApplicationResponse>($"/api/applications/{application.Id}");
+        Assert.NotNull(reopened);
+        var reviewed = reopened;
+        Assert.NotNull(reviewed);
+        var decisions = JsonSerializer.Deserialize<List<GapDecisionTestItem>>(reviewed.GapDecisions, JsonOptions);
+        Assert.NotNull(decisions);
+        Assert.Equal(2, decisions.Count);
+        Assert.Contains(decisions, decision =>
+            decision.UnmatchedRequirementId == "unmatched-dotnet" &&
+            decision.Decision == "MentionAsLearningInterest");
+        Assert.Contains(decisions, decision =>
+            decision.UnmatchedRequirementId == "unmatched-kubernetes" &&
+            decision.Decision == "Ignore");
+    }
+
+    [Fact]
+    public async Task PutGapDecisions_rejects_unknown_or_invalid_decisions()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+
+        var unknownIdResponse = await client.PutAsJsonAsync(
+            $"/api/applications/{application.Id}/gap-decisions",
+            new GapDecisionsRequest("""[{"unmatchedRequirementId":"missing","decision":"Ignore"}]"""));
+        var invalidDecisionResponse = await client.PutAsJsonAsync(
+            $"/api/applications/{application.Id}/gap-decisions",
+            new GapDecisionsRequest("""[{"unmatchedRequirementId":"missing","decision":"CoveredByCustomFact"}]"""));
+        var malformedResponse = await client.PutAsJsonAsync(
+            $"/api/applications/{application.Id}/gap-decisions",
+            new GapDecisionsRequest("""{"unmatchedRequirementId":"missing","decision":"Ignore"}"""));
+
+        Assert.Equal(HttpStatusCode.BadRequest, unknownIdResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidDecisionResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, malformedResponse.StatusCode);
+    }
+
+    [Fact]
     public async Task GenerateDraft_creates_current_draft_from_approved_evidence()
     {
         await using var factory = new TestApplicationFactory();
@@ -2121,6 +2209,10 @@ public sealed class ApplicationWorkflowApiTests
         application.ApprovedEvidence = approvedEvidence;
         await db.SaveChangesAsync();
     }
+
+    private sealed record GapDecisionTestItem(
+        string UnmatchedRequirementId,
+        string Decision);
 
     private static async Task MarkDraftAuditedAsync(WebApplicationFactory<Program> factory, Guid draftId)
     {

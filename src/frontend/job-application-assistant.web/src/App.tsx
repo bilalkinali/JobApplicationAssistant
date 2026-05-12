@@ -104,6 +104,7 @@ type ApplicationSession = ApplicationForm & {
   evidenceMatches: string;
   unmatchedRequirements: string;
   approvedEvidence: string;
+  gapDecisions: string;
   customFacts: string;
   lastPreparedAt: string | null;
   preparationStatus: string;
@@ -184,6 +185,13 @@ type UnmatchedRequirement = {
   recommendation: string;
 };
 
+type GapDecisionValue = "Ignore" | "MentionAsLearningInterest";
+
+type GapDecision = {
+  unmatchedRequirementId: string;
+  decision: GapDecisionValue;
+};
+
 type ClaimAudit = {
   claims: ClaimAuditClaim[];
 };
@@ -234,6 +242,7 @@ function App() {
   const [applicationReadinessFilter, setApplicationReadinessFilter] = useState("All");
   const [includeArchivedApplications, setIncludeArchivedApplications] = useState(false);
   const [approvedEvidenceDraft, setApprovedEvidenceDraft] = useState<EvidenceMatch[]>([]);
+  const [gapDecisionsDraft, setGapDecisionsDraft] = useState<GapDecision[]>([]);
   const [generatedDraftForm, setGeneratedDraftForm] = useState<GeneratedDraftForm>({
     coverLetterText: "",
     shortMotivationText: ""
@@ -290,6 +299,14 @@ function App() {
     () => parseJsonArray<EvidenceMatch>(selectedApplication?.approvedEvidence),
     [selectedApplication?.approvedEvidence]
   );
+  const savedGapDecisions = useMemo(
+    () => parseJsonArray<GapDecision>(selectedApplication?.gapDecisions),
+    [selectedApplication?.gapDecisions]
+  );
+  const currentGapDecisionCount = useMemo(
+    () => countCurrentGapDecisions(savedGapDecisions, unmatchedRequirements),
+    [savedGapDecisions, unmatchedRequirements]
+  );
   const customFacts = useMemo(
     () => parseJsonArray<CustomFact>(selectedApplication?.customFacts),
     [selectedApplication?.customFacts]
@@ -345,9 +362,11 @@ function App() {
       getDraftGenerationState({
         selectedApplicationId,
         hasSavedJobPosting,
-        hasSavedApprovedEvidence
+        hasSavedApprovedEvidence,
+        unmatchedRequirementCount: unmatchedRequirements.length,
+        savedGapDecisionCount: currentGapDecisionCount
       }),
-    [hasSavedApprovedEvidence, hasSavedJobPosting, selectedApplicationId]
+    [currentGapDecisionCount, hasSavedApprovedEvidence, hasSavedJobPosting, selectedApplicationId, unmatchedRequirements.length]
   );
   const guidedNextAction = useMemo(
     () =>
@@ -357,15 +376,19 @@ function App() {
         preparationStatus: selectedApplication?.preparationStatus ?? "NotStarted",
         approvedProfileFactCount: approvedProfileFacts.length,
         savedApprovedEvidenceCount: savedApprovedEvidence.length,
+        unmatchedRequirementCount: unmatchedRequirements.length,
+        savedGapDecisionCount: currentGapDecisionCount,
         hasGeneratedDraft
       }),
     [
       approvedProfileFacts.length,
+      currentGapDecisionCount,
       hasGeneratedDraft,
       hasSavedJobPosting,
       savedApprovedEvidence.length,
       selectedApplication?.preparationStatus,
-      selectedApplicationId
+      selectedApplicationId,
+      unmatchedRequirements.length
     ]
   );
   const workflowBusyReason = workflowBusy ? "Wait for the current workflow action to finish." : null;
@@ -384,6 +407,10 @@ function App() {
   useEffect(() => {
     setApprovedEvidenceDraft(savedApprovedEvidence);
   }, [selectedApplicationId, savedApprovedEvidence]);
+
+  useEffect(() => {
+    setGapDecisionsDraft(savedGapDecisions);
+  }, [selectedApplicationId, savedGapDecisions]);
 
   useEffect(() => {
     setGeneratedDraftForm({
@@ -647,13 +674,18 @@ function App() {
     setWorkflowBusy("review");
 
     try {
-      const saved = await apiSend<ApplicationSession>(
+      await apiSend<ApplicationSession>(
         `/api/applications/${selectedApplicationId}/approved-evidence`,
         "PUT",
         { approvedEvidence: JSON.stringify(approvedEvidenceDraft) }
       );
-      replaceApplication(saved);
-      setNotice("Approved evidence saved.");
+      const reviewed = await apiSend<ApplicationSession>(
+        `/api/applications/${selectedApplicationId}/gap-decisions`,
+        "PUT",
+        { gapDecisions: JSON.stringify(gapDecisionsDraft) }
+      );
+      replaceApplication(reviewed);
+      setNotice("Evidence review saved.");
     } catch (apiError) {
       setError(formatError(apiError));
     } finally {
@@ -917,6 +949,13 @@ function App() {
 
   function removeApprovedEvidence(matchId: string) {
     setApprovedEvidenceDraft((current) => current.filter((item) => item.id !== matchId));
+  }
+
+  function decideGap(unmatchedRequirementId: string, decision: GapDecisionValue) {
+    setGapDecisionsDraft((current) => [
+      ...current.filter((item) => item.unmatchedRequirementId !== unmatchedRequirementId),
+      { unmatchedRequirementId, decision }
+    ]);
   }
 
   function startNewApplication() {
@@ -1320,20 +1359,49 @@ function App() {
                   <section className="review-column">
                     <h4>Unmatched requirements</h4>
                     {unmatchedRequirements.length === 0 && <p className="empty-state compact">No unmatched requirements recorded.</p>}
-                    {unmatchedRequirements.map((requirement) => (
-                      <article className="evidence-card muted" key={requirement.id}>
-                        <strong>{requirement.requirement}</strong>
-                        <span>{requirement.category}</span>
-                        <p>{requirement.recommendation}</p>
-                      </article>
-                    ))}
+                    {unmatchedRequirements.map((requirement) => {
+                      const gapDecision = gapDecisionForRequirement(gapDecisionsDraft, requirement.id);
+
+                      return (
+                        <article className="evidence-card muted" key={requirement.id}>
+                          <div className="gap-card-heading">
+                            <strong>{requirement.requirement}</strong>
+                            {gapDecision ? (
+                              <StatusBadge tone={gapDecision.decision === "Ignore" ? "neutral" : "pending"}>
+                                {gapDecisionLabel(gapDecision.decision)}
+                              </StatusBadge>
+                            ) : (
+                              <StatusBadge tone="pending">Needs decision</StatusBadge>
+                            )}
+                          </div>
+                          <span>{requirement.category}</span>
+                          <p>{requirement.recommendation}</p>
+                          <div className="gap-decision-actions" role="group" aria-label={`Gap decision for ${requirement.requirement}`}>
+                            <button
+                              type="button"
+                              className={gapDecision?.decision === "Ignore" ? "selected" : ""}
+                              onClick={() => decideGap(requirement.id, "Ignore")}
+                            >
+                              Ignore
+                            </button>
+                            <button
+                              type="button"
+                              className={gapDecision?.decision === "MentionAsLearningInterest" ? "selected" : ""}
+                              onClick={() => decideGap(requirement.id, "MentionAsLearningInterest")}
+                            >
+                              Mention as learning interest
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
                   </section>
                 </div>
 
                 <div className="workflow-step">
                   <div>
-                    <h4>3. Approved evidence</h4>
-                    <p>Save only evidence you approve as support for generated claims. Draft, archived, and removed evidence is not sent to draft generation.</p>
+                    <h4>3. Evidence review decisions</h4>
+                    <p>Save approved evidence as support for generated claims. Gap decisions are review guidance, not approved evidence.</p>
                   </div>
                   <button
                     className="secondary-workflow-action"
@@ -1345,7 +1413,7 @@ function App() {
                       workflowBusyReason ?? "Save the application before reviewing evidence."
                     )}
                   >
-                    {workflowBusy === "review" ? "Saving..." : "Save approved evidence"}
+                    {workflowBusy === "review" ? "Saving..." : "Save evidence review"}
                   </button>
                 </div>
 
@@ -1361,6 +1429,25 @@ function App() {
                       <button type="button" onClick={() => removeApprovedEvidence(match.id)}>Remove</button>
                     </article>
                   ))}
+                </div>
+
+                <div className="gap-decision-list">
+                  {gapDecisionsDraft.length === 0 && <p className="empty-state compact">No gap decisions selected.</p>}
+                  {gapDecisionsDraft.map((decision) => {
+                    const requirement = unmatchedRequirements.find((item) => item.id === decision.unmatchedRequirementId);
+
+                    return (
+                      <article className={`gap-decision-item ${decision.decision === "Ignore" ? "ignored" : "learning"}`} key={decision.unmatchedRequirementId}>
+                        <div>
+                          <StatusBadge tone={decision.decision === "Ignore" ? "neutral" : "pending"}>
+                            {gapDecisionLabel(decision.decision)}
+                          </StatusBadge>
+                          <strong>{requirement?.requirement ?? decision.unmatchedRequirementId}</strong>
+                          <span>{decision.decision === "Ignore" ? "Will not be called out in the review guidance." : "May be framed cautiously as interest, not proof."}</span>
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
 
                 <section className="custom-facts-panel">
@@ -1793,6 +1880,7 @@ function toApplicationSession(application: ApplicationSession): ApplicationSessi
     evidenceMatches: application.evidenceMatches || "[]",
     unmatchedRequirements: application.unmatchedRequirements || "[]",
     approvedEvidence: application.approvedEvidence || "[]",
+    gapDecisions: application.gapDecisions || "[]",
     customFacts: application.customFacts || "[]",
     lastPreparedAt: application.lastPreparedAt ?? null,
     preparationStatus: application.preparationStatus ?? "NotStarted",
@@ -1950,14 +2038,45 @@ function applicationStatusLabel(status: string): string {
 }
 
 function applicationNextActionLabel(application: ApplicationSession, approvedProfileFactCount: number): string {
+  const unmatchedRequirements = parseJsonArray<UnmatchedRequirement>(application.unmatchedRequirements);
+  const gapDecisions = parseJsonArray<GapDecision>(application.gapDecisions);
+
   return getGuidedNextAction({
     selectedApplicationId: application.id,
     hasSavedJobPosting: Boolean(application.jobPostingText.trim()),
     preparationStatus: application.preparationStatus,
     approvedProfileFactCount,
     savedApprovedEvidenceCount: parseJsonArray<EvidenceMatch>(application.approvedEvidence).length,
+    unmatchedRequirementCount: unmatchedRequirements.length,
+    savedGapDecisionCount: countCurrentGapDecisions(gapDecisions, unmatchedRequirements),
     hasGeneratedDraft: application.hasGeneratedDraft
   }).title;
+}
+
+function countCurrentGapDecisions(decisions: GapDecision[], requirements: UnmatchedRequirement[]): number {
+  const requirementIds = new Set(requirements.map((requirement) => requirement.id));
+  const decidedRequirementIds = new Set(
+    decisions
+      .filter((decision) => requirementIds.has(decision.unmatchedRequirementId))
+      .map((decision) => decision.unmatchedRequirementId)
+  );
+
+  return decidedRequirementIds.size;
+}
+
+function gapDecisionForRequirement(decisions: GapDecision[], unmatchedRequirementId: string): GapDecision | undefined {
+  return decisions.find((decision) => decision.unmatchedRequirementId === unmatchedRequirementId);
+}
+
+function gapDecisionLabel(decision: GapDecisionValue): string {
+  switch (decision) {
+    case "Ignore":
+      return "Ignored gap";
+    case "MentionAsLearningInterest":
+      return "Learning interest";
+    default:
+      return decision;
+  }
 }
 
 function guidedActionButtonLabel(label: string, kind: string, workflowBusy: string | null): string {

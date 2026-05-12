@@ -28,6 +28,8 @@ public sealed class JobApplication
 
     public string ApprovedEvidence { get; set; } = "[]";
 
+    public string GapDecisions { get; set; } = "[]";
+
     public string CustomFacts { get; set; } = "[]";
 
     public DateTimeOffset? LastPreparedAt { get; set; }

@@ -94,7 +94,9 @@ test("draft generation explains job posting and approved evidence blockers", () 
     getDraftGenerationState({
       selectedApplicationId: "application-1",
       hasSavedJobPosting: false,
-      hasSavedApprovedEvidence: false
+      hasSavedApprovedEvidence: false,
+      unmatchedRequirementCount: 0,
+      savedGapDecisionCount: 0
     }),
     {
       canRun: false,
@@ -106,11 +108,29 @@ test("draft generation explains job posting and approved evidence blockers", () 
     getDraftGenerationState({
       selectedApplicationId: "application-1",
       hasSavedJobPosting: true,
-      hasSavedApprovedEvidence: false
+      hasSavedApprovedEvidence: false,
+      unmatchedRequirementCount: 0,
+      savedGapDecisionCount: 0
     }),
     {
       canRun: false,
       message: "Save approved evidence before generating a draft."
+    }
+  );
+});
+
+test("draft generation waits for gap decisions", () => {
+  assert.deepEqual(
+    getDraftGenerationState({
+      selectedApplicationId: "application-1",
+      hasSavedJobPosting: true,
+      hasSavedApprovedEvidence: true,
+      unmatchedRequirementCount: 2,
+      savedGapDecisionCount: 1
+    }),
+    {
+      canRun: false,
+      message: "Decide how to handle each unmatched requirement before generating a draft."
     }
   );
 });
@@ -122,6 +142,8 @@ test("guided next action starts with saving the posting", () => {
     preparationStatus: "NotStarted",
     approvedProfileFactCount: 1,
     savedApprovedEvidenceCount: 0,
+    unmatchedRequirementCount: 0,
+    savedGapDecisionCount: 0,
     hasGeneratedDraft: false
   });
 
@@ -137,6 +159,8 @@ test("guided next action prepares a saved posting before evidence review", () =>
     preparationStatus: "NotStarted",
     approvedProfileFactCount: 2,
     savedApprovedEvidenceCount: 0,
+    unmatchedRequirementCount: 0,
+    savedGapDecisionCount: 0,
     hasGeneratedDraft: false
   });
 
@@ -159,6 +183,8 @@ test("guided next action shows preparation blockers plainly", () => {
     preparationStatus: "NotStarted",
     approvedProfileFactCount: 0,
     savedApprovedEvidenceCount: 0,
+    unmatchedRequirementCount: 0,
+    savedGapDecisionCount: 0,
     hasGeneratedDraft: false
   });
 
@@ -174,6 +200,8 @@ test("guided next action moves from prepared evidence to review", () => {
     preparationStatus: "PreparedForEvidenceReview",
     approvedProfileFactCount: 2,
     savedApprovedEvidenceCount: 0,
+    unmatchedRequirementCount: 0,
+    savedGapDecisionCount: 0,
     hasGeneratedDraft: false
   });
 
@@ -189,12 +217,47 @@ test("guided next action stops at reviewed evidence before draft generation", ()
     preparationStatus: "PreparedForEvidenceReview",
     approvedProfileFactCount: 2,
     savedApprovedEvidenceCount: 1,
+    unmatchedRequirementCount: 0,
+    savedGapDecisionCount: 0,
     hasGeneratedDraft: false
   });
 
   assert.equal(action.kind, "evidence-ready");
   assert.equal(action.title, "Evidence reviewed");
   assert.equal(action.buttonLabel, "Review evidence");
+});
+
+test("guided next action stays at evidence review while gaps are unresolved", () => {
+  const action = getGuidedNextAction({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: true,
+    preparationStatus: "PreparedForEvidenceReview",
+    approvedProfileFactCount: 2,
+    savedApprovedEvidenceCount: 1,
+    unmatchedRequirementCount: 2,
+    savedGapDecisionCount: 1,
+    hasGeneratedDraft: false
+  });
+
+  assert.equal(action.kind, "review-evidence");
+  assert.equal(action.title, "Resolve evidence gaps");
+  assert.equal(action.buttonLabel, "Review gaps");
+});
+
+test("guided next action allows draft generation after all gaps are resolved", () => {
+  const action = getGuidedNextAction({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: true,
+    preparationStatus: "PreparedForEvidenceReview",
+    approvedProfileFactCount: 2,
+    savedApprovedEvidenceCount: 1,
+    unmatchedRequirementCount: 2,
+    savedGapDecisionCount: 2,
+    hasGeneratedDraft: false
+  });
+
+  assert.equal(action.kind, "evidence-ready");
+  assert.equal(action.title, "Evidence reviewed");
 });
 
 test("guided next action points provider failures toward diagnostics", () => {
@@ -204,6 +267,8 @@ test("guided next action points provider failures toward diagnostics", () => {
     preparationStatus: "FailedProviderUnavailable",
     approvedProfileFactCount: 2,
     savedApprovedEvidenceCount: 0,
+    unmatchedRequirementCount: 0,
+    savedGapDecisionCount: 0,
     hasGeneratedDraft: false
   });
 

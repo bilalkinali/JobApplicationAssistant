@@ -397,6 +397,7 @@ public static class ApplicationEndpoints
             application.EvidenceMatches = JsonSerializer.Serialize(matchingResult.EvidenceMatches, JsonOptions);
             application.UnmatchedRequirements = JsonSerializer.Serialize(matchingResult.UnmatchedRequirements, JsonOptions);
             application.ApprovedEvidence = "[]";
+            application.GapDecisions = "[]";
             application.Status = "PreparedForEvidenceReview";
             application.LastPreparedAt = now;
             application.PreparationStatus = "PreparedForEvidenceReview";
@@ -488,6 +489,7 @@ public static class ApplicationEndpoints
             application.EvidenceMatches = "[]";
             application.UnmatchedRequirements = "[]";
             application.ApprovedEvidence = "[]";
+            application.GapDecisions = "[]";
             application.PreparationStatus = "NotStarted";
             application.LastPreparedAt = null;
             application.Status = application.Status == "Draft" ? "PostingCaptured" : application.Status;
@@ -577,6 +579,7 @@ public static class ApplicationEndpoints
             application.EvidenceMatches = JsonSerializer.Serialize(result.EvidenceMatches, JsonOptions);
             application.UnmatchedRequirements = JsonSerializer.Serialize(result.UnmatchedRequirements, JsonOptions);
             application.ApprovedEvidence = "[]";
+            application.GapDecisions = "[]";
             application.Status = application.Status is "Draft" or "PostingCaptured" ? "ReadyForReview" : application.Status;
             application.UpdatedAt = DateTimeOffset.UtcNow;
             run.Status = result.AttemptCount > 1 ? "RepairedSucceeded" : "Succeeded";
@@ -608,6 +611,29 @@ public static class ApplicationEndpoints
             }
 
             application.ApprovedEvidence = JsonSerializer.Serialize(validation.ApprovedEvidence, JsonOptions);
+            application.Status = application.Status is "Draft" or "PostingCaptured" ? "ReadyForReview" : application.Status;
+            application.UpdatedAt = DateTimeOffset.UtcNow;
+
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(ToResponse(application));
+        });
+
+        group.MapPut("/{id:guid}/gap-decisions", async Task<IResult> (Guid id, GapDecisionsRequest request, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var application = await db.JobApplications.FindAsync([id], ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            var validation = ValidateGapDecisions(request, application.UnmatchedRequirements);
+            if (validation.Errors.Count > 0)
+            {
+                return Results.BadRequest(ApiError.Validation(validation.Errors));
+            }
+
+            application.GapDecisions = JsonSerializer.Serialize(validation.GapDecisions, JsonOptions);
             application.Status = application.Status is "Draft" or "PostingCaptured" ? "ReadyForReview" : application.Status;
             application.UpdatedAt = DateTimeOffset.UtcNow;
 
@@ -867,6 +893,7 @@ public static class ApplicationEndpoints
             application.EvidenceMatches,
             application.UnmatchedRequirements,
             application.ApprovedEvidence,
+            application.GapDecisions,
             application.CustomFacts,
             application.LastPreparedAt,
             application.PreparationStatus,
@@ -1066,6 +1093,38 @@ public static class ApplicationEndpoints
         return new ApprovedEvidenceValidation(errors, approvedEvidence);
     }
 
+    private static GapDecisionValidation ValidateGapDecisions(GapDecisionsRequest request, string unmatchedRequirementsJson)
+    {
+        var errors = new Dictionary<string, string[]>();
+        var decisions = ReadGapDecisions(request.GapDecisions, errors);
+        var currentRequirements = ReadUnmatchedRequirements(unmatchedRequirementsJson);
+
+        if (errors.Count > 0)
+        {
+            return new GapDecisionValidation(errors, []);
+        }
+
+        var currentById = currentRequirements.ToDictionary(requirement => requirement.Id, StringComparer.OrdinalIgnoreCase);
+        var missingIds = decisions
+            .Where(decision => !currentById.ContainsKey(decision.UnmatchedRequirementId))
+            .Select(decision => decision.UnmatchedRequirementId)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (missingIds.Count > 0)
+        {
+            errors[nameof(request.GapDecisions)] = ["Gap decisions must refer to current unmatched requirements."];
+            return new GapDecisionValidation(errors, []);
+        }
+
+        var normalizedDecisions = decisions
+            .GroupBy(decision => decision.UnmatchedRequirementId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Last())
+            .ToList();
+
+        return new GapDecisionValidation(errors, normalizedDecisions);
+    }
+
     private static IReadOnlyList<string> ReadApprovedEvidenceIds(string? value, Dictionary<string, string[]> errors)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -1104,6 +1163,70 @@ public static class ApplicationEndpoints
             errors[nameof(ApprovedEvidenceRequest.ApprovedEvidence)] = ["Approved evidence must be a JSON array."];
             return [];
         }
+    }
+
+    private static IReadOnlyList<GapDecision> ReadGapDecisions(string? value, Dictionary<string, string[]> errors)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(value);
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                errors[nameof(GapDecisionsRequest.GapDecisions)] = ["Gap decisions must be a JSON array."];
+                return [];
+            }
+
+            var decisions = new List<GapDecision>();
+            foreach (var element in document.RootElement.EnumerateArray())
+            {
+                if (element.ValueKind != JsonValueKind.Object ||
+                    !element.TryGetProperty("unmatchedRequirementId", out var idProperty) ||
+                    idProperty.ValueKind != JsonValueKind.String ||
+                    string.IsNullOrWhiteSpace(idProperty.GetString()) ||
+                    !element.TryGetProperty("decision", out var decisionProperty) ||
+                    decisionProperty.ValueKind != JsonValueKind.String)
+                {
+                    errors[nameof(GapDecisionsRequest.GapDecisions)] = ["Each gap decision must include unmatchedRequirementId and decision."];
+                    return [];
+                }
+
+                var decision = NormalizeGapDecision(decisionProperty.GetString());
+                if (decision is null)
+                {
+                    errors[nameof(GapDecisionsRequest.GapDecisions)] = ["Gap decision must be Ignore or MentionAsLearningInterest."];
+                    return [];
+                }
+
+                decisions.Add(new GapDecision(idProperty.GetString()!.Trim(), decision));
+            }
+
+            return decisions;
+        }
+        catch (JsonException)
+        {
+            errors[nameof(GapDecisionsRequest.GapDecisions)] = ["Gap decisions must be a JSON array."];
+            return [];
+        }
+    }
+
+    private static string? NormalizeGapDecision(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim() switch
+        {
+            var decision when string.Equals(decision, "Ignore", StringComparison.OrdinalIgnoreCase) => "Ignore",
+            var decision when string.Equals(decision, "MentionAsLearningInterest", StringComparison.OrdinalIgnoreCase) => "MentionAsLearningInterest",
+            _ => null
+        };
     }
 
     private static IReadOnlyList<JobSignal> ReadJobSignals(string jobSignals)
@@ -1146,6 +1269,12 @@ public static class ApplicationEndpoints
     private sealed record ApprovedEvidenceValidation(
         Dictionary<string, string[]> Errors,
         IReadOnlyList<EvidenceMatch> ApprovedEvidence);
+
+    private sealed record GapDecision(string UnmatchedRequirementId, string Decision);
+
+    private sealed record GapDecisionValidation(
+        Dictionary<string, string[]> Errors,
+        IReadOnlyList<GapDecision> GapDecisions);
 
     private sealed record OptionalFilter(string? Value, bool IsInvalid);
 }
