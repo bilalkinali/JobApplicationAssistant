@@ -349,6 +349,161 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task PrepareApplication_rejects_application_without_job_posting_text()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, jobPostingText: "");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/prepare", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains(nameof(ApplicationRequest.JobPostingText), error.Details.Keys);
+    }
+
+    [Fact]
+    public async Task PrepareApplication_rejects_when_no_approved_profile_facts_exist()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/prepare", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains("ProfileFacts", error.Details.Keys);
+    }
+
+    [Fact]
+    public async Task PrepareApplication_runs_analysis_and_matching_and_returns_evidence_review_checkpoint()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        await SetApprovedEvidenceAsync(factory, application.Id, """[{"id":"stale-evidence"}]""");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/prepare", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var prepared = await response.Content.ReadFromJsonAsync<PrepareApplicationResponse>();
+        Assert.NotNull(prepared);
+        Assert.Equal("ReviewEvidence", prepared.NextCheckpoint);
+        Assert.Equal("PreparedForEvidenceReview", prepared.Application.Status);
+        Assert.Equal("PreparedForEvidenceReview", prepared.Application.PreparationStatus);
+        Assert.NotNull(prepared.Application.LastPreparedAt);
+        Assert.Equal("[]", prepared.Application.ApprovedEvidence);
+
+        var signals = JsonSerializer.Deserialize<JobSignalsDocument>(prepared.Application.JobSignals, JsonOptions);
+        var evidenceMatches = JsonSerializer.Deserialize<List<EvidenceMatch>>(prepared.Application.EvidenceMatches, JsonOptions);
+        var unmatchedRequirements = JsonSerializer.Deserialize<List<UnmatchedRequirement>>(prepared.Application.UnmatchedRequirements, JsonOptions);
+        Assert.NotNull(signals);
+        Assert.NotNull(evidenceMatches);
+        Assert.NotNull(unmatchedRequirements);
+        Assert.Contains(".NET", signals.RequiredSkills);
+        Assert.Single(evidenceMatches);
+        Assert.Contains(unmatchedRequirements, requirement => requirement.Requirement == "Kubernetes");
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var runSteps = db.AiRuns.Select(run => run.Step).ToList();
+        Assert.Contains("JobAnalysis", runSteps);
+        Assert.Contains("EvidenceMatching", runSteps);
+    }
+
+    [Fact]
+    public async Task PrepareApplication_with_unavailable_provider_marks_failure_without_mutating_workflow_state()
+    {
+        await using var factory = new TestApplicationFactory()
+            .WithOllamaResponses([new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                ReasonPhrase = "Service Unavailable"
+            }]);
+        using var client = factory.CreateClient();
+        await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/prepare", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var reopenedResponse = await client.GetAsync($"/api/applications/{application.Id}");
+        reopenedResponse.EnsureSuccessStatusCode();
+        var reopened = await reopenedResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(reopened);
+        Assert.Equal("Fallback Company", reopened.CompanyName);
+        Assert.Equal("Fallback Role", reopened.RoleTitle);
+        Assert.Equal("Draft", reopened.Status);
+        Assert.Equal("{}", reopened.JobSignals);
+        Assert.Equal("FailedProviderUnavailable", reopened.PreparationStatus);
+        Assert.Null(reopened.LastPreparedAt);
+    }
+
+    [Fact]
+    public async Task PrepareApplication_with_invalid_analysis_output_marks_failure_without_mutating_workflow_state()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent("{ malformed") },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent("""{"companyName":"","roleTitle":""}""") }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/prepare", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var reopenedResponse = await client.GetAsync($"/api/applications/{application.Id}");
+        reopenedResponse.EnsureSuccessStatusCode();
+        var reopened = await reopenedResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(reopened);
+        Assert.Equal("Fallback Company", reopened.CompanyName);
+        Assert.Equal("Fallback Role", reopened.RoleTitle);
+        Assert.Equal("Draft", reopened.Status);
+        Assert.Equal("{}", reopened.JobSignals);
+        Assert.Equal("FailedInvalidProviderOutput", reopened.PreparationStatus);
+        Assert.Null(reopened.LastPreparedAt);
+    }
+
+    [Fact]
+    public async Task PrepareApplication_with_matching_failure_preserves_analysis_and_marks_partial_state()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaAnalysisJson("Contoso", "Platform Engineer")) },
+            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { ReasonPhrase = "Service Unavailable" }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/prepare", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var reopenedResponse = await client.GetAsync($"/api/applications/{application.Id}");
+        reopenedResponse.EnsureSuccessStatusCode();
+        var reopened = await reopenedResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(reopened);
+        Assert.Equal("Contoso", reopened.CompanyName);
+        Assert.Equal("Platform Engineer", reopened.RoleTitle);
+        Assert.Equal("PostingCaptured", reopened.Status);
+        Assert.Equal("PartiallyPreparedAnalysisOnly", reopened.PreparationStatus);
+        Assert.Null(reopened.LastPreparedAt);
+
+        var signals = JsonSerializer.Deserialize<JobSignalsDocument>(reopened.JobSignals, JsonOptions);
+        Assert.NotNull(signals);
+        Assert.Contains(".NET", signals.RequiredSkills);
+        Assert.Equal("[]", reopened.EvidenceMatches);
+        Assert.Equal("[]", reopened.ApprovedEvidence);
+    }
+
+    [Fact]
     public async Task MatchEvidence_uses_only_approved_profile_facts_and_persists_unmatched_requirements()
     {
         await using var factory = new TestApplicationFactory();
@@ -1876,6 +2031,16 @@ public sealed class ApplicationWorkflowApiTests
                     new JobSignal("kubernetes", "Kubernetes", "PreferredSkill", ["kubernetes"])
                 ]),
             JsonOptions);
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SetApprovedEvidenceAsync(WebApplicationFactory<Program> factory, Guid applicationId, string approvedEvidence)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var application = await db.JobApplications.FindAsync(applicationId);
+        Assert.NotNull(application);
+        application.ApprovedEvidence = approvedEvidence;
         await db.SaveChangesAsync();
     }
 

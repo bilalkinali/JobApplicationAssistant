@@ -51,7 +51,7 @@ const emptyProfileFact: ProfileFactForm = {
   allowedClaims: "[]",
   forbiddenClaims: "[]"
 };
-const applicationStatuses = ["Draft", "PostingCaptured", "ReadyForReview", "Applied", "Archived"];
+const applicationStatuses = ["Draft", "PostingCaptured", "ReadyForReview", "PreparedForEvidenceReview", "Applied", "Archived"];
 const auditReadinessOptions = ["All", "Current", "Stale", "Missing", "NotApplicable"];
 const profileFactStatuses = ["Draft", "Approved", "Archived"];
 
@@ -103,6 +103,8 @@ type ApplicationSession = ApplicationForm & {
   unmatchedRequirements: string;
   approvedEvidence: string;
   customFacts: string;
+  lastPreparedAt: string | null;
+  preparationStatus: string;
   generatedDraft: GeneratedDraft | null;
   hasGeneratedDraft: boolean;
   auditReadiness: string;
@@ -1676,6 +1678,8 @@ function toApplicationSession(application: ApplicationSession): ApplicationSessi
     unmatchedRequirements: application.unmatchedRequirements || "[]",
     approvedEvidence: application.approvedEvidence || "[]",
     customFacts: application.customFacts || "[]",
+    lastPreparedAt: application.lastPreparedAt ?? null,
+    preparationStatus: application.preparationStatus ?? "NotStarted",
     generatedDraft: application.generatedDraft ?? null,
     hasGeneratedDraft: application.hasGeneratedDraft ?? Boolean(application.generatedDraft),
     auditReadiness: application.auditReadiness ?? auditReadinessForDraft(application.generatedDraft),

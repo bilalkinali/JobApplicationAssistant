@@ -12,7 +12,7 @@ namespace JobApplicationAssistant.Api.Endpoints;
 
 public static class ApplicationEndpoints
 {
-    private static readonly string[] ValidStatuses = ["Draft", "PostingCaptured", "ReadyForReview", "Applied", "Archived"];
+    private static readonly string[] ValidStatuses = ["Draft", "PostingCaptured", "ReadyForReview", "PreparedForEvidenceReview", "Applied", "Archived"];
     private static readonly string[] ValidAuditReadiness = ["Current", "Stale", "Missing", "NotApplicable"];
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -35,7 +35,7 @@ public static class ApplicationEndpoints
                 var errors = new Dictionary<string, string[]>();
                 if (normalizedStatus.IsInvalid)
                 {
-                    errors[nameof(status)] = ["Status must be Draft, PostingCaptured, ReadyForReview, Applied, Archived, or All."];
+                    errors[nameof(status)] = ["Status must be Draft, PostingCaptured, ReadyForReview, PreparedForEvidenceReview, Applied, Archived, or All."];
                 }
 
                 if (normalizedReadiness.IsInvalid)
@@ -263,6 +263,163 @@ public static class ApplicationEndpoints
                 fileName);
         });
 
+        group.MapPost("/{id:guid}/prepare", async Task<IResult> (Guid id, ApplicationDbContext db, IAiProvider aiProvider, AiOptions aiOptions, CancellationToken ct) =>
+        {
+            var application = await db.JobApplications.FindAsync([id], ct);
+            if (application is null)
+            {
+                return Results.NotFound(ApiError.NotFound("Application session was not found."));
+            }
+
+            if (string.IsNullOrWhiteSpace(application.JobPostingText))
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(application.JobPostingText)] = ["Job posting text is required before preparation."]
+                }));
+            }
+
+            var approvedFacts = await db.ProfileFacts
+                .Where(fact => fact.Status == ProfileFactStatus.Approved)
+                .ToListAsync(ct);
+
+            if (approvedFacts.Count == 0)
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    ["ProfileFacts"] = ["At least one approved profile fact is required before preparation."]
+                }));
+            }
+
+            var analysisRun = new AiRun
+            {
+                Id = Guid.NewGuid(),
+                JobApplicationId = application.Id,
+                Step = "JobAnalysis",
+                Provider = aiOptions.Provider,
+                Model = aiOptions.Model,
+                Status = "Running",
+                AttemptCount = 1,
+                StartedAt = DateTimeOffset.UtcNow,
+                InputSummary = JsonSerializer.Serialize(new
+                {
+                    application.CompanyName,
+                    application.RoleTitle,
+                    PostingLength = application.JobPostingText.Length
+                }, JsonOptions)
+            };
+            db.AiRuns.Add(analysisRun);
+
+            application.PreparationStatus = "Preparing";
+            application.UpdatedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(ct);
+
+            JobAnalysisResult analysisResult;
+            try
+            {
+                analysisResult = await aiProvider.AnalyzeJobAsync(
+                    new JobAnalysisInput(
+                        application.CompanyName,
+                        application.RoleTitle,
+                        application.SelectedLanguage,
+                        application.JobPostingText),
+                    ct);
+            }
+            catch (AiProviderException exception)
+            {
+                RecordFailedRun(analysisRun, exception);
+                application.PreparationStatus = ToPreparationFailureStatus(exception);
+                application.UpdatedAt = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync(ct);
+
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    ["AiProvider"] = [exception.Message]
+                }));
+            }
+
+            application.CompanyName = analysisResult.CompanyName;
+            application.RoleTitle = analysisResult.RoleTitle;
+            application.DetectedLanguage = analysisResult.DetectedLanguage;
+            application.SelectedLanguage = analysisResult.SelectedLanguage;
+            application.JobSignals = JsonSerializer.Serialize(analysisResult.JobSignals, JsonOptions);
+            application.EvidenceMatches = "[]";
+            application.UnmatchedRequirements = "[]";
+            application.ApprovedEvidence = "[]";
+            application.Status = application.Status == "Draft" ? "PostingCaptured" : application.Status;
+            application.UpdatedAt = DateTimeOffset.UtcNow;
+            analysisRun.Status = analysisResult.AttemptCount > 1 ? "RepairedSucceeded" : "Succeeded";
+            analysisRun.AttemptCount = analysisResult.AttemptCount;
+            analysisRun.CompletedAt = DateTimeOffset.UtcNow;
+            analysisRun.OutputSummary = JsonSerializer.Serialize(new
+            {
+                analysisResult.CompanyName,
+                analysisResult.RoleTitle,
+                SignalCount = analysisResult.JobSignals.Signals.Count
+            }, JsonOptions);
+
+            var signals = analysisResult.JobSignals.Signals;
+            var matchingRun = new AiRun
+            {
+                Id = Guid.NewGuid(),
+                JobApplicationId = application.Id,
+                Step = "EvidenceMatching",
+                Provider = aiOptions.Provider,
+                Model = aiOptions.Model,
+                Status = "Running",
+                AttemptCount = 1,
+                StartedAt = DateTimeOffset.UtcNow,
+                InputSummary = JsonSerializer.Serialize(new
+                {
+                    SignalCount = signals.Count,
+                    ApprovedFactCount = approvedFacts.Count
+                }, JsonOptions)
+            };
+            db.AiRuns.Add(matchingRun);
+
+            EvidenceMatchResult matchingResult;
+            try
+            {
+                matchingResult = await aiProvider.MatchEvidenceAsync(new EvidenceMatchInput(signals, approvedFacts), ct);
+            }
+            catch (AiProviderException exception)
+            {
+                RecordFailedRun(matchingRun, exception);
+                application.PreparationStatus = "PartiallyPreparedAnalysisOnly";
+                application.UpdatedAt = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync(ct);
+
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    ["AiProvider"] = [exception.Message]
+                }));
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            application.EvidenceMatches = JsonSerializer.Serialize(matchingResult.EvidenceMatches, JsonOptions);
+            application.UnmatchedRequirements = JsonSerializer.Serialize(matchingResult.UnmatchedRequirements, JsonOptions);
+            application.ApprovedEvidence = "[]";
+            application.Status = "PreparedForEvidenceReview";
+            application.LastPreparedAt = now;
+            application.PreparationStatus = "PreparedForEvidenceReview";
+            application.UpdatedAt = now;
+            matchingRun.Status = matchingResult.AttemptCount > 1 ? "RepairedSucceeded" : "Succeeded";
+            matchingRun.AttemptCount = matchingResult.AttemptCount;
+            matchingRun.CompletedAt = DateTimeOffset.UtcNow;
+            matchingRun.OutputSummary = JsonSerializer.Serialize(new
+            {
+                MatchCount = matchingResult.EvidenceMatches.Count,
+                UnmatchedCount = matchingResult.UnmatchedRequirements.Count
+            }, JsonOptions);
+
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(new PrepareApplicationResponse(
+                ToResponse(application),
+                "ReviewEvidence",
+                "Preparation complete. Review evidence before generating application text."));
+        });
+
         group.MapPost("/{id:guid}/analyze-job", async Task<IResult> (Guid id, ApplicationDbContext db, IAiProvider aiProvider, AiOptions aiOptions, CancellationToken ct) =>
         {
             var application = await db.JobApplications.FindAsync([id], ct);
@@ -333,6 +490,8 @@ public static class ApplicationEndpoints
             application.EvidenceMatches = "[]";
             application.UnmatchedRequirements = "[]";
             application.ApprovedEvidence = "[]";
+            application.PreparationStatus = "NotStarted";
+            application.LastPreparedAt = null;
             application.Status = application.Status == "Draft" ? "PostingCaptured" : application.Status;
             application.UpdatedAt = DateTimeOffset.UtcNow;
             run.Status = result.AttemptCount > 1 ? "RepairedSucceeded" : "Succeeded";
@@ -711,6 +870,8 @@ public static class ApplicationEndpoints
             application.UnmatchedRequirements,
             application.ApprovedEvidence,
             application.CustomFacts,
+            application.LastPreparedAt,
+            application.PreparationStatus,
             application.CreatedAt,
             application.UpdatedAt,
             application.GeneratedDraft is null ? null : ToResponse(application.GeneratedDraft),
@@ -751,7 +912,7 @@ public static class ApplicationEndpoints
         if (!string.IsNullOrWhiteSpace(request.Status) &&
             !ValidStatuses.Contains(request.Status.Trim(), StringComparer.OrdinalIgnoreCase))
         {
-            errors[nameof(request.Status)] = ["Status must be Draft, PostingCaptured, ReadyForReview, Applied, or Archived."];
+            errors[nameof(request.Status)] = ["Status must be Draft, PostingCaptured, ReadyForReview, PreparedForEvidenceReview, Applied, or Archived."];
         }
 
         return errors;
@@ -841,6 +1002,20 @@ public static class ApplicationEndpoints
 
         return "Current";
     }
+
+    private static void RecordFailedRun(AiRun run, AiProviderException exception)
+    {
+        run.Status = "Failed";
+        run.ErrorCode = exception.ErrorCode;
+        run.ErrorMessage = exception.Message;
+        run.AttemptCount = exception.AttemptCount;
+        run.CompletedAt = DateTimeOffset.UtcNow;
+    }
+
+    private static string ToPreparationFailureStatus(AiProviderException exception) =>
+        string.Equals(exception.ErrorCode, "ProviderUnavailable", StringComparison.OrdinalIgnoreCase)
+            ? "FailedProviderUnavailable"
+            : "FailedInvalidProviderOutput";
 
     private static string BuildCoverLetterFileName(JobApplication application)
         => BuildCoverLetterFileName(application, "txt");

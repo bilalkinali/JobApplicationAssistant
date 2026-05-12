@@ -25,11 +25,18 @@ public sealed record ApplicationResponse(
     string UnmatchedRequirements,
     string ApprovedEvidence,
     string CustomFacts,
+    DateTimeOffset? LastPreparedAt,
+    string PreparationStatus,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     GeneratedDraftResponse? GeneratedDraft,
     bool HasGeneratedDraft,
     string AuditReadiness);
+
+public sealed record PrepareApplicationResponse(
+    ApplicationResponse Application,
+    string NextCheckpoint,
+    string Message);
 
 public sealed record ApprovedEvidenceRequest(string? ApprovedEvidence);
 

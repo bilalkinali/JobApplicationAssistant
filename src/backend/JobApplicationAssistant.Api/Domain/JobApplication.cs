@@ -30,6 +30,10 @@ public sealed class JobApplication
 
     public string CustomFacts { get; set; } = "[]";
 
+    public DateTimeOffset? LastPreparedAt { get; set; }
+
+    public string PreparationStatus { get; set; } = "NotStarted";
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }
