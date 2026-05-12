@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   getDraftGenerationState,
   getEvidenceMatchingState,
+  getGuidedNextAction,
   getJobAnalysisState,
+  getPrepareApplicationPath,
   getProfileReadiness
 } from "../dist-test/readiness.js";
 
@@ -111,4 +113,100 @@ test("draft generation explains job posting and approved evidence blockers", () 
       message: "Save approved evidence before generating a draft."
     }
   );
+});
+
+test("guided next action starts with saving the posting", () => {
+  const action = getGuidedNextAction({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: false,
+    preparationStatus: "NotStarted",
+    approvedProfileFactCount: 1,
+    savedApprovedEvidenceCount: 0,
+    hasGeneratedDraft: false
+  });
+
+  assert.equal(action.kind, "save-posting");
+  assert.equal(action.title, "Paste and save the posting");
+  assert.equal(action.buttonLabel, "Save posting");
+});
+
+test("guided next action prepares a saved posting before evidence review", () => {
+  const action = getGuidedNextAction({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: true,
+    preparationStatus: "NotStarted",
+    approvedProfileFactCount: 2,
+    savedApprovedEvidenceCount: 0,
+    hasGeneratedDraft: false
+  });
+
+  assert.equal(action.kind, "prepare-application");
+  assert.equal(action.title, "Prepare application");
+  assert.equal(action.canRun, true);
+});
+
+test("prepare application path targets the backend orchestration endpoint", () => {
+  assert.equal(
+    getPrepareApplicationPath("application-1"),
+    "/api/applications/application-1/prepare"
+  );
+});
+
+test("guided next action shows preparation blockers plainly", () => {
+  const action = getGuidedNextAction({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: true,
+    preparationStatus: "NotStarted",
+    approvedProfileFactCount: 0,
+    savedApprovedEvidenceCount: 0,
+    hasGeneratedDraft: false
+  });
+
+  assert.equal(action.kind, "prepare-application");
+  assert.equal(action.canRun, false);
+  assert.equal(action.message, "Approve at least one profile fact before preparation can match evidence.");
+});
+
+test("guided next action moves from prepared evidence to review", () => {
+  const action = getGuidedNextAction({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: true,
+    preparationStatus: "PreparedForEvidenceReview",
+    approvedProfileFactCount: 2,
+    savedApprovedEvidenceCount: 0,
+    hasGeneratedDraft: false
+  });
+
+  assert.equal(action.kind, "review-evidence");
+  assert.equal(action.title, "Review evidence");
+  assert.equal(action.buttonLabel, "Review matches");
+});
+
+test("guided next action stops at reviewed evidence before draft generation", () => {
+  const action = getGuidedNextAction({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: true,
+    preparationStatus: "PreparedForEvidenceReview",
+    approvedProfileFactCount: 2,
+    savedApprovedEvidenceCount: 1,
+    hasGeneratedDraft: false
+  });
+
+  assert.equal(action.kind, "evidence-ready");
+  assert.equal(action.title, "Evidence reviewed");
+  assert.equal(action.buttonLabel, "Review evidence");
+});
+
+test("guided next action points provider failures toward diagnostics", () => {
+  const action = getGuidedNextAction({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: true,
+    preparationStatus: "FailedProviderUnavailable",
+    approvedProfileFactCount: 2,
+    savedApprovedEvidenceCount: 0,
+    hasGeneratedDraft: false
+  });
+
+  assert.equal(action.kind, "ai-readiness");
+  assert.equal(action.buttonLabel, "Open AI settings");
 });

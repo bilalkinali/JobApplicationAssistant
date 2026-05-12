@@ -276,6 +276,28 @@ button:disabled {
   line-height: 1.6;
 }
 
+.recent-next-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.recent-next-actions button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d7dde2;
+  border-radius: 6px;
+  color: #263442;
+  background: #ffffff;
+  text-align: left;
+}
+
+.recent-next-actions span {
+  color: #64717c;
+  font-size: 0.84rem;
+}
+
 .status-details {
   display: grid;
   gap: 10px;
@@ -627,7 +649,8 @@ button:disabled {
 }
 
 .session-badges .ready,
-.session-badges .audit-current {
+.session-badges .audit-current,
+.session-badges .next-action {
   border-color: #b8ddcd;
   color: #24533b;
   background: #e7f5ee;
@@ -702,6 +725,64 @@ button:disabled {
   color: #263442;
   background: #ffffff;
   font-weight: 750;
+}
+
+.workflow-step button.secondary-workflow-action {
+  border-color: #d7dde2;
+  color: #52606b;
+  background: #f7f8f5;
+}
+
+.guided-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px;
+  border: 1px solid #b8ddcd;
+  border-radius: 8px;
+  background: #edf8f2;
+}
+
+.guided-action.warning {
+  border-color: #e4c06e;
+  background: #fff8e8;
+}
+
+.guided-action.error {
+  border-color: #c58f88;
+  background: #fff5f3;
+}
+
+.guided-action.success {
+  border-color: #b8ddcd;
+  background: #e7f5ee;
+}
+
+.guided-action > div {
+  min-width: 0;
+}
+
+.guided-action span {
+  color: #52606b;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.guided-action h4 {
+  margin: 3px 0 0;
+}
+
+.guided-action p {
+  max-width: 68ch;
+  margin: 6px 0 0;
+  color: #3f4a54;
+  line-height: 1.45;
+}
+
+.guided-action button {
+  flex: 0 0 auto;
 }
 
 .signal-grid,
