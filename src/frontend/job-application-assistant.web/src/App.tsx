@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   getAuditExportNotice,
   getCoverLetterExportState,
@@ -13,7 +13,9 @@ import {
 import {
   getDraftGenerationState,
   getEvidenceMatchingState,
+  getGuidedNextAction,
   getJobAnalysisState,
+  getPrepareApplicationPath,
   getProfileReadiness
 } from "./readiness";
 import "./styles.css";
@@ -51,7 +53,7 @@ const emptyProfileFact: ProfileFactForm = {
   allowedClaims: "[]",
   forbiddenClaims: "[]"
 };
-const applicationStatuses = ["Draft", "PostingCaptured", "ReadyForReview", "Applied", "Archived"];
+const applicationStatuses = ["Draft", "PostingCaptured", "ReadyForReview", "PreparedForEvidenceReview", "Applied", "Archived"];
 const auditReadinessOptions = ["All", "Current", "Stale", "Missing", "NotApplicable"];
 const profileFactStatuses = ["Draft", "Approved", "Archived"];
 
@@ -103,11 +105,18 @@ type ApplicationSession = ApplicationForm & {
   unmatchedRequirements: string;
   approvedEvidence: string;
   customFacts: string;
+  lastPreparedAt: string | null;
+  preparationStatus: string;
   generatedDraft: GeneratedDraft | null;
   hasGeneratedDraft: boolean;
   auditReadiness: string;
   createdAt: string;
   updatedAt: string;
+};
+
+type PrepareApplicationResult = {
+  application: ApplicationSession;
+  message: string;
 };
 
 type GeneratedDraft = {
@@ -240,6 +249,7 @@ function App() {
   const [aiDiagnosticsLastRanAt, setAiDiagnosticsLastRanAt] = useState<string | null>(null);
   const [error, setError] = useState<ErrorPresentation | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const evidenceReviewRef = useRef<HTMLDivElement | null>(null);
 
   const selectedApplication = useMemo(
     () => applications.find((application) => application.id === selectedApplicationId),
@@ -338,6 +348,25 @@ function App() {
         hasSavedApprovedEvidence
       }),
     [hasSavedApprovedEvidence, hasSavedJobPosting, selectedApplicationId]
+  );
+  const guidedNextAction = useMemo(
+    () =>
+      getGuidedNextAction({
+        selectedApplicationId,
+        hasSavedJobPosting,
+        preparationStatus: selectedApplication?.preparationStatus ?? "NotStarted",
+        approvedProfileFactCount: approvedProfileFacts.length,
+        savedApprovedEvidenceCount: savedApprovedEvidence.length,
+        hasGeneratedDraft
+      }),
+    [
+      approvedProfileFacts.length,
+      hasGeneratedDraft,
+      hasSavedJobPosting,
+      savedApprovedEvidence.length,
+      selectedApplication?.preparationStatus,
+      selectedApplicationId
+    ]
   );
   const workflowBusyReason = workflowBusy ? "Wait for the current workflow action to finish." : null;
   const exportBusyReason = exportBusy ? "Wait for the current export action to finish." : null;
@@ -581,6 +610,32 @@ function App() {
     }
   }
 
+  async function prepareApplication() {
+    if (!selectedApplicationId) {
+      setError(plainError("Validation blocker", "Save the application before preparing it."));
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setWorkflowBusy("prepare");
+
+    try {
+      const result = await apiSend<PrepareApplicationResult>(
+        getPrepareApplicationPath(selectedApplicationId),
+        "POST",
+        null
+      );
+      replaceApplication(result.application);
+      setNotice(result.message);
+    } catch (apiError) {
+      setError(formatError(apiError));
+      await refreshSelectedApplication(selectedApplicationId);
+    } finally {
+      setWorkflowBusy(null);
+    }
+  }
+
   async function saveApprovedEvidence() {
     if (!selectedApplicationId) {
       setError(plainError("Validation blocker", "Save the application before reviewing evidence."));
@@ -798,6 +853,35 @@ function App() {
     }
   }
 
+  async function refreshSelectedApplication(applicationId: string) {
+    try {
+      const detailed = await apiGet<ApplicationSession>(`/api/applications/${applicationId}`);
+      replaceApplication(detailed);
+    } catch {
+      // Keep the original preparation error visible.
+    }
+  }
+
+  function runGuidedNextAction() {
+    switch (guidedNextAction.kind) {
+      case "prepare-application":
+        void prepareApplication();
+        return;
+      case "review-evidence":
+      case "evidence-ready":
+        evidenceReviewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      case "ai-readiness":
+        setView("settings");
+        return;
+      case "complete":
+        setNotice("Draft is ready for review.");
+        return;
+      default:
+        return;
+    }
+  }
+
   function replaceApplication(application: ApplicationSession) {
     const normalized = toApplicationSession(application);
     setApplications((current) => current.map((item) => (item.id === normalized.id ? normalized : item)));
@@ -923,6 +1007,16 @@ function App() {
             <article className="panel">
               <h3>Recent applications</h3>
               <p>{applications.length} application session{applications.length === 1 ? "" : "s"} saved.</p>
+              {applications.length > 0 && (
+                <div className="recent-next-actions">
+                  {applications.slice(0, 3).map((application) => (
+                    <button key={application.id} type="button" onClick={() => void openApplication(application)}>
+                      <strong>{application.companyName}</strong>
+                      <span>Next: {applicationNextActionLabel(application, approvedProfileFacts.length)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </article>
             <article className="panel">
               <h3>AI status</h3>
@@ -1061,6 +1155,7 @@ function App() {
                     </small>
                     <div className="session-badges">
                       {application.deadline && <span>Deadline {formatDate(application.deadline)}</span>}
+                      <span className="next-action">Next: {applicationNextActionLabel(application, approvedProfileFacts.length)}</span>
                       <span className={application.hasGeneratedDraft ? "ready" : "muted"}>{application.hasGeneratedDraft ? "Draft ready" : "No draft"}</span>
                       <span className={`audit-${application.auditReadiness.toLowerCase()}`}>Audit {readinessLabel(application.auditReadiness)}</span>
                     </div>
@@ -1129,8 +1224,27 @@ function App() {
                     {aiWorkflowStatusMessage(aiStatus)}
                   </p>
                 )}
+                <section className={`guided-action ${guidedNextAction.tone}`} aria-label="Guided next action">
+                  <div>
+                    <span>Next action</span>
+                    <h4>{guidedNextAction.title}</h4>
+                    <p>{guidedNextAction.message}</p>
+                  </div>
+                  <button
+                    className="primary-action"
+                    type={guidedNextAction.kind === "save-posting" ? "submit" : "button"}
+                    onClick={guidedNextAction.kind === "save-posting" ? undefined : runGuidedNextAction}
+                    disabled={!guidedNextAction.canRun || workflowBusy !== null}
+                    title={disabledTitle(!guidedNextAction.canRun || workflowBusy !== null, workflowBusyReason ?? guidedNextAction.message)}
+                  >
+                    {guidedActionButtonLabel(guidedNextAction.buttonLabel, guidedNextAction.kind, workflowBusy)}
+                  </button>
+                </section>
                 {selectedApplication && (
                   <div className="trust-chain" aria-label="Draft trust chain">
+                    <StatusBadge tone={preparationStatusTone(selectedApplication.preparationStatus)}>
+                      {preparationStatusLabel(selectedApplication.preparationStatus)}
+                    </StatusBadge>
                     <StatusBadge tone={savedApprovedEvidence.length > 0 ? "approved" : "pending"}>
                       {approvedEvidenceCountLabel(savedApprovedEvidence.length)}
                     </StatusBadge>
@@ -1152,6 +1266,7 @@ function App() {
                     <p>{jobAnalysisState.message}</p>
                   </div>
                   <button
+                    className="secondary-workflow-action"
                     type="button"
                     onClick={analyzeJob}
                     disabled={!jobAnalysisState.canRun || workflowBusy !== null}
@@ -1177,6 +1292,7 @@ function App() {
                     <p>{evidenceMatchingState.message}</p>
                   </div>
                   <button
+                    className="secondary-workflow-action"
                     type="button"
                     onClick={matchEvidence}
                     disabled={!evidenceMatchingState.canRun || workflowBusy !== null}
@@ -1186,7 +1302,7 @@ function App() {
                   </button>
                 </div>
 
-                <div className="review-grid">
+                <div className="review-grid" ref={evidenceReviewRef}>
                   <section className="review-column">
                     <h4>Matched evidence</h4>
                     {evidenceMatches.length === 0 && <p className="empty-state compact">No matches yet.</p>}
@@ -1220,6 +1336,7 @@ function App() {
                     <p>Save only evidence you approve as support for generated claims. Draft, archived, and removed evidence is not sent to draft generation.</p>
                   </div>
                   <button
+                    className="secondary-workflow-action"
                     type="button"
                     onClick={saveApprovedEvidence}
                     disabled={!selectedApplicationId || workflowBusy !== null}
@@ -1273,6 +1390,7 @@ function App() {
                     <p>{draftGenerationState.message}</p>
                   </div>
                   <button
+                    className="secondary-workflow-action"
                     type="button"
                     onClick={generateDraft}
                     disabled={!draftGenerationState.canRun || workflowBusy !== null}
@@ -1676,6 +1794,8 @@ function toApplicationSession(application: ApplicationSession): ApplicationSessi
     unmatchedRequirements: application.unmatchedRequirements || "[]",
     approvedEvidence: application.approvedEvidence || "[]",
     customFacts: application.customFacts || "[]",
+    lastPreparedAt: application.lastPreparedAt ?? null,
+    preparationStatus: application.preparationStatus ?? "NotStarted",
     generatedDraft: application.generatedDraft ?? null,
     hasGeneratedDraft: application.hasGeneratedDraft ?? Boolean(application.generatedDraft),
     auditReadiness: application.auditReadiness ?? auditReadinessForDraft(application.generatedDraft),
@@ -1826,6 +1946,61 @@ function applicationStatusLabel(status: string): string {
       return "Ready for review";
     default:
       return status;
+  }
+}
+
+function applicationNextActionLabel(application: ApplicationSession, approvedProfileFactCount: number): string {
+  return getGuidedNextAction({
+    selectedApplicationId: application.id,
+    hasSavedJobPosting: Boolean(application.jobPostingText.trim()),
+    preparationStatus: application.preparationStatus,
+    approvedProfileFactCount,
+    savedApprovedEvidenceCount: parseJsonArray<EvidenceMatch>(application.approvedEvidence).length,
+    hasGeneratedDraft: application.hasGeneratedDraft
+  }).title;
+}
+
+function guidedActionButtonLabel(label: string, kind: string, workflowBusy: string | null): string {
+  if (workflowBusy === "prepare" && kind === "prepare-application") {
+    return "Preparing...";
+  }
+
+  if (workflowBusy === "review" && kind === "review-evidence") {
+    return "Saving...";
+  }
+
+  return label;
+}
+
+function preparationStatusLabel(status: string): string {
+  switch (status) {
+    case "PreparedForEvidenceReview":
+      return "Prepared for evidence review";
+    case "Preparing":
+      return "Preparing";
+    case "FailedProviderUnavailable":
+      return "Preparation blocked";
+    case "FailedInvalidProviderOutput":
+      return "Preparation output blocked";
+    case "PartiallyPreparedAnalysisOnly":
+      return "Analysis prepared";
+    default:
+      return "Preparation not started";
+  }
+}
+
+function preparationStatusTone(status: string): string {
+  switch (status) {
+    case "PreparedForEvidenceReview":
+      return "approved";
+    case "FailedProviderUnavailable":
+    case "FailedInvalidProviderOutput":
+      return "rejected";
+    case "Preparing":
+    case "PartiallyPreparedAnalysisOnly":
+      return "pending";
+    default:
+      return "neutral";
   }
 }
 

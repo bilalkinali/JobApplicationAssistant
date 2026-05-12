@@ -73,6 +73,8 @@ namespace JobApplicationAssistant.Api.Migrations
                 b.Property<string>("EvidenceMatches").IsRequired().HasColumnType("jsonb");
                 b.Property<string>("JobPostingText").IsRequired().HasColumnType("text");
                 b.Property<string>("JobSignals").IsRequired().HasColumnType("jsonb");
+                b.Property<DateTimeOffset?>("LastPreparedAt").HasColumnType("timestamp with time zone");
+                b.Property<string>("PreparationStatus").IsRequired().HasMaxLength(80).HasColumnType("character varying(80)");
                 b.Property<string>("RoleTitle").IsRequired().HasMaxLength(200).HasColumnType("character varying(200)");
                 b.Property<string>("SelectedLanguage").HasMaxLength(40).HasColumnType("character varying(40)");
                 b.Property<string>("Status").IsRequired().HasMaxLength(80).HasColumnType("character varying(80)");
