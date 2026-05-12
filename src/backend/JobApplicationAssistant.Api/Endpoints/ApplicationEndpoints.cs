@@ -755,8 +755,11 @@ public static class ApplicationEndpoints
                 .Select(decision => new DraftGapDecision(decision.UnmatchedRequirementId, decision.Decision, decision.CustomFactId))
                 .ToList();
             var approvedCustomFacts = ReadApprovedCustomFactsForDraft(application);
-            var gapDecisions = SelectGapDecisionsForDraft(savedGapDecisions, approvedCustomFacts);
-            var draftUnmatchedRequirements = SelectUnmatchedRequirementsForDraft(unmatchedRequirements, gapDecisions);
+            var gapDecisions = SelectGapDecisionsForDraft(savedGapDecisions, unmatchedRequirements, approvedCustomFacts);
+            var draftUnmatchedRequirements = SelectUnmatchedRequirementsForDraft(
+                unmatchedRequirements,
+                gapDecisions,
+                savedGapDecisions.Count > 0);
             var tonePreference = string.Equals(application.SelectedLanguage, "Danish", StringComparison.OrdinalIgnoreCase)
                 ? profile?.DanishTone
                 : profile?.EnglishTone;
@@ -1481,7 +1484,9 @@ public static class ApplicationEndpoints
                 customFact.Technologies));
         }
 
-        return approvedEvidence;
+        return approvedEvidence
+            .DistinctBy(evidence => evidence.Id)
+            .ToList();
     }
 
     private static IReadOnlyList<DraftCustomFact> ReadApprovedCustomFactsForDraft(JobApplication application)
@@ -1520,9 +1525,10 @@ public static class ApplicationEndpoints
 
     private static IReadOnlyList<UnmatchedRequirement> SelectUnmatchedRequirementsForDraft(
         IReadOnlyList<UnmatchedRequirement> unmatchedRequirements,
-        IReadOnlyList<DraftGapDecision> gapDecisions)
+        IReadOnlyList<DraftGapDecision> gapDecisions,
+        bool hasSavedGapDecisions)
     {
-        if (gapDecisions.Count == 0)
+        if (!hasSavedGapDecisions)
         {
             return unmatchedRequirements;
         }
@@ -1539,16 +1545,28 @@ public static class ApplicationEndpoints
 
     private static IReadOnlyList<DraftGapDecision> SelectGapDecisionsForDraft(
         IReadOnlyList<DraftGapDecision> gapDecisions,
+        IReadOnlyList<UnmatchedRequirement> unmatchedRequirements,
         IReadOnlyList<DraftCustomFact> approvedCustomFacts)
     {
-        var approvedCustomFactIds = approvedCustomFacts
-            .Select(fact => fact.Id)
-            .ToHashSet();
+        var unmatchedRequirementIds = unmatchedRequirements
+            .Select(requirement => requirement.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var approvedCustomFactKeys = approvedCustomFacts
+            .Select(fact => $"{fact.Id:N}:{fact.UnmatchedRequirementId}")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         return gapDecisions
             .Where(decision =>
-                !string.Equals(decision.Decision, "CoveredByCustomFact", StringComparison.OrdinalIgnoreCase) ||
-                (decision.CustomFactId is not null && approvedCustomFactIds.Contains(decision.CustomFactId.Value)))
+            {
+                if (!unmatchedRequirementIds.Contains(decision.UnmatchedRequirementId))
+                {
+                    return false;
+                }
+
+                return !string.Equals(decision.Decision, "CoveredByCustomFact", StringComparison.OrdinalIgnoreCase) ||
+                    (decision.CustomFactId is not null &&
+                        approvedCustomFactKeys.Contains($"{decision.CustomFactId.Value:N}:{decision.UnmatchedRequirementId}"));
+            })
             .ToList();
     }
 
