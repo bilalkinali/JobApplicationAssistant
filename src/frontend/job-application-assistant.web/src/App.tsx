@@ -368,6 +368,11 @@ function App() {
   const effectiveAuditReadiness = hasUnsavedDraftEdits
     ? "Stale"
     : selectedApplication?.auditReadiness ?? auditReadinessForDraft(selectedApplication?.generatedDraft ?? null);
+  const isRealProviderUnavailable = Boolean(aiStatus && !isFakeProvider(aiStatus) && !aiStatus.isAvailable);
+  const canRefreshClaimAudit =
+    Boolean(selectedApplication?.generatedDraft) &&
+    effectiveAuditReadiness !== "Current" &&
+    !isRealProviderUnavailable;
   const effectiveAuditExportNotice = hasUnsavedDraftEdits
     ? {
         tone: "warning" as const,
@@ -1039,11 +1044,6 @@ function App() {
         void refreshClaimAudit();
         return;
       case "copy-export":
-        if (coverLetterExportState.canCopy) {
-          void copyCoverLetter();
-          return;
-        }
-
         exportPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
         return;
       case "ai-readiness":
@@ -1739,6 +1739,9 @@ function App() {
                         {effectiveAuditReadiness === "Stale" ? " - Audit stale" : ""}
                       </p>
                     </div>
+                    {aiStatus && isFakeProvider(aiStatus) && (
+                      <p className="workflow-note warning">Fake AI mode: this draft uses deterministic demo/test output.</p>
+                    )}
                     {effectiveAuditExportNotice && <p className={`workflow-note ${effectiveAuditExportNotice.tone}`}>{effectiveAuditExportNotice.message}</p>}
                     <Textarea
                       label="Cover letter"
@@ -1758,19 +1761,28 @@ function App() {
                     />
                     <div className="form-actions">
                       <button
-                        className="primary-action"
+                        className="secondary-workflow-action"
                         type="button"
                         onClick={saveGeneratedDraft}
-                        disabled={workflowBusy !== null}
-                        title={disabledTitle(workflowBusy !== null, workflowBusyReason)}
+                        disabled={!hasUnsavedDraftEdits || workflowBusy !== null}
+                        title={disabledTitle(
+                          !hasUnsavedDraftEdits || workflowBusy !== null,
+                          workflowBusyReason ?? "Edit the draft before saving changes."
+                        )}
                       >
                         {workflowBusy === "draft-edit" ? "Saving..." : "Save draft edits"}
                       </button>
                       <button
                         type="button"
-                        onClick={auditClaims}
-                        disabled={workflowBusy !== null}
-                        title={disabledTitle(workflowBusy !== null, workflowBusyReason)}
+                        onClick={() => void refreshClaimAudit()}
+                        disabled={!canRefreshClaimAudit || workflowBusy !== null}
+                        title={disabledTitle(
+                          !canRefreshClaimAudit || workflowBusy !== null,
+                          workflowBusyReason ??
+                            (isRealProviderUnavailable
+                              ? "Open AI settings before refreshing claim audit."
+                              : "Claim audit is current.")
+                        )}
                       >
                         {workflowBusy === "audit" ? "Auditing..." : "Refresh claim audit"}
                       </button>

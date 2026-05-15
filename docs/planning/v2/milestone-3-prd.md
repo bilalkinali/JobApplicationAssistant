@@ -1,6 +1,6 @@
 # V2 Milestone 3 Product Requirements Document
 
-Status: ready-for-agent
+Status: done
 Source: docs/planning/v2/v2-specification.md
 
 ## Goal

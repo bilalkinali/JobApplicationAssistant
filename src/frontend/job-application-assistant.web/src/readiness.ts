@@ -174,10 +174,10 @@ export function getDraftGenerationState(input: DraftGenerationInput): ActionStat
     };
   }
 
-  if (!input.hasGeneratedDraft && input.aiStatus && !isFakeProvider(input.aiStatus) && !input.aiStatus.isAvailable) {
+  if (isUnavailableRealProvider(input.aiStatus)) {
     return {
       canRun: false,
-      message: getDraftReadinessLabel(input.aiStatus)
+      message: getWorkflowReadinessRecoveryMessage(input.aiStatus, "draft generation")
     };
   }
 
@@ -212,6 +212,21 @@ export function getGuidedNextAction(input: {
     };
   }
 
+  if (
+    isUnavailableRealProvider(input.aiStatus) &&
+    input.preparationStatus !== "PreparedForEvidenceReview" &&
+    input.preparationStatus !== "FailedInvalidProviderOutput"
+  ) {
+    return {
+      kind: "ai-readiness",
+      title: "Check AI readiness",
+      buttonLabel: "Open AI settings",
+      canRun: true,
+      tone: "error",
+      message: getWorkflowReadinessRecoveryMessage(input.aiStatus, "preparation")
+    };
+  }
+
   if (input.preparationStatus === "FailedProviderUnavailable") {
     return {
       kind: "ai-readiness",
@@ -219,7 +234,7 @@ export function getGuidedNextAction(input: {
       buttonLabel: "Open AI settings",
       canRun: true,
       tone: "error",
-      message: "The provider was unavailable during preparation. Run diagnostics, then retry preparation."
+      message: getWorkflowReadinessRecoveryMessage(input.aiStatus, "preparation")
     };
   }
 
@@ -285,14 +300,14 @@ export function getGuidedNextAction(input: {
   }
 
   if (!input.hasGeneratedDraft) {
-    if (input.aiStatus && !isFakeProvider(input.aiStatus) && !input.aiStatus.isAvailable) {
+    if (isUnavailableRealProvider(input.aiStatus)) {
       return {
         kind: "ai-readiness",
         title: "Check AI readiness",
         buttonLabel: "Open AI settings",
         canRun: true,
         tone: "error",
-        message: getDraftReadinessLabel(input.aiStatus)
+        message: getWorkflowReadinessRecoveryMessage(input.aiStatus, "draft generation")
       };
     }
 
@@ -307,14 +322,14 @@ export function getGuidedNextAction(input: {
   }
 
   if (input.hasUnsavedDraftEdits || input.auditReadiness === "Stale" || input.auditReadiness === "Missing") {
-    if (input.aiStatus && !isFakeProvider(input.aiStatus) && !input.aiStatus.isAvailable) {
+    if (isUnavailableRealProvider(input.aiStatus)) {
       return {
         kind: "ai-readiness",
         title: "Check AI readiness",
         buttonLabel: "Open AI settings",
         canRun: true,
         tone: "error",
-        message: getDraftReadinessLabel(input.aiStatus)
+        message: getWorkflowReadinessRecoveryMessage(input.aiStatus, "claim audit refresh")
       };
     }
 
@@ -334,10 +349,10 @@ export function getGuidedNextAction(input: {
     return {
       kind: "copy-export",
       title: "Copy or export",
-      buttonLabel: input.canCopyOrExport ? "Copy cover letter" : "Review export options",
+      buttonLabel: input.canCopyOrExport ? "Review copy/export" : "Review export options",
       canRun: true,
       tone: "success",
-      message: "The claim audit is current. Copy the cover letter or download TXT/DOCX when ready."
+      message: "The claim audit is current. Use the copy and TXT/DOCX export options when ready."
     };
   }
 
@@ -384,6 +399,25 @@ export function getProviderRecoveryGuidance(status: AiProviderReadinessInput): s
   return `Run diagnostics from AI settings and confirm the configured provider and model are available before retrying AI workflow actions.${endpoint}`;
 }
 
+export function getWorkflowReadinessRecoveryMessage(
+  status: AiProviderReadinessInput | null | undefined,
+  actionName: string
+): string {
+  if (!status) {
+    return `AI readiness needs attention. Run diagnostics before retrying ${actionName}.`;
+  }
+
+  if (isFakeProvider(status)) {
+    return "Fake AI mode is ready and uses deterministic demo/test output.";
+  }
+
+  if (status.isAvailable) {
+    return `${status.provider} ${status.model} is ready for ${actionName}.`;
+  }
+
+  return `${status.provider} ${status.model} is unavailable. Run diagnostics before retrying ${actionName}.`;
+}
+
 export function getDraftReadinessLabel(status: AiProviderReadinessInput): string {
   if (isFakeProvider(status)) {
     return "Draft generation will use deterministic demo/test AI.";
@@ -398,6 +432,10 @@ export function getDraftReadinessLabel(status: AiProviderReadinessInput): string
 
 export function isFakeProvider(status: AiProviderReadinessInput): boolean {
   return status.provider.toLowerCase() === "fake";
+}
+
+function isUnavailableRealProvider(status: AiProviderReadinessInput | null | undefined): status is AiProviderReadinessInput {
+  return Boolean(status && !isFakeProvider(status) && !status.isAvailable);
 }
 
 function hasText(value: string | null | undefined): boolean {

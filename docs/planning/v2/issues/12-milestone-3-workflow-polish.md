@@ -1,6 +1,6 @@
 # Milestone 3 Workflow Polish
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,15 +15,15 @@ The completed milestone should be demoable as a normal application path: prepare
 
 ## Acceptance criteria
 
-- [ ] The application detail page has at most one visually dominant guided next action throughout the Milestone 3 path.
-- [ ] Secondary workflow actions remain available only where useful and do not compete visually with the guided next action.
-- [ ] Fake-mode draft output is labeled plainly during review.
-- [ ] Provider readiness messaging is consistent between workbench, preparation, and draft generation surfaces.
-- [ ] Draft review, stale audit, audit refresh, and copy/export states use consistent language.
-- [ ] The end-to-end happy path is demoable with fake AI.
-- [ ] The real-provider unavailable path is demoable with recoverable readiness messaging.
-- [ ] Existing export mechanisms are reachable from the final guided action when audit is current.
-- [ ] No OpenAI support, editable provider settings, profile import, export redesign, authentication, multi-user support, or broad visual redesign is added.
+- [x] The application detail page has at most one visually dominant guided next action throughout the Milestone 3 path.
+- [x] Secondary workflow actions remain available only where useful and do not compete visually with the guided next action.
+- [x] Fake-mode draft output is labeled plainly during review.
+- [x] Provider readiness messaging is consistent between workbench, preparation, and draft generation surfaces.
+- [x] Draft review, stale audit, audit refresh, and copy/export states use consistent language.
+- [x] The end-to-end happy path is demoable with fake AI.
+- [x] The real-provider unavailable path is demoable with recoverable readiness messaging.
+- [x] Existing export mechanisms are reachable from the final guided action when audit is current.
+- [x] No OpenAI support, editable provider settings, profile import, export redesign, authentication, multi-user support, or broad visual redesign is added.
 
 ## Blocked by
 
