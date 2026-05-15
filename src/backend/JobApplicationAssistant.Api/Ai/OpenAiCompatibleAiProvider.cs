@@ -8,6 +8,7 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly string JobAnalysisPrompt = LoadPrompt("job-analysis.md");
+    private static readonly string EvidenceMatchingPrompt = LoadPrompt("evidence-matching.md");
 
     private readonly HttpClient httpClient;
     private readonly AiOptions options;
@@ -142,8 +143,19 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         }
     }
 
-    public Task<EvidenceMatchResult> MatchEvidenceAsync(EvidenceMatchInput input, CancellationToken ct) =>
-        throw ProviderUnavailable();
+    public async Task<EvidenceMatchResult> MatchEvidenceAsync(EvidenceMatchInput input, CancellationToken ct)
+    {
+        var responseText = await ChatAsync(BuildEvidenceMatchingPrompt(input), attemptCount: 1, ct);
+        try
+        {
+            return ParseEvidenceMatching(responseText, input, attemptCount: 1);
+        }
+        catch (AiInvalidOutputException firstFailure)
+        {
+            var repairedText = await ChatAsync(BuildEvidenceMatchingRepairPrompt(responseText, firstFailure.Message), attemptCount: 2, ct);
+            return ParseEvidenceMatching(repairedText, input, attemptCount: 2);
+        }
+    }
 
     public Task<DraftGenerationResult> GenerateDraftAsync(DraftGenerationInput input, CancellationToken ct) =>
         throw ProviderUnavailable();
@@ -300,6 +312,116 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         };
     }
 
+    private EvidenceMatchResult ParseEvidenceMatching(string responseText, EvidenceMatchInput input, int attemptCount)
+    {
+        OpenAiEvidenceMatchingResponse? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<OpenAiEvidenceMatchingResponse>(responseText, JsonOptions);
+        }
+        catch (JsonException exception)
+        {
+            throw new AiInvalidOutputException(
+                AppendRawPayload("OpenAI-compatible endpoint returned malformed evidence matching JSON.", responseText),
+                attemptCount,
+                exception);
+        }
+
+        if (payload is null ||
+            payload.EvidenceMatches is null ||
+            payload.UnmatchedRequirements is null)
+        {
+            throw new AiInvalidOutputException(
+                AppendRawPayload("OpenAI-compatible endpoint returned structurally invalid evidence matching JSON.", responseText),
+                attemptCount);
+        }
+
+        var signalsById = input.Signals.ToDictionary(signal => signal.Id, StringComparer.OrdinalIgnoreCase);
+        var approvedFactsById = input.ApprovedFacts.ToDictionary(fact => fact.Id);
+        var matches = new List<EvidenceMatch>();
+        var unmatched = new List<UnmatchedRequirement>();
+        var matchedSignalIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var unmatchedSignalIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var matchKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var match in payload.EvidenceMatches)
+        {
+            if (match is null ||
+                string.IsNullOrWhiteSpace(match.SignalId) ||
+                string.IsNullOrWhiteSpace(match.ProfileFactId) ||
+                string.IsNullOrWhiteSpace(match.Summary) ||
+                match.MatchedTerms is null ||
+                match.MatchedTerms.Count == 0 ||
+                match.MatchedTerms.All(string.IsNullOrWhiteSpace) ||
+                !signalsById.TryGetValue(match.SignalId.Trim(), out var signal) ||
+                !Guid.TryParse(match.ProfileFactId, out var profileFactId) ||
+                !approvedFactsById.TryGetValue(profileFactId, out var fact))
+            {
+                throw new AiInvalidOutputException(
+                    AppendRawPayload("OpenAI-compatible endpoint returned structurally invalid evidence match JSON.", responseText),
+                    attemptCount);
+            }
+
+            if (!matchKeys.Add($"{signal.Id}:{fact.Id:N}"))
+            {
+                throw new AiInvalidOutputException(
+                    AppendRawPayload("OpenAI-compatible endpoint returned duplicate evidence matches for a job signal and profile fact.", responseText),
+                    attemptCount);
+            }
+
+            matchedSignalIds.Add(signal.Id);
+            matches.Add(new EvidenceMatch(
+                $"match-{signal.Id}-{fact.Id:N}",
+                signal.Id,
+                signal.Label,
+                signal.Category,
+                fact.Id,
+                fact.Title,
+                match.Summary.Trim(),
+                match.MatchedTerms.Where(term => !string.IsNullOrWhiteSpace(term)).Select(term => term.Trim()).ToList()));
+        }
+
+        foreach (var requirement in payload.UnmatchedRequirements)
+        {
+            if (requirement is null ||
+                string.IsNullOrWhiteSpace(requirement.SignalId) ||
+                string.IsNullOrWhiteSpace(requirement.Recommendation) ||
+                !signalsById.TryGetValue(requirement.SignalId.Trim(), out var signal))
+            {
+                throw new AiInvalidOutputException(
+                    AppendRawPayload("OpenAI-compatible endpoint returned structurally invalid unmatched requirement JSON.", responseText),
+                    attemptCount);
+            }
+
+            if (!unmatchedSignalIds.Add(signal.Id))
+            {
+                throw new AiInvalidOutputException(
+                    AppendRawPayload("OpenAI-compatible endpoint returned duplicate unmatched requirements for a job signal.", responseText),
+                    attemptCount);
+            }
+
+            unmatched.Add(new UnmatchedRequirement(
+                $"unmatched-{signal.Id}",
+                signal.Id,
+                signal.Label,
+                signal.Category,
+                requirement.Recommendation.Trim()));
+        }
+
+        if (matchedSignalIds.Overlaps(unmatchedSignalIds) ||
+            input.Signals.Any(signal => !matchedSignalIds.Contains(signal.Id) && !unmatchedSignalIds.Contains(signal.Id)))
+        {
+            throw new AiInvalidOutputException(
+                AppendRawPayload("OpenAI-compatible endpoint returned incomplete or conflicting evidence matching JSON.", responseText),
+                attemptCount);
+        }
+
+        return new EvidenceMatchResult(matches, unmatched)
+        {
+            AttemptCount = attemptCount
+        };
+    }
+
     private static string BuildJobAnalysisPrompt(JobAnalysisInput input) =>
         $"""
         {JobAnalysisPrompt}
@@ -313,9 +435,52 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         {input.JobPostingText}
         """;
 
+    private static string BuildEvidenceMatchingPrompt(EvidenceMatchInput input)
+    {
+        var signals = input.Signals.Select(signal => new
+        {
+            signal.Id,
+            signal.Label,
+            signal.Category,
+            signal.Keywords
+        });
+        var approvedFacts = input.ApprovedFacts.Select(fact => new
+        {
+            fact.Id,
+            fact.Type,
+            fact.Title,
+            fact.Summary,
+            fact.FactItems,
+            fact.Technologies,
+            fact.AllowedClaims
+        });
+
+        return $"""
+        {EvidenceMatchingPrompt}
+
+        Job signals:
+        {JsonSerializer.Serialize(signals, JsonOptions)}
+
+        Approved profile facts:
+        {JsonSerializer.Serialize(approvedFacts, JsonOptions)}
+        """;
+    }
+
     private static string BuildRepairPrompt(string invalidJson, string validationError) =>
         $"""
         Repair this job analysis JSON so it matches the required contract exactly.
+        Return only strict JSON. Do not include markdown.
+
+        Validation error:
+        {validationError}
+
+        Invalid JSON:
+        {invalidJson}
+        """;
+
+    private static string BuildEvidenceMatchingRepairPrompt(string invalidJson, string validationError) =>
+        $"""
+        Repair this evidence matching JSON so it matches the required contract exactly.
         Return only strict JSON. Do not include markdown.
 
         Validation error:
@@ -383,4 +548,18 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         string Label,
         string Category,
         IReadOnlyList<string> Keywords);
+
+    private sealed record OpenAiEvidenceMatchingResponse(
+        IReadOnlyList<OpenAiEvidenceMatchResponse> EvidenceMatches,
+        IReadOnlyList<OpenAiUnmatchedRequirementResponse> UnmatchedRequirements);
+
+    private sealed record OpenAiEvidenceMatchResponse(
+        string SignalId,
+        string ProfileFactId,
+        string Summary,
+        IReadOnlyList<string> MatchedTerms);
+
+    private sealed record OpenAiUnmatchedRequirementResponse(
+        string SignalId,
+        string Recommendation);
 }

@@ -1,6 +1,6 @@
 # OpenAI-Compatible Evidence Matching and Prepare
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,18 +15,18 @@ The completed slice should prove the main preparation workflow can reach the evi
 
 ## Acceptance criteria
 
-- [ ] Evidence matching calls the configured OpenAI-compatible chat completions endpoint using the configured model.
-- [ ] The evidence matching prompt requests strict JSON output compatible with existing parsing and validation.
-- [ ] Valid assistant JSON is parsed into existing evidence match and unmatched requirement results.
-- [ ] Duplicate, conflicting, malformed, or incomplete evidence matching output is rejected by existing validation rules.
-- [ ] Existing repair-attempt behavior is preserved for invalid evidence matching JSON.
-- [ ] `POST /api/applications/{id}/prepare` uses `OpenAiCompatible` for both job analysis and evidence matching when configured.
-- [ ] A successful prepare call persists job signals, evidence matches, unmatched requirements, preparation status, and the evidence review checkpoint using the real provider path.
-- [ ] Failed evidence matching or prepare calls fail gracefully without persisting partial prepared state.
-- [ ] Raw payloads are stored or logged for failed evidence matching or prepare provider calls when `StoreRawPayloads` is enabled.
-- [ ] Backend tests prove evidence matching works with `OpenAiCompatible` and returns valid parsed JSON.
-- [ ] Backend tests prove prepare works with `OpenAiCompatible`, not Fake AI.
-- [ ] Backend tests cover invalid JSON, provider API error, timeout, unreachable endpoint, and partial-state preservation for this path.
+- [x] Evidence matching calls the configured OpenAI-compatible chat completions endpoint using the configured model.
+- [x] The evidence matching prompt requests strict JSON output compatible with existing parsing and validation.
+- [x] Valid assistant JSON is parsed into existing evidence match and unmatched requirement results.
+- [x] Duplicate, conflicting, malformed, or incomplete evidence matching output is rejected by existing validation rules.
+- [x] Existing repair-attempt behavior is preserved for invalid evidence matching JSON.
+- [x] `POST /api/applications/{id}/prepare` uses `OpenAiCompatible` for both job analysis and evidence matching when configured.
+- [x] A successful prepare call persists job signals, evidence matches, unmatched requirements, preparation status, and the evidence review checkpoint using the real provider path.
+- [x] Failed evidence matching or prepare calls fail gracefully without persisting partial prepared state.
+- [x] Raw payloads are stored or logged for failed evidence matching or prepare provider calls when `StoreRawPayloads` is enabled.
+- [x] Backend tests prove evidence matching works with `OpenAiCompatible` and returns valid parsed JSON.
+- [x] Backend tests prove prepare works with `OpenAiCompatible`, not Fake AI.
+- [x] Backend tests cover invalid JSON, provider API error, timeout, unreachable endpoint, and partial-state preservation for this path.
 
 ## Blocked by
 

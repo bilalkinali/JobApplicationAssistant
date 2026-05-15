@@ -1053,6 +1053,409 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task MatchEvidence_with_openai_compatible_stores_matches_unmatched_requirements_and_records_successful_ai_run()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>());
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var approvedFact = await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        await CreateProfileFactAsync(client, "Draft Kubernetes work", "Draft", """["Kubernetes"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        await MarkApplicationAnalyzedAsync(factory, application.Id);
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = OpenAiChatCompletionContent(ValidOllamaEvidenceMatchingJson(approvedFact.Id))
+        });
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var matched = await response.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(matched);
+        Assert.Equal("ReadyForReview", matched.Status);
+
+        var evidenceMatches = JsonSerializer.Deserialize<List<EvidenceMatch>>(matched.EvidenceMatches, JsonOptions);
+        var unmatchedRequirements = JsonSerializer.Deserialize<List<UnmatchedRequirement>>(matched.UnmatchedRequirements, JsonOptions);
+        Assert.NotNull(evidenceMatches);
+        Assert.NotNull(unmatchedRequirements);
+        var match = Assert.Single(evidenceMatches);
+        Assert.Equal("dotnet", match.SignalId);
+        Assert.Equal(".NET", match.Signal);
+        Assert.Equal(approvedFact.Id, match.ProfileFactId);
+        Assert.Equal("Approved API work", match.ProfileFactTitle);
+        Assert.Contains(".NET", match.MatchedTerms);
+        var unmatched = Assert.Single(unmatchedRequirements);
+        Assert.Equal("kubernetes", unmatched.SignalId);
+        Assert.Equal("Kubernetes", unmatched.Requirement);
+
+        var requestJson = await Assert.Single(handler.Requests).Content!.ReadAsStringAsync();
+        Assert.Contains("chat/completions", handler.Requests[0].RequestUri!.ToString());
+        Assert.Contains("\"model\":\"local-model\"", requestJson);
+        Assert.Contains("\"response_format\":{\"type\":\"json_object\"}", requestJson);
+        Assert.Contains("Return only strict JSON", requestJson);
+        Assert.Contains(approvedFact.Id.ToString(), requestJson);
+        Assert.DoesNotContain("Draft Kubernetes work", requestJson);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal(application.Id, run.JobApplicationId);
+        Assert.Equal("EvidenceMatching", run.Step);
+        Assert.Equal("OpenAiCompatible", run.Provider);
+        Assert.Equal("local-model", run.Model);
+        Assert.Equal("Succeeded", run.Status);
+        Assert.Equal(1, run.AttemptCount);
+        Assert.Null(run.ErrorCode);
+        Assert.Contains("\"matchCount\":1", run.OutputSummary);
+    }
+
+    [Fact]
+    public async Task MatchEvidence_with_openai_compatible_repairs_incomplete_signal_coverage_once()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>());
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var approvedFact = await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        await MarkApplicationAnalyzedAsync(factory, application.Id);
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = OpenAiChatCompletionContent($$"""
+                {
+                  "evidenceMatches": [
+                    {
+                      "signalId": "dotnet",
+                      "profileFactId": "{{approvedFact.Id}}",
+                      "summary": "Approved API work demonstrates .NET experience.",
+                      "matchedTerms": [".NET"]
+                    }
+                  ],
+                  "unmatchedRequirements": []
+                }
+                """)
+        });
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = OpenAiChatCompletionContent(ValidOllamaEvidenceMatchingJson(approvedFact.Id))
+        });
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        Assert.Equal(2, handler.Requests.Count);
+
+        var repairRequestJson = await handler.Requests[1].Content!.ReadAsStringAsync();
+        Assert.Contains("Repair this evidence matching JSON", repairRequestJson);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("RepairedSucceeded", run.Status);
+        Assert.Equal(2, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task MatchEvidence_with_openai_compatible_invalid_output_after_repair_records_raw_payload_and_does_not_mutate_application()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>());
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(
+            handler,
+            model: "local-model",
+            storeRawPayloads: true);
+        using var client = factory.CreateClient();
+        var approvedFact = await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        await MarkApplicationAnalyzedAsync(factory, application.Id);
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent("{ malformed") });
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = OpenAiChatCompletionContent($$"""
+                {
+                  "evidenceMatches": [
+                    {
+                      "signalId": "dotnet",
+                      "profileFactId": "{{approvedFact.Id}}",
+                      "summary": "First match.",
+                      "matchedTerms": [".NET"]
+                    },
+                    {
+                      "signalId": "dotnet",
+                      "profileFactId": "{{approvedFact.Id}}",
+                      "summary": "Duplicate match.",
+                      "matchedTerms": [".NET"]
+                    }
+                  ],
+                  "unmatchedRequirements": [
+                    {
+                      "signalId": "kubernetes",
+                      "recommendation": "Treat Kubernetes as an honest learning area."
+                    }
+                  ]
+                }
+                """)
+        });
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(2, handler.Requests.Count);
+        var reopenedResponse = await client.GetAsync($"/api/applications/{application.Id}");
+        reopenedResponse.EnsureSuccessStatusCode();
+        var reopened = await reopenedResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(reopened);
+        Assert.Equal("PostingCaptured", reopened.Status);
+        Assert.Equal("[]", reopened.EvidenceMatches);
+        Assert.Equal("[]", reopened.UnmatchedRequirements);
+        Assert.Equal("[]", reopened.ApprovedEvidence);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("InvalidOutput", run.ErrorCode);
+        Assert.Equal(2, run.AttemptCount);
+        Assert.Contains("Duplicate match", run.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task MatchEvidence_with_openai_compatible_conflicting_output_after_repair_records_failure()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>());
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(
+            handler,
+            model: "local-model",
+            storeRawPayloads: true);
+        using var client = factory.CreateClient();
+        var approvedFact = await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        await MarkApplicationAnalyzedAsync(factory, application.Id);
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent("{ malformed") });
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = OpenAiChatCompletionContent($$"""
+                {
+                  "evidenceMatches": [
+                    {
+                      "signalId": "dotnet",
+                      "profileFactId": "{{approvedFact.Id}}",
+                      "summary": "Approved API work demonstrates .NET experience.",
+                      "matchedTerms": [".NET"]
+                    }
+                  ],
+                  "unmatchedRequirements": [
+                    {
+                      "signalId": "dotnet",
+                      "recommendation": ".NET should not also be unmatched."
+                    },
+                    {
+                      "signalId": "kubernetes",
+                      "recommendation": "Treat Kubernetes as an honest learning area."
+                    }
+                  ]
+                }
+                """)
+        });
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("InvalidOutput", run.ErrorCode);
+        Assert.Equal(2, run.AttemptCount);
+        Assert.Contains("conflicting evidence matching JSON", run.ErrorMessage);
+        Assert.Contains(".NET should not also be unmatched", run.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task MatchEvidence_with_openai_compatible_api_error_records_raw_payload_when_enabled()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                ReasonPhrase = "Service Unavailable",
+                Content = JsonContent.Create(new { error = new { message = "model unavailable" } })
+            }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(
+            handler,
+            model: "local-model",
+            storeRawPayloads: true);
+        using var client = factory.CreateClient();
+        await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        await MarkApplicationAnalyzedAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+        Assert.Contains("model unavailable", run.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task MatchEvidence_with_openai_compatible_timeout_records_failure()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(
+            new Queue<HttpResponseMessage>(),
+            new TaskCanceledException("timed out"));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        await MarkApplicationAnalyzedAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+        Assert.Equal(1, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task MatchEvidence_with_openai_compatible_unreachable_endpoint_records_failure()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(
+            new Queue<HttpResponseMessage>(),
+            new HttpRequestException("unreachable"));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        await MarkApplicationAnalyzedAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+        Assert.Equal(1, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task PrepareApplication_with_openai_compatible_runs_analysis_and_matching_and_returns_evidence_review_checkpoint()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = OpenAiChatCompletionContent(ValidOllamaAnalysisJson("Contoso", "Platform Engineer"))
+            }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var approvedFact = await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = OpenAiChatCompletionContent(ValidOpenAiPrepareEvidenceMatchingJson(approvedFact.Id))
+        });
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/prepare", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var prepared = await response.Content.ReadFromJsonAsync<PrepareApplicationResponse>();
+        Assert.NotNull(prepared);
+        Assert.Equal("ReviewEvidence", prepared.NextCheckpoint);
+        Assert.Equal("PreparedForEvidenceReview", prepared.Application.Status);
+        Assert.Equal("PreparedForEvidenceReview", prepared.Application.PreparationStatus);
+        Assert.NotNull(prepared.Application.LastPreparedAt);
+
+        var signals = JsonSerializer.Deserialize<JobSignalsDocument>(prepared.Application.JobSignals, JsonOptions);
+        var evidenceMatches = JsonSerializer.Deserialize<List<EvidenceMatch>>(prepared.Application.EvidenceMatches, JsonOptions);
+        var unmatchedRequirements = JsonSerializer.Deserialize<List<UnmatchedRequirement>>(prepared.Application.UnmatchedRequirements, JsonOptions);
+        Assert.NotNull(signals);
+        Assert.NotNull(evidenceMatches);
+        Assert.NotNull(unmatchedRequirements);
+        Assert.Equal("OpenAiCompatible", signals.Provider);
+        Assert.Single(evidenceMatches);
+        Assert.Equal(3, unmatchedRequirements.Count);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var runs = db.AiRuns.OrderBy(run => run.StartedAt).ToList();
+        Assert.Equal(2, runs.Count);
+        Assert.All(runs, run => Assert.Equal("OpenAiCompatible", run.Provider));
+        Assert.Equal("JobAnalysis", runs[0].Step);
+        Assert.Equal("EvidenceMatching", runs[1].Step);
+        Assert.All(runs, run => Assert.Equal("Succeeded", run.Status));
+    }
+
+    [Fact]
+    public async Task PrepareApplication_with_openai_compatible_matching_failure_preserves_analysis_and_records_raw_payload()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = OpenAiChatCompletionContent(ValidOllamaAnalysisJson("Contoso", "Platform Engineer"))
+            },
+            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                ReasonPhrase = "Service Unavailable",
+                Content = JsonContent.Create(new { error = new { message = "matching unavailable" } })
+            }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(
+            handler,
+            model: "local-model",
+            storeRawPayloads: true);
+        using var client = factory.CreateClient();
+        await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        await SetEvidenceReviewStateAsync(
+            factory,
+            application.Id,
+            """[{"id":"existing-match","signalId":"legacy","profileFactId":"00000000-0000-0000-0000-000000000001","summary":"Existing match","matchedTerms":["Legacy"]}]""",
+            """[{"id":"existing-unmatched","signalId":"legacy-gap","requirement":"Legacy gap","recommendation":"Existing recommendation"}]""",
+            """[{"id":"existing-approved"}]""");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/prepare", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var reopenedResponse = await client.GetAsync($"/api/applications/{application.Id}");
+        reopenedResponse.EnsureSuccessStatusCode();
+        var reopened = await reopenedResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(reopened);
+        Assert.Equal("Contoso", reopened.CompanyName);
+        Assert.Equal("Platform Engineer", reopened.RoleTitle);
+        Assert.Equal("PostingCaptured", reopened.Status);
+        Assert.Equal("PartiallyPreparedAnalysisOnly", reopened.PreparationStatus);
+        Assert.Null(reopened.LastPreparedAt);
+        Assert.Contains("existing-match", reopened.EvidenceMatches);
+        Assert.Contains("existing-unmatched", reopened.UnmatchedRequirements);
+        Assert.Contains("existing-approved", reopened.ApprovedEvidence);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var runs = db.AiRuns.OrderBy(run => run.StartedAt).ToList();
+        Assert.Equal(2, runs.Count);
+        Assert.Equal("Succeeded", runs[0].Status);
+        Assert.Equal("Failed", runs[1].Status);
+        Assert.Equal("EvidenceMatching", runs[1].Step);
+        Assert.Equal("ProviderUnavailable", runs[1].ErrorCode);
+        Assert.Contains("matching unavailable", runs[1].ErrorMessage);
+    }
+
+    [Fact]
     public async Task PutApprovedEvidence_persists_only_submitted_current_matches()
     {
         await using var factory = new TestApplicationFactory();
@@ -2745,6 +3148,34 @@ public sealed class ApplicationWorkflowApiTests
             {
               "signalId": "kubernetes",
               "recommendation": "Treat Kubernetes as an honest learning area."
+            }
+          ]
+        }
+        """;
+
+    private static string ValidOpenAiPrepareEvidenceMatchingJson(Guid profileFactId) =>
+        $$"""
+        {
+          "evidenceMatches": [
+            {
+              "signalId": "dotnet",
+              "profileFactId": "{{profileFactId}}",
+              "summary": "Approved API work demonstrates .NET experience.",
+              "matchedTerms": [".NET"]
+            }
+          ],
+          "unmatchedRequirements": [
+            {
+              "signalId": "postgresql",
+              "recommendation": "Treat PostgreSQL as an honest learning area."
+            },
+            {
+              "signalId": "kubernetes",
+              "recommendation": "Treat Kubernetes as an honest learning area."
+            },
+            {
+              "signalId": "rest-api",
+              "recommendation": "Treat REST API ownership as an honest learning area."
             }
           ]
         }

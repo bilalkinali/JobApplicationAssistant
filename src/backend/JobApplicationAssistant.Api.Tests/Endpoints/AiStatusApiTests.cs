@@ -294,6 +294,8 @@ public sealed class AiStatusApiTests
     {
         public List<HttpRequestMessage> Requests { get; } = [];
 
+        public void Enqueue(HttpResponseMessage response) => responses.Enqueue(response);
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Requests.Add(request);
