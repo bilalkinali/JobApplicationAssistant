@@ -1,0 +1,12 @@
+Use webapp-testing to smoke test the CV upload flow.
+
+Check:
+- app starts correctly
+- no browser console errors on load
+- profile page opens
+- CV upload UI is visible
+- upload button/input exists
+- invalid file or empty upload shows a user-facing error
+- navigation still works after the failed upload
+- report screenshots and console errors
+Do not change production code unless the test reveals a clear bug.

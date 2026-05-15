@@ -1,0 +1,9 @@
+Use webapp-testing to test the CV upload flow with \docs\testing\fake CV.pdf
+
+Verify:
+- the PDF can be selected
+- upload starts
+- extraction finishes or reaches a clear AI/provider error state
+- extracted fields are rendered in the review UI
+- no console errors occur
+- take screenshots of each major step
