@@ -48,4 +48,14 @@ public sealed record ProfileFactResponse(
     string AllowedClaims,
     string ForbiddenClaims,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string SourceDocumentIds = "[]",
+    string? OriginalImportedSnapshot = null,
+    bool ManuallyEdited = false);
+
+public sealed record AssistedProfileImportResponse(
+    Guid ImportSessionId,
+    string FileName,
+    int ImportedFactCount,
+    IReadOnlyList<ProfileFactResponse> ProfileFacts,
+    string ReviewUrl);

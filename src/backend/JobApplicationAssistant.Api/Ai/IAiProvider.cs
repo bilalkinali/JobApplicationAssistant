@@ -15,6 +15,8 @@ public interface IAiProvider
     Task<DraftGenerationResult> GenerateDraftAsync(DraftGenerationInput input, CancellationToken ct);
 
     Task<ClaimAuditResult> AuditClaimsAsync(ClaimAuditInput input, CancellationToken ct);
+
+    Task<AssistedProfileImportResult> ImportProfileFactsAsync(AssistedProfileImportInput input, CancellationToken ct);
 }
 
 public sealed record AiProviderStatus(
@@ -111,6 +113,26 @@ public sealed record ClaimAuditClaim(
     string Text,
     string Status,
     IReadOnlyList<string> EvidenceIds);
+
+public sealed record AssistedProfileImportInput(
+    string FileName,
+    string ExtractedText);
+
+public sealed record AssistedProfileImportResult(
+    IReadOnlyList<AssistedProfileImportFact> Facts)
+{
+    public int AttemptCount { get; init; } = 1;
+}
+
+public sealed record AssistedProfileImportFact(
+    string Type,
+    string Title,
+    string Summary,
+    IReadOnlyList<string> FactItems,
+    IReadOnlyList<string> Technologies,
+    IReadOnlyList<string> AllowedClaims,
+    IReadOnlyList<string> ForbiddenClaims,
+    string SourceContext);
 
 public sealed record JobSignalsDocument(
     string Provider,

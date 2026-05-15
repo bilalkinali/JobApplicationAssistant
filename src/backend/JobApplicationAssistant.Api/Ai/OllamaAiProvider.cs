@@ -10,6 +10,7 @@ public sealed class OllamaAiProvider : IAiProvider
     private static readonly string EvidenceMatchingPrompt = LoadPrompt("evidence-matching.md");
     private static readonly string DraftGenerationPrompt = LoadPrompt("draft-generation.md");
     private static readonly string ClaimAuditPrompt = LoadPrompt("claim-audit.md");
+    private static readonly string AssistedProfileImportPrompt = LoadPrompt("assisted-profile-import.md");
 
     private readonly HttpClient httpClient;
     private readonly AiOptions options;
@@ -132,6 +133,20 @@ public sealed class OllamaAiProvider : IAiProvider
         {
             var repairedText = await GenerateAsync(BuildClaimAuditRepairPrompt(responseText, firstFailure.Message), attemptCount: 2, ct);
             return ParseClaimAudit(repairedText, input, attemptCount: 2);
+        }
+    }
+
+    public async Task<AssistedProfileImportResult> ImportProfileFactsAsync(AssistedProfileImportInput input, CancellationToken ct)
+    {
+        var responseText = await GenerateAsync(BuildAssistedProfileImportPrompt(input), attemptCount: 1, ct);
+        try
+        {
+            return ParseAssistedProfileImport(responseText, attemptCount: 1);
+        }
+        catch (AiInvalidOutputException firstFailure)
+        {
+            var repairedText = await GenerateAsync(BuildRepairPrompt(responseText, firstFailure.Message), attemptCount: 2, ct);
+            return ParseAssistedProfileImport(repairedText, attemptCount: 2);
         }
     }
 
@@ -434,6 +449,54 @@ public sealed class OllamaAiProvider : IAiProvider
         };
     }
 
+    private static AssistedProfileImportResult ParseAssistedProfileImport(string responseText, int attemptCount)
+    {
+        OllamaAssistedProfileImportResponse? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<OllamaAssistedProfileImportResponse>(responseText, JsonOptions);
+        }
+        catch (JsonException exception)
+        {
+            throw new AiInvalidOutputException("Ollama returned malformed assisted profile import JSON.", attemptCount, exception);
+        }
+
+        if (payload?.Facts is null || payload.Facts.Count == 0)
+        {
+            throw new AiInvalidOutputException("Ollama returned assisted profile import without facts.", attemptCount);
+        }
+
+        var facts = payload.Facts.Select(fact =>
+        {
+            if (fact is null ||
+                string.IsNullOrWhiteSpace(fact.Type) ||
+                string.IsNullOrWhiteSpace(fact.Title) ||
+                string.IsNullOrWhiteSpace(fact.Summary) ||
+                fact.FactItems is null ||
+                fact.Technologies is null ||
+                fact.AllowedClaims is null ||
+                fact.ForbiddenClaims is null)
+            {
+                throw new AiInvalidOutputException("Ollama returned structurally invalid assisted profile import fact JSON.", attemptCount);
+            }
+
+            return new AssistedProfileImportFact(
+                fact.Type.Trim(),
+                fact.Title.Trim(),
+                fact.Summary.Trim(),
+                TrimStrings(fact.FactItems),
+                TrimStrings(fact.Technologies),
+                TrimStrings(fact.AllowedClaims),
+                TrimStrings(fact.ForbiddenClaims),
+                fact.SourceContext?.Trim() ?? string.Empty);
+        }).ToList();
+
+        return new AssistedProfileImportResult(facts)
+        {
+            AttemptCount = attemptCount
+        };
+    }
+
     private static string BuildJobAnalysisPrompt(JobAnalysisInput input) =>
         $"""
         {JobAnalysisPrompt}
@@ -569,6 +632,16 @@ public sealed class OllamaAiProvider : IAiProvider
         """;
     }
 
+    private static string BuildAssistedProfileImportPrompt(AssistedProfileImportInput input) =>
+        $"""
+        {AssistedProfileImportPrompt}
+
+        File name: {input.FileName}
+
+        CV text:
+        {input.ExtractedText}
+        """;
+
     private static string BuildRepairPrompt(string invalidJson, string validationError) =>
         $"""
         Repair this job analysis JSON so it matches the required contract exactly.
@@ -648,6 +721,9 @@ public sealed class OllamaAiProvider : IAiProvider
         return File.ReadAllText(path);
     }
 
+    private static IReadOnlyList<string> TrimStrings(IReadOnlyList<string> values) =>
+        values.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim()).ToList();
+
     private sealed record OllamaTagsResponse(IReadOnlyList<OllamaModel> Models);
 
     private sealed record OllamaModel(string Name);
@@ -699,4 +775,17 @@ public sealed class OllamaAiProvider : IAiProvider
         string Text,
         string Status,
         IReadOnlyList<string> EvidenceIds);
+
+    private sealed record OllamaAssistedProfileImportResponse(
+        IReadOnlyList<OllamaAssistedProfileImportFactResponse> Facts);
+
+    private sealed record OllamaAssistedProfileImportFactResponse(
+        string Type,
+        string Title,
+        string Summary,
+        IReadOnlyList<string> FactItems,
+        IReadOnlyList<string> Technologies,
+        IReadOnlyList<string> AllowedClaims,
+        IReadOnlyList<string> ForbiddenClaims,
+        string? SourceContext);
 }

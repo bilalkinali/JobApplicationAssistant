@@ -11,6 +11,7 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
     private static readonly string EvidenceMatchingPrompt = LoadPrompt("evidence-matching.md");
     private static readonly string DraftGenerationPrompt = LoadPrompt("draft-generation.md");
     private static readonly string ClaimAuditPrompt = LoadPrompt("claim-audit.md");
+    private static readonly string AssistedProfileImportPrompt = LoadPrompt("assisted-profile-import.md");
 
     private readonly HttpClient httpClient;
     private readonly AiOptions options;
@@ -184,6 +185,20 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         {
             var repairedText = await ChatAsync(BuildClaimAuditRepairPrompt(responseText, firstFailure.Message), attemptCount: 2, ct);
             return ParseClaimAudit(repairedText, input, attemptCount: 2);
+        }
+    }
+
+    public async Task<AssistedProfileImportResult> ImportProfileFactsAsync(AssistedProfileImportInput input, CancellationToken ct)
+    {
+        var responseText = await ChatAsync(BuildAssistedProfileImportPrompt(input), attemptCount: 1, ct);
+        try
+        {
+            return ParseAssistedProfileImport(responseText, attemptCount: 1);
+        }
+        catch (AiInvalidOutputException firstFailure)
+        {
+            var repairedText = await ChatAsync(BuildRepairPrompt(responseText, firstFailure.Message), attemptCount: 2, ct);
+            return ParseAssistedProfileImport(repairedText, attemptCount: 2);
         }
     }
 
@@ -570,6 +585,61 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         };
     }
 
+    private AssistedProfileImportResult ParseAssistedProfileImport(string responseText, int attemptCount)
+    {
+        OpenAiAssistedProfileImportResponse? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<OpenAiAssistedProfileImportResponse>(responseText, JsonOptions);
+        }
+        catch (JsonException exception)
+        {
+            throw new AiInvalidOutputException(
+                AppendRawPayload("OpenAI-compatible endpoint returned malformed assisted profile import JSON.", responseText),
+                attemptCount,
+                exception);
+        }
+
+        if (payload?.Facts is null || payload.Facts.Count == 0)
+        {
+            throw new AiInvalidOutputException(
+                AppendRawPayload("OpenAI-compatible endpoint returned assisted profile import without facts.", responseText),
+                attemptCount);
+        }
+
+        var facts = payload.Facts.Select(fact =>
+        {
+            if (fact is null ||
+                string.IsNullOrWhiteSpace(fact.Type) ||
+                string.IsNullOrWhiteSpace(fact.Title) ||
+                string.IsNullOrWhiteSpace(fact.Summary) ||
+                fact.FactItems is null ||
+                fact.Technologies is null ||
+                fact.AllowedClaims is null ||
+                fact.ForbiddenClaims is null)
+            {
+                throw new AiInvalidOutputException(
+                    AppendRawPayload("OpenAI-compatible endpoint returned structurally invalid assisted profile import fact JSON.", responseText),
+                    attemptCount);
+            }
+
+            return new AssistedProfileImportFact(
+                fact.Type.Trim(),
+                fact.Title.Trim(),
+                fact.Summary.Trim(),
+                TrimStrings(fact.FactItems),
+                TrimStrings(fact.Technologies),
+                TrimStrings(fact.AllowedClaims),
+                TrimStrings(fact.ForbiddenClaims),
+                fact.SourceContext?.Trim() ?? string.Empty);
+        }).ToList();
+
+        return new AssistedProfileImportResult(facts)
+        {
+            AttemptCount = attemptCount
+        };
+    }
+
     private static string BuildJobAnalysisPrompt(JobAnalysisInput input) =>
         $"""
         {JobAnalysisPrompt}
@@ -705,6 +775,16 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         """;
     }
 
+    private static string BuildAssistedProfileImportPrompt(AssistedProfileImportInput input) =>
+        $"""
+        {AssistedProfileImportPrompt}
+
+        File name: {input.FileName}
+
+        CV text:
+        {input.ExtractedText}
+        """;
+
     private static string BuildRepairPrompt(string invalidJson, string validationError) =>
         $"""
         Repair this job analysis JSON so it matches the required contract exactly.
@@ -784,6 +864,9 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         return File.ReadAllText(path);
     }
 
+    private static IReadOnlyList<string> TrimStrings(IReadOnlyList<string> values) =>
+        values.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim()).ToList();
+
     private sealed record OpenAiModelsResponse(IReadOnlyList<OpenAiModel?>? Data);
 
     private sealed record OpenAiModel(string Id);
@@ -848,4 +931,17 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         string Text,
         string Status,
         IReadOnlyList<string> EvidenceIds);
+
+    private sealed record OpenAiAssistedProfileImportResponse(
+        IReadOnlyList<OpenAiAssistedProfileImportFactResponse> Facts);
+
+    private sealed record OpenAiAssistedProfileImportFactResponse(
+        string Type,
+        string Title,
+        string Summary,
+        IReadOnlyList<string> FactItems,
+        IReadOnlyList<string> Technologies,
+        IReadOnlyList<string> AllowedClaims,
+        IReadOnlyList<string> ForbiddenClaims,
+        string? SourceContext);
 }
