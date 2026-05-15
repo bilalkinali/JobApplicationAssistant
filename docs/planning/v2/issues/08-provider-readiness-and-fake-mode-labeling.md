@@ -1,6 +1,6 @@
 # Provider Readiness and Fake Mode Labeling
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,15 +15,15 @@ Fake AI should be labeled as demo/test behavior. Real provider readiness should 
 
 ## Acceptance criteria
 
-- [ ] The workbench shows the current AI provider mode and readiness state.
-- [ ] The application detail workflow shows provider readiness near `Prepare application`.
-- [ ] The application detail workflow shows provider readiness near draft generation when that action is available.
-- [ ] Fake AI mode is plainly labeled as deterministic demo/test behavior.
-- [ ] Real provider readiness includes provider and model details.
-- [ ] Ollama readiness includes endpoint reachability and model availability where the existing diagnostics can determine them.
-- [ ] Unavailable or failing real provider states show plain recovery guidance instead of a generic workflow failure.
-- [ ] AI actions do not silently fall back from a failing real provider to fake AI.
-- [ ] Focused tests cover provider readiness contracts and the visible guided-workflow states where existing test structure supports them.
+- [x] The workbench shows the current AI provider mode and readiness state.
+- [x] The application detail workflow shows provider readiness near `Prepare application`.
+- [x] The application detail workflow shows provider readiness near draft generation when that action is available.
+- [x] Fake AI mode is plainly labeled as deterministic demo/test behavior.
+- [x] Real provider readiness includes provider and model details.
+- [x] Ollama readiness includes endpoint reachability and model availability where the existing diagnostics can determine them.
+- [x] Unavailable or failing real provider states show plain recovery guidance instead of a generic workflow failure.
+- [x] AI actions do not silently fall back from a failing real provider to fake AI.
+- [x] Focused tests cover provider readiness contracts and the visible guided-workflow states where existing test structure supports them.
 
 ## Blocked by
 

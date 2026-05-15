@@ -96,6 +96,53 @@ public sealed class AiStatusApiTests
         Assert.Equal("connectivity", check.Name);
         Assert.Equal("unavailable", check.Status);
     }
+
+    [Fact]
+    public async Task GetAiStatus_does_not_fall_back_to_fake_for_unsupported_provider()
+    {
+        await using var factory = new TestApplicationFactory().WithAiConfiguration(
+            provider: "OpenAI",
+            endpoint: "https://api.openai.com/v1",
+            model: "gpt-4.1-mini",
+            timeoutSeconds: "1");
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/api/ai/status");
+
+        response.EnsureSuccessStatusCode();
+        var status = await response.Content.ReadFromJsonAsync<AiProviderStatusResponse>();
+        Assert.NotNull(status);
+        Assert.Equal("OpenAI", status.Provider);
+        Assert.Equal("gpt-4.1-mini", status.Model);
+        Assert.Equal("https://api.openai.com/v1", status.Endpoint);
+        Assert.False(status.IsAvailable);
+        Assert.Contains("not supported", status.Message);
+    }
+
+    [Fact]
+    public async Task PostAiDiagnostics_reports_unsupported_provider_without_fake_fallback()
+    {
+        await using var factory = new TestApplicationFactory().WithAiConfiguration(
+            provider: "OpenAI",
+            endpoint: "https://api.openai.com/v1",
+            model: "gpt-4.1-mini",
+            timeoutSeconds: "1");
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsync("/api/ai/diagnostics", null);
+
+        response.EnsureSuccessStatusCode();
+        var diagnostics = await response.Content.ReadFromJsonAsync<AiDiagnosticsResponse>();
+        Assert.NotNull(diagnostics);
+        Assert.Equal("OpenAI", diagnostics.Provider);
+        Assert.Equal("gpt-4.1-mini", diagnostics.Model);
+        Assert.Equal("https://api.openai.com/v1", diagnostics.Endpoint);
+        Assert.False(diagnostics.IsAvailable);
+        Assert.Contains("not supported", diagnostics.Message);
+        var check = Assert.Single(diagnostics.Checks);
+        Assert.Equal("provider", check.Name);
+        Assert.Equal("unsupported", check.Status);
+    }
 }
 
 internal static class TestApplicationFactoryAiExtensions

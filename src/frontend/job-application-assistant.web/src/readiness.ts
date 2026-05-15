@@ -40,6 +40,14 @@ export type GuidedNextAction = ActionState & {
   tone: "info" | "warning" | "success" | "error";
 };
 
+export type AiProviderReadinessInput = {
+  provider: string;
+  model: string;
+  endpoint: string | null;
+  isAvailable: boolean;
+  message: string;
+};
+
 export function getPrepareApplicationPath(applicationId: string): string {
   return `/api/applications/${applicationId}/prepare`;
 }
@@ -280,6 +288,55 @@ export function getGuidedNextAction(input: {
     tone: "success",
     message: "The application has a generated draft. Review edits, audit claims, and export when ready."
   };
+}
+
+export function getProviderSummary(status: AiProviderReadinessInput): string {
+  const availability = status.isAvailable ? "available" : "unavailable";
+  const endpoint = status.endpoint ? ` at ${status.endpoint}` : "";
+  const deterministic = isFakeProvider(status) ? " Deterministic demo/test behavior is active." : "";
+
+  return `${status.provider} provider is ${availability} with model ${status.model}${endpoint}. ${status.message}${deterministic}`;
+}
+
+export function getAvailabilityLabel(status: AiProviderReadinessInput): string {
+  return status.isAvailable ? "Available" : "Unavailable";
+}
+
+export function getReadinessTone(status: AiProviderReadinessInput): "info" | "warning" | "error" {
+  if (isFakeProvider(status)) {
+    return "warning";
+  }
+
+  return status.isAvailable ? "info" : "error";
+}
+
+export function getProviderReadinessTitle(status: AiProviderReadinessInput): string {
+  if (isFakeProvider(status)) {
+    return "Fake AI mode";
+  }
+
+  return status.isAvailable ? "Real AI provider ready" : "Real AI provider unavailable";
+}
+
+export function getProviderRecoveryGuidance(status: AiProviderReadinessInput): string {
+  const endpoint = status.endpoint ? ` Confirm ${status.endpoint} is reachable.` : "";
+  return `Run diagnostics from AI settings and confirm the configured provider and model are available before retrying AI workflow actions.${endpoint}`;
+}
+
+export function getDraftReadinessLabel(status: AiProviderReadinessInput): string {
+  if (isFakeProvider(status)) {
+    return "Draft generation will use deterministic demo/test AI.";
+  }
+
+  if (status.isAvailable) {
+    return `${status.provider} ${status.model} is ready for draft generation.`;
+  }
+
+  return `${status.provider} ${status.model} is unavailable. Run diagnostics before retrying draft generation.`;
+}
+
+export function isFakeProvider(status: AiProviderReadinessInput): boolean {
+  return status.provider.toLowerCase() === "fake";
 }
 
 function hasText(value: string | null | undefined): boolean {

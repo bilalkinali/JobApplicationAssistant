@@ -155,6 +155,12 @@ button:disabled {
   background: #fff5f3;
 }
 
+.status-pill.fake {
+  border-color: #e4c06e;
+  color: #714d12;
+  background: #fff8e8;
+}
+
 .state-badge {
   display: inline-flex;
   width: fit-content;
@@ -1048,6 +1054,35 @@ button:disabled {
 .workflow-note ul {
   margin: 8px 0 0;
   padding-left: 18px;
+}
+
+.provider-readiness {
+  display: grid;
+  gap: 10px;
+}
+
+.provider-readiness .status-details {
+  margin-top: 2px;
+}
+
+.provider-readiness li {
+  margin-bottom: 4px;
+}
+
+.inline-readiness {
+  display: inline-block;
+  margin-top: 8px;
+  color: #24533b;
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
+.inline-readiness.unavailable {
+  color: #7c241f;
+}
+
+.inline-readiness.fake {
+  color: #714d12;
 }
 
 .workflow-note.warning {

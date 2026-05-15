@@ -11,12 +11,19 @@ import {
   technicalDetails
 } from "./errorPresentation";
 import {
+  getAvailabilityLabel,
+  getDraftReadinessLabel,
   getDraftGenerationState,
   getEvidenceMatchingState,
   getGuidedNextAction,
   getJobAnalysisState,
   getPrepareApplicationPath,
-  getProfileReadiness
+  getProfileReadiness,
+  getProviderReadinessTitle,
+  getProviderRecoveryGuidance,
+  getProviderSummary,
+  getReadinessTone,
+  isFakeProvider
 } from "./readiness";
 import "./styles.css";
 
@@ -1106,8 +1113,12 @@ function App() {
             <p className="eyebrow">Workbench</p>
             <h2 id="workspace-title">{pageTitle(view)}</h2>
           </div>
-          <span className={`status-pill ${aiStatus?.isAvailable === false ? "unavailable" : ""}`}>
-            {aiStatus ? `${aiStatus.provider} - ${aiStatus.model} - ${availabilityLabel(aiStatus)}` : "AI status loading"}
+          <span
+            className={`status-pill ${aiStatus?.isAvailable === false ? "unavailable" : ""} ${
+              aiStatus && isFakeProvider(aiStatus) ? "fake" : ""
+            }`}
+          >
+            {aiStatus ? `${aiStatus.provider} - ${aiStatus.model} - ${getAvailabilityLabel(aiStatus)}` : "AI status loading"}
           </span>
         </header>
 
@@ -1155,27 +1166,12 @@ function App() {
             <article className="panel">
               <h3>AI status</h3>
               {aiStatus ? (
-                <>
-                  <p>{providerSummary(aiStatus)}</p>
-                  <dl className="status-details compact">
-                    <div>
-                      <dt>Provider</dt>
-                      <dd>{aiStatus.provider}</dd>
-                    </div>
-                    <div>
-                      <dt>Model</dt>
-                      <dd>{aiStatus.model}</dd>
-                    </div>
-                    <div>
-                      <dt>Availability</dt>
-                      <dd>{aiStatus.isAvailable ? "Available" : "Unavailable"}</dd>
-                    </div>
-                    <div>
-                      <dt>Diagnostics</dt>
-                      <dd>{aiDiagnosticsLastRanAt ? `Last ran ${formatDateTime(aiDiagnosticsLastRanAt)}` : "Not run this session"}</dd>
-                    </div>
-                  </dl>
-                </>
+                <ProviderReadinessSummary
+                  status={aiStatus}
+                  diagnostics={aiDiagnostics}
+                  diagnosticsLastRanAt={aiDiagnosticsLastRanAt}
+                  compact
+                />
               ) : (
                 <p>Loading AI provider status.</p>
               )}
@@ -1354,9 +1350,11 @@ function App() {
                   <p>Move from job analysis to approved evidence, generated text, and claim audit before final use.</p>
                 </div>
                 {aiStatus && (
-                  <p className={`workflow-note ${aiStatus.isAvailable ? "info" : "warning"}`}>
-                    {aiWorkflowStatusMessage(aiStatus)}
-                  </p>
+                  <ProviderReadinessSummary
+                    status={aiStatus}
+                    diagnostics={aiDiagnostics}
+                    diagnosticsLastRanAt={aiDiagnosticsLastRanAt}
+                  />
                 )}
                 <section className={`guided-action ${guidedNextAction.tone}`} aria-label="Guided next action">
                   <div>
@@ -1502,7 +1500,7 @@ function App() {
                           </div>
 
                           <div className="custom-fact-editor">
-                            <Input
+                            <Field
                               label="Custom fact title"
                               value={customFactDraft.title}
                               onChange={(title) => updateCustomFactDraft(requirement.id, { title })}
@@ -1658,6 +1656,11 @@ function App() {
                   <div>
                     <h4>4. Generated draft</h4>
                     <p>{draftGenerationState.message}</p>
+                    {aiStatus && (
+                      <span className={`inline-readiness ${aiStatus.isAvailable ? "available" : "unavailable"} ${isFakeProvider(aiStatus) ? "fake" : ""}`}>
+                        {getDraftReadinessLabel(aiStatus)}
+                      </span>
+                    )}
                   </div>
                   <button
                     className="secondary-workflow-action"
@@ -1806,7 +1809,7 @@ function App() {
             <h3>AI settings</h3>
             {aiStatus ? (
               <>
-                <p>{providerSummary(aiStatus)}</p>
+                <p>{getProviderSummary(aiStatus)}</p>
                 <dl className="status-details">
                   <div>
                     <dt>Provider</dt>
@@ -2099,32 +2102,67 @@ function fileNameFromContentDisposition(header: string | null, fallback: string)
   return fileNameMatch?.[1] ?? fallback;
 }
 
-function providerSummary(status: AiProviderStatus): string {
-  const availability = status.isAvailable ? "available" : "unavailable";
-  const endpoint = status.endpoint ? ` at ${status.endpoint}` : "";
-  const deterministic = isFakeProvider(status) ? " Deterministic fake workflow is active." : "";
+function ProviderReadinessSummary({
+  status,
+  diagnostics,
+  diagnosticsLastRanAt,
+  compact = false
+}: {
+  status: AiProviderStatus;
+  diagnostics: AiDiagnostics | null;
+  diagnosticsLastRanAt: string | null;
+  compact?: boolean;
+}) {
+  const tone = getReadinessTone(status);
+  const details = diagnostics?.checks ?? [];
 
-  return `${status.provider} provider is ${availability} with model ${status.model}${endpoint}. ${status.message}${deterministic}`;
-}
-
-function availabilityLabel(status: AiProviderStatus): string {
-  return status.isAvailable ? "Available" : "Unavailable";
-}
-
-function aiWorkflowStatusMessage(status: AiProviderStatus): string {
-  if (isFakeProvider(status)) {
-    return "Deterministic fake AI is active for repeatable workflow checks.";
-  }
-
-  if (status.isAvailable) {
-    return `${status.provider} model ${status.model} is available for AI workflow actions.`;
-  }
-
-  return `${status.provider} model ${status.model} is unavailable. AI actions may fail until diagnostics pass; validation blockers are still shown separately.`;
-}
-
-function isFakeProvider(status: AiProviderStatus): boolean {
-  return status.provider.toLowerCase() === "fake";
+  return (
+    <section className={`provider-readiness workflow-note ${tone}`}>
+      <strong>{getProviderReadinessTitle(status)}</strong>
+      <p>{getProviderSummary(status)}</p>
+      {!status.isAvailable && !isFakeProvider(status) && (
+        <p>{getProviderRecoveryGuidance(status)}</p>
+      )}
+      <dl className={`status-details ${compact ? "compact" : ""}`}>
+        <div>
+          <dt>Provider</dt>
+          <dd>{status.provider}</dd>
+        </div>
+        <div>
+          <dt>Mode</dt>
+          <dd>{isFakeProvider(status) ? "Deterministic demo/test behavior" : "Configured real provider"}</dd>
+        </div>
+        <div>
+          <dt>Model</dt>
+          <dd>{status.model}</dd>
+        </div>
+        <div>
+          <dt>Endpoint</dt>
+          <dd>{status.endpoint ?? "Not applicable"}</dd>
+        </div>
+        <div>
+          <dt>Availability</dt>
+          <dd>{status.isAvailable ? "Available" : "Unavailable"}</dd>
+        </div>
+        <div>
+          <dt>Diagnostics</dt>
+          <dd>{diagnosticsLastRanAt ? `Last ran ${formatDateTime(diagnosticsLastRanAt)}` : "Not run this session"}</dd>
+        </div>
+      </dl>
+      {details.length > 0 && (
+        <details>
+          <summary>Readiness checks</summary>
+          <ul>
+            {details.map((check) => (
+              <li key={`${check.name}-${check.status}`}>
+                <strong>{check.name}</strong>: {check.status} - {check.message}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </section>
+  );
 }
 
 function claimAuditMessage(hasGeneratedDraft: boolean): string {

@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  getDraftReadinessLabel,
   getDraftGenerationState,
   getEvidenceMatchingState,
   getGuidedNextAction,
   getJobAnalysisState,
   getPrepareApplicationPath,
-  getProfileReadiness
+  getProfileReadiness,
+  getProviderReadinessTitle,
+  getProviderRecoveryGuidance,
+  getProviderSummary,
+  getReadinessTone,
+  isFakeProvider
 } from "../dist-test/readiness.js";
 
 test("profile readiness warns about missing contact setup without blocking evidence status", () => {
@@ -274,4 +280,41 @@ test("guided next action points provider failures toward diagnostics", () => {
 
   assert.equal(action.kind, "ai-readiness");
   assert.equal(action.buttonLabel, "Open AI settings");
+});
+
+test("fake provider readiness is labeled as deterministic demo test behavior", () => {
+  const status = {
+    provider: "Fake",
+    model: "fake-deterministic",
+    endpoint: null,
+    isAvailable: true,
+    message: "Fake provider is available."
+  };
+
+  assert.equal(isFakeProvider(status), true);
+  assert.equal(getReadinessTone(status), "warning");
+  assert.equal(getProviderReadinessTitle(status), "Fake AI mode");
+  assert.match(getProviderSummary(status), /Deterministic demo\/test behavior is active/);
+  assert.equal(getDraftReadinessLabel(status), "Draft generation will use deterministic demo/test AI.");
+});
+
+test("real provider readiness includes recovery guidance for unavailable ollama", () => {
+  const status = {
+    provider: "Ollama",
+    model: "llama3.1:8b",
+    endpoint: "http://127.0.0.1:11434",
+    isAvailable: false,
+    message: "Ollama endpoint is unavailable."
+  };
+
+  assert.equal(isFakeProvider(status), false);
+  assert.equal(getReadinessTone(status), "error");
+  assert.equal(getProviderReadinessTitle(status), "Real AI provider unavailable");
+  assert.match(getProviderSummary(status), /Ollama provider is unavailable with model llama3\.1:8b at http:\/\/127\.0\.0\.1:11434/);
+  assert.match(getProviderRecoveryGuidance(status), /confirm the configured provider and model are available/i);
+  assert.match(getProviderRecoveryGuidance(status), /http:\/\/127\.0\.0\.1:11434/);
+  assert.equal(
+    getDraftReadinessLabel(status),
+    "Ollama llama3.1:8b is unavailable. Run diagnostics before retrying draft generation."
+  );
 });
