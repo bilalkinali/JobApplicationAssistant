@@ -49,9 +49,9 @@ test("stale and missing audit warnings do not block export", () => {
   };
 
   assert.equal(getCoverLetterExportState(staleApplication).canExport, true);
-  assert.equal(getAuditExportWarning(staleApplication), "Claim audit is stale. You can export, but re-run audit before sending if you want the latest trust check.");
+  assert.equal(getAuditExportWarning(staleApplication), "Claim audit is stale. Copy/export stays available, but refresh claim audit before sending if you want the latest trust check.");
   assert.equal(getCoverLetterExportState(missingApplication).canExport, true);
-  assert.equal(getAuditExportWarning(missingApplication), "Claim audit has not been run. You can export, but this draft has not been checked against approved evidence yet.");
+  assert.equal(getAuditExportWarning(missingApplication), "Claim audit has not been run. Copy/export stays available, but this draft has not been checked against approved evidence yet.");
 });
 
 test("copy uses the current cover letter text only when draft text exists and clipboard is available", () => {
@@ -80,5 +80,5 @@ test("claim audit is missing when the audit payload is still empty", () => {
     }
   };
 
-  assert.equal(getAuditExportWarning(state), "Claim audit has not been run. You can export, but this draft has not been checked against approved evidence yet.");
+  assert.equal(getAuditExportWarning(state), "Claim audit has not been run. Copy/export stays available, but this draft has not been checked against approved evidence yet.");
 });

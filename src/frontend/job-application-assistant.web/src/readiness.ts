@@ -18,6 +18,8 @@ export type DraftGenerationInput = {
   hasSavedApprovedEvidence: boolean;
   unmatchedRequirementCount: number;
   savedGapDecisionCount: number;
+  hasGeneratedDraft: boolean;
+  aiStatus?: AiProviderReadinessInput | null;
 };
 
 export type ActionState = {
@@ -29,7 +31,9 @@ export type GuidedNextActionKind =
   | "save-posting"
   | "prepare-application"
   | "review-evidence"
-  | "evidence-ready"
+  | "generate-draft"
+  | "refresh-audit"
+  | "copy-export"
   | "ai-readiness"
   | "complete";
 
@@ -38,6 +42,14 @@ export type GuidedNextAction = ActionState & {
   title: string;
   buttonLabel: string;
   tone: "info" | "warning" | "success" | "error";
+};
+
+export type AiProviderReadinessInput = {
+  provider: string;
+  model: string;
+  endpoint: string | null;
+  isAvailable: boolean;
+  message: string;
 };
 
 export function getPrepareApplicationPath(applicationId: string): string {
@@ -162,9 +174,16 @@ export function getDraftGenerationState(input: DraftGenerationInput): ActionStat
     };
   }
 
+  if (isUnavailableRealProvider(input.aiStatus)) {
+    return {
+      canRun: false,
+      message: getWorkflowReadinessRecoveryMessage(input.aiStatus, "draft generation")
+    };
+  }
+
   return {
     canRun: true,
-    message: "Generate or edit the current cover letter and short motivation."
+    message: "Generate the current cover letter and short motivation, then audit claims against approved evidence."
   };
 }
 
@@ -177,6 +196,10 @@ export function getGuidedNextAction(input: {
   unmatchedRequirementCount: number;
   savedGapDecisionCount: number;
   hasGeneratedDraft: boolean;
+  auditReadiness: string;
+  hasUnsavedDraftEdits?: boolean;
+  canCopyOrExport?: boolean;
+  aiStatus?: AiProviderReadinessInput | null;
 }): GuidedNextAction {
   if (!input.selectedApplicationId || !input.hasSavedJobPosting) {
     return {
@@ -189,6 +212,21 @@ export function getGuidedNextAction(input: {
     };
   }
 
+  if (
+    isUnavailableRealProvider(input.aiStatus) &&
+    input.preparationStatus !== "PreparedForEvidenceReview" &&
+    input.preparationStatus !== "FailedInvalidProviderOutput"
+  ) {
+    return {
+      kind: "ai-readiness",
+      title: "Check AI readiness",
+      buttonLabel: "Open AI settings",
+      canRun: true,
+      tone: "error",
+      message: getWorkflowReadinessRecoveryMessage(input.aiStatus, "preparation")
+    };
+  }
+
   if (input.preparationStatus === "FailedProviderUnavailable") {
     return {
       kind: "ai-readiness",
@@ -196,7 +234,7 @@ export function getGuidedNextAction(input: {
       buttonLabel: "Open AI settings",
       canRun: true,
       tone: "error",
-      message: "The provider was unavailable during preparation. Run diagnostics, then retry preparation."
+      message: getWorkflowReadinessRecoveryMessage(input.aiStatus, "preparation")
     };
   }
 
@@ -262,13 +300,59 @@ export function getGuidedNextAction(input: {
   }
 
   if (!input.hasGeneratedDraft) {
+    if (isUnavailableRealProvider(input.aiStatus)) {
+      return {
+        kind: "ai-readiness",
+        title: "Check AI readiness",
+        buttonLabel: "Open AI settings",
+        canRun: true,
+        tone: "error",
+        message: getWorkflowReadinessRecoveryMessage(input.aiStatus, "draft generation")
+      };
+    }
+
     return {
-      kind: "evidence-ready",
-      title: "Evidence reviewed",
-      buttonLabel: "Review evidence",
+      kind: "generate-draft",
+      title: "Generate and audit draft",
+      buttonLabel: "Generate draft",
       canRun: true,
       tone: "success",
-      message: "Approved evidence is saved. Continue with draft generation below when you are ready."
+      message: "Approved evidence and gap decisions are saved. Generate the draft and claim audit in one step."
+    };
+  }
+
+  if (input.hasUnsavedDraftEdits || input.auditReadiness === "Stale" || input.auditReadiness === "Missing") {
+    if (isUnavailableRealProvider(input.aiStatus)) {
+      return {
+        kind: "ai-readiness",
+        title: "Check AI readiness",
+        buttonLabel: "Open AI settings",
+        canRun: true,
+        tone: "error",
+        message: getWorkflowReadinessRecoveryMessage(input.aiStatus, "claim audit refresh")
+      };
+    }
+
+    return {
+      kind: "refresh-audit",
+      title: "Refresh claim audit",
+      buttonLabel: "Refresh claim audit",
+      canRun: true,
+      tone: input.auditReadiness === "Current" ? "info" : "warning",
+      message: input.hasUnsavedDraftEdits
+        ? "Draft edits need to be saved and checked against approved evidence before final use."
+        : "The current draft needs a fresh claim audit before copy or export is the final guided action."
+    };
+  }
+
+  if (input.auditReadiness === "Current") {
+    return {
+      kind: "copy-export",
+      title: "Copy or export",
+      buttonLabel: input.canCopyOrExport ? "Review copy/export" : "Review export options",
+      canRun: true,
+      tone: "success",
+      message: "The claim audit is current. Use the copy and TXT/DOCX export options when ready."
     };
   }
 
@@ -280,6 +364,78 @@ export function getGuidedNextAction(input: {
     tone: "success",
     message: "The application has a generated draft. Review edits, audit claims, and export when ready."
   };
+}
+
+export function getProviderSummary(status: AiProviderReadinessInput): string {
+  const availability = status.isAvailable ? "available" : "unavailable";
+  const endpoint = status.endpoint ? ` at ${status.endpoint}` : "";
+  const deterministic = isFakeProvider(status) ? " Deterministic demo/test behavior is active." : "";
+
+  return `${status.provider} provider is ${availability} with model ${status.model}${endpoint}. ${status.message}${deterministic}`;
+}
+
+export function getAvailabilityLabel(status: AiProviderReadinessInput): string {
+  return status.isAvailable ? "Available" : "Unavailable";
+}
+
+export function getReadinessTone(status: AiProviderReadinessInput): "info" | "warning" | "error" {
+  if (isFakeProvider(status)) {
+    return "warning";
+  }
+
+  return status.isAvailable ? "info" : "error";
+}
+
+export function getProviderReadinessTitle(status: AiProviderReadinessInput): string {
+  if (isFakeProvider(status)) {
+    return "Fake AI mode";
+  }
+
+  return status.isAvailable ? "Real AI provider ready" : "Real AI provider unavailable";
+}
+
+export function getProviderRecoveryGuidance(status: AiProviderReadinessInput): string {
+  const endpoint = status.endpoint ? ` Confirm ${status.endpoint} is reachable.` : "";
+  return `Run diagnostics from AI settings and confirm the configured provider and model are available before retrying AI workflow actions.${endpoint}`;
+}
+
+export function getWorkflowReadinessRecoveryMessage(
+  status: AiProviderReadinessInput | null | undefined,
+  actionName: string
+): string {
+  if (!status) {
+    return `AI readiness needs attention. Run diagnostics before retrying ${actionName}.`;
+  }
+
+  if (isFakeProvider(status)) {
+    return "Fake AI mode is ready and uses deterministic demo/test output.";
+  }
+
+  if (status.isAvailable) {
+    return `${status.provider} ${status.model} is ready for ${actionName}.`;
+  }
+
+  return `${status.provider} ${status.model} is unavailable. Run diagnostics before retrying ${actionName}.`;
+}
+
+export function getDraftReadinessLabel(status: AiProviderReadinessInput): string {
+  if (isFakeProvider(status)) {
+    return "Draft generation will use deterministic demo/test AI.";
+  }
+
+  if (status.isAvailable) {
+    return `${status.provider} ${status.model} is ready for draft generation.`;
+  }
+
+  return `${status.provider} ${status.model} is unavailable. Run diagnostics before retrying draft generation.`;
+}
+
+export function isFakeProvider(status: AiProviderReadinessInput): boolean {
+  return status.provider.toLowerCase() === "fake";
+}
+
+function isUnavailableRealProvider(status: AiProviderReadinessInput | null | undefined): status is AiProviderReadinessInput {
+  return Boolean(status && !isFakeProvider(status) && !status.isAvailable);
 }
 
 function hasText(value: string | null | undefined): boolean {

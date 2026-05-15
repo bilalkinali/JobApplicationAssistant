@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  getDraftReadinessLabel,
   getDraftGenerationState,
   getEvidenceMatchingState,
   getGuidedNextAction,
   getJobAnalysisState,
   getPrepareApplicationPath,
-  getProfileReadiness
+  getProfileReadiness,
+  getProviderReadinessTitle,
+  getProviderRecoveryGuidance,
+  getProviderSummary,
+  getReadinessTone,
+  isFakeProvider
 } from "../dist-test/readiness.js";
 
 test("profile readiness warns about missing contact setup without blocking evidence status", () => {
@@ -135,6 +141,51 @@ test("draft generation waits for gap decisions", () => {
   );
 });
 
+test("draft generation blocks unavailable real provider with retry guidance", () => {
+  assert.deepEqual(
+    getDraftGenerationState({
+      selectedApplicationId: "application-1",
+      hasSavedJobPosting: true,
+      hasSavedApprovedEvidence: true,
+      unmatchedRequirementCount: 0,
+      savedGapDecisionCount: 0,
+      hasGeneratedDraft: false,
+      aiStatus: {
+        provider: "Ollama",
+        model: "llama3.1:8b",
+        endpoint: "http://127.0.0.1:11434",
+        isAvailable: false,
+        message: "Ollama endpoint is unavailable."
+      }
+    }),
+    {
+      canRun: false,
+      message: "Ollama llama3.1:8b is unavailable. Run diagnostics before retrying draft generation."
+    }
+  );
+});
+
+test("draft generation stays blocked for unavailable real provider when a stable draft exists", () => {
+  const state = getDraftGenerationState({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: true,
+    hasSavedApprovedEvidence: true,
+    unmatchedRequirementCount: 0,
+    savedGapDecisionCount: 0,
+    hasGeneratedDraft: true,
+    aiStatus: {
+      provider: "Ollama",
+      model: "llama3.1:8b",
+      endpoint: "http://127.0.0.1:11434",
+      isAvailable: false,
+      message: "Ollama endpoint is unavailable."
+    }
+  });
+
+  assert.equal(state.canRun, false);
+  assert.equal(state.message, "Ollama llama3.1:8b is unavailable. Run diagnostics before retrying draft generation.");
+});
+
 test("guided next action starts with saving the posting", () => {
   const action = getGuidedNextAction({
     selectedApplicationId: "application-1",
@@ -167,6 +218,30 @@ test("guided next action prepares a saved posting before evidence review", () =>
   assert.equal(action.kind, "prepare-application");
   assert.equal(action.title, "Prepare application");
   assert.equal(action.canRun, true);
+});
+
+test("guided next action blocks preparation when a real provider is unavailable", () => {
+  const action = getGuidedNextAction({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: true,
+    preparationStatus: "NotStarted",
+    approvedProfileFactCount: 2,
+    savedApprovedEvidenceCount: 0,
+    unmatchedRequirementCount: 0,
+    savedGapDecisionCount: 0,
+    hasGeneratedDraft: false,
+    aiStatus: {
+      provider: "Ollama",
+      model: "llama3.1:8b",
+      endpoint: "http://127.0.0.1:11434",
+      isAvailable: false,
+      message: "Ollama endpoint is unavailable."
+    }
+  });
+
+  assert.equal(action.kind, "ai-readiness");
+  assert.equal(action.title, "Check AI readiness");
+  assert.equal(action.message, "Ollama llama3.1:8b is unavailable. Run diagnostics before retrying preparation.");
 });
 
 test("prepare application path targets the backend orchestration endpoint", () => {
@@ -222,9 +297,9 @@ test("guided next action stops at reviewed evidence before draft generation", ()
     hasGeneratedDraft: false
   });
 
-  assert.equal(action.kind, "evidence-ready");
-  assert.equal(action.title, "Evidence reviewed");
-  assert.equal(action.buttonLabel, "Review evidence");
+  assert.equal(action.kind, "generate-draft");
+  assert.equal(action.title, "Generate and audit draft");
+  assert.equal(action.buttonLabel, "Generate draft");
 });
 
 test("guided next action stays at evidence review while gaps are unresolved", () => {
@@ -256,8 +331,112 @@ test("guided next action allows draft generation after all gaps are resolved", (
     hasGeneratedDraft: false
   });
 
-  assert.equal(action.kind, "evidence-ready");
-  assert.equal(action.title, "Evidence reviewed");
+  assert.equal(action.kind, "generate-draft");
+  assert.equal(action.title, "Generate and audit draft");
+});
+
+test("guided next action points unavailable real provider toward diagnostics before draft generation", () => {
+  const action = getGuidedNextAction({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: true,
+    preparationStatus: "PreparedForEvidenceReview",
+    approvedProfileFactCount: 2,
+    savedApprovedEvidenceCount: 1,
+    unmatchedRequirementCount: 0,
+    savedGapDecisionCount: 0,
+    hasGeneratedDraft: false,
+    aiStatus: {
+      provider: "Ollama",
+      model: "llama3.1:8b",
+      endpoint: "http://127.0.0.1:11434",
+      isAvailable: false,
+      message: "Ollama endpoint is unavailable."
+    }
+  });
+
+  assert.equal(action.kind, "ai-readiness");
+  assert.equal(action.buttonLabel, "Open AI settings");
+  assert.equal(action.message, "Ollama llama3.1:8b is unavailable. Run diagnostics before retrying draft generation.");
+});
+
+test("guided next action keeps current draft available when provider is unavailable", () => {
+  const action = getGuidedNextAction({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: true,
+    preparationStatus: "PreparedForEvidenceReview",
+    approvedProfileFactCount: 2,
+    savedApprovedEvidenceCount: 1,
+    unmatchedRequirementCount: 0,
+    savedGapDecisionCount: 0,
+    hasGeneratedDraft: true,
+    auditReadiness: "Current",
+    canCopyOrExport: true,
+    aiStatus: {
+      provider: "Ollama",
+      model: "llama3.1:8b",
+      endpoint: "http://127.0.0.1:11434",
+      isAvailable: false,
+      message: "Ollama endpoint is unavailable."
+    }
+  });
+
+  assert.equal(action.kind, "copy-export");
+  assert.equal(action.buttonLabel, "Review copy/export");
+});
+
+test("guided next action refreshes stale audit before final use", () => {
+  const action = getGuidedNextAction({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: true,
+    preparationStatus: "PreparedForEvidenceReview",
+    approvedProfileFactCount: 2,
+    savedApprovedEvidenceCount: 1,
+    unmatchedRequirementCount: 0,
+    savedGapDecisionCount: 0,
+    hasGeneratedDraft: true,
+    auditReadiness: "Stale"
+  });
+
+  assert.equal(action.kind, "refresh-audit");
+  assert.equal(action.title, "Refresh claim audit");
+  assert.equal(action.buttonLabel, "Refresh claim audit");
+});
+
+test("guided next action treats unsaved draft edits as stale audit", () => {
+  const action = getGuidedNextAction({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: true,
+    preparationStatus: "PreparedForEvidenceReview",
+    approvedProfileFactCount: 2,
+    savedApprovedEvidenceCount: 1,
+    unmatchedRequirementCount: 0,
+    savedGapDecisionCount: 0,
+    hasGeneratedDraft: true,
+    auditReadiness: "Current",
+    hasUnsavedDraftEdits: true
+  });
+
+  assert.equal(action.kind, "refresh-audit");
+  assert.match(action.message, /Draft edits need to be saved/);
+});
+
+test("guided next action makes copy and export final when audit is current", () => {
+  const action = getGuidedNextAction({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: true,
+    preparationStatus: "PreparedForEvidenceReview",
+    approvedProfileFactCount: 2,
+    savedApprovedEvidenceCount: 1,
+    unmatchedRequirementCount: 0,
+    savedGapDecisionCount: 0,
+    hasGeneratedDraft: true,
+    auditReadiness: "Current",
+    canCopyOrExport: true
+  });
+
+  assert.equal(action.kind, "copy-export");
+  assert.equal(action.title, "Copy or export");
+  assert.equal(action.buttonLabel, "Review copy/export");
 });
 
 test("guided next action points provider failures toward diagnostics", () => {
@@ -274,4 +453,41 @@ test("guided next action points provider failures toward diagnostics", () => {
 
   assert.equal(action.kind, "ai-readiness");
   assert.equal(action.buttonLabel, "Open AI settings");
+});
+
+test("fake provider readiness is labeled as deterministic demo test behavior", () => {
+  const status = {
+    provider: "Fake",
+    model: "fake-deterministic",
+    endpoint: null,
+    isAvailable: true,
+    message: "Fake provider is available."
+  };
+
+  assert.equal(isFakeProvider(status), true);
+  assert.equal(getReadinessTone(status), "warning");
+  assert.equal(getProviderReadinessTitle(status), "Fake AI mode");
+  assert.match(getProviderSummary(status), /Deterministic demo\/test behavior is active/);
+  assert.equal(getDraftReadinessLabel(status), "Draft generation will use deterministic demo/test AI.");
+});
+
+test("real provider readiness includes recovery guidance for unavailable ollama", () => {
+  const status = {
+    provider: "Ollama",
+    model: "llama3.1:8b",
+    endpoint: "http://127.0.0.1:11434",
+    isAvailable: false,
+    message: "Ollama endpoint is unavailable."
+  };
+
+  assert.equal(isFakeProvider(status), false);
+  assert.equal(getReadinessTone(status), "error");
+  assert.equal(getProviderReadinessTitle(status), "Real AI provider unavailable");
+  assert.match(getProviderSummary(status), /Ollama provider is unavailable with model llama3\.1:8b at http:\/\/127\.0\.0\.1:11434/);
+  assert.match(getProviderRecoveryGuidance(status), /confirm the configured provider and model are available/i);
+  assert.match(getProviderRecoveryGuidance(status), /http:\/\/127\.0\.0\.1:11434/);
+  assert.equal(
+    getDraftReadinessLabel(status),
+    "Ollama llama3.1:8b is unavailable. Run diagnostics before retrying draft generation."
+  );
 });

@@ -22,9 +22,17 @@ builder.Services.AddHttpClient<OllamaAiProvider>((serviceProvider, client) =>
 builder.Services.AddSingleton<IAiProvider>(serviceProvider =>
 {
     var options = serviceProvider.GetRequiredService<AiOptions>();
-    return string.Equals(options.Provider, "Ollama", StringComparison.OrdinalIgnoreCase)
-        ? serviceProvider.GetRequiredService<OllamaAiProvider>()
-        : new FakeAiProvider(new FakeAiProviderOptions(options.Model));
+    if (string.Equals(options.Provider, "Fake", StringComparison.OrdinalIgnoreCase))
+    {
+        return new FakeAiProvider(new FakeAiProviderOptions(options.Model));
+    }
+
+    if (string.Equals(options.Provider, "Ollama", StringComparison.OrdinalIgnoreCase))
+    {
+        return serviceProvider.GetRequiredService<OllamaAiProvider>();
+    }
+
+    return new UnavailableAiProvider(options);
 });
 builder.Services.AddCors(options =>
 {

@@ -75,14 +75,14 @@ export function getAuditExportNotice(application: ExportApplication | null | und
   if (draft.isClaimAuditStale) {
     return {
       tone: "warning",
-      message: "Claim audit is stale. You can export, but re-run audit before sending if you want the latest trust check."
+      message: "Claim audit is stale. Copy/export stays available, but refresh claim audit before sending if you want the latest trust check."
     };
   }
 
   if (!draft.auditUpdatedAt || draft.claimAudit === "{}") {
     return {
       tone: "neutral",
-      message: "Claim audit has not been run. You can export, but this draft has not been checked against approved evidence yet."
+      message: "Claim audit has not been run. Copy/export stays available, but this draft has not been checked against approved evidence yet."
     };
   }
 
