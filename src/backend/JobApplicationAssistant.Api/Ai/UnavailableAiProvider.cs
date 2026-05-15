@@ -24,7 +24,7 @@ public sealed class UnavailableAiProvider : IAiProvider
             options.Endpoint,
             false,
             UnsupportedProviderMessage(),
-            [new AiDiagnosticCheck("provider", "unsupported", "Configure Ai:Provider as Fake or Ollama.")]));
+            [new AiDiagnosticCheck("provider", "unsupported", "Configure Ai:Provider as Fake, Ollama, or OpenAiCompatible.")]));
 
     public Task<JobAnalysisResult> AnalyzeJobAsync(JobAnalysisInput input, CancellationToken ct) =>
         throw ProviderUnavailable();
@@ -42,5 +42,5 @@ public sealed class UnavailableAiProvider : IAiProvider
         new(UnsupportedProviderMessage());
 
     private string UnsupportedProviderMessage() =>
-        $"AI provider '{options.Provider}' is not supported. Configure Ai:Provider as Fake or Ollama.";
+        $"AI provider '{options.Provider}' is not supported. Configure Ai:Provider as Fake, Ollama, or OpenAiCompatible.";
 }

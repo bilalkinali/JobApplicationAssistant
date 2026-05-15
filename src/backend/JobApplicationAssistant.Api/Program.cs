@@ -16,7 +16,13 @@ builder.Services.AddSingleton(_ =>
 builder.Services.AddHttpClient<OllamaAiProvider>((serviceProvider, client) =>
 {
     var options = serviceProvider.GetRequiredService<AiOptions>();
-    client.BaseAddress = new Uri(options.Endpoint);
+    client.BaseAddress = new Uri(EnsureTrailingSlash(options.Endpoint));
+    client.Timeout = TimeSpan.FromSeconds(Math.Max(1, options.TimeoutSeconds));
+});
+builder.Services.AddHttpClient<OpenAiCompatibleAiProvider>((serviceProvider, client) =>
+{
+    var options = serviceProvider.GetRequiredService<AiOptions>();
+    client.BaseAddress = new Uri(EnsureTrailingSlash(options.Endpoint));
     client.Timeout = TimeSpan.FromSeconds(Math.Max(1, options.TimeoutSeconds));
 });
 builder.Services.AddSingleton<IAiProvider>(serviceProvider =>
@@ -30,6 +36,11 @@ builder.Services.AddSingleton<IAiProvider>(serviceProvider =>
     if (string.Equals(options.Provider, "Ollama", StringComparison.OrdinalIgnoreCase))
     {
         return serviceProvider.GetRequiredService<OllamaAiProvider>();
+    }
+
+    if (string.Equals(options.Provider, "OpenAiCompatible", StringComparison.OrdinalIgnoreCase))
+    {
+        return serviceProvider.GetRequiredService<OpenAiCompatibleAiProvider>();
     }
 
     return new UnavailableAiProvider(options);
@@ -72,5 +83,8 @@ app.MapApplicationEndpoints();
 app.MapAiEndpoints();
 
 app.Run();
+
+static string EnsureTrailingSlash(string endpoint) =>
+    endpoint.EndsWith("/", StringComparison.Ordinal) ? endpoint : $"{endpoint}/";
 
 public partial class Program;
