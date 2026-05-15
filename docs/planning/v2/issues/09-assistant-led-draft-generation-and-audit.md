@@ -1,6 +1,6 @@
 # Assistant-Led Draft Generation and Audit
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,18 +15,18 @@ The action should generate cover letter and short motivation text from approved 
 
 ## Acceptance criteria
 
-- [ ] Evidence review completion makes draft generation the guided next action when no current draft exists.
-- [ ] Draft generation is blocked until approved evidence exists and unmatched requirements have explicit handling decisions.
-- [ ] The guided draft action generates both cover letter and short motivation text.
-- [ ] Approved profile facts are included as approved evidence for generation.
-- [ ] Approved job-local custom facts are included only for their owning application.
-- [ ] Unapproved job-local custom facts are excluded from generation evidence.
-- [ ] `MentionAsLearningInterest` decisions can guide cautious wording but are not passed as approved evidence.
-- [ ] Ignored gaps are not emphasized unless independently supported by approved evidence.
-- [ ] Claim audit runs after successful generation when provider availability and inputs allow it.
-- [ ] The generated draft and current audit state are persisted as latest application state.
-- [ ] The frontend exposes this as one guided primary action rather than separate equally weighted generation and audit actions.
-- [ ] Focused backend tests cover successful generation, audit orchestration, generation inputs, and persisted current state.
+- [x] Evidence review completion makes draft generation the guided next action when no current draft exists.
+- [x] Draft generation is blocked until approved evidence exists and unmatched requirements have explicit handling decisions.
+- [x] The guided draft action generates both cover letter and short motivation text.
+- [x] Approved profile facts are included as approved evidence for generation.
+- [x] Approved job-local custom facts are included only for their owning application.
+- [x] Unapproved job-local custom facts are excluded from generation evidence.
+- [x] `MentionAsLearningInterest` decisions can guide cautious wording but are not passed as approved evidence.
+- [x] Ignored gaps are not emphasized unless independently supported by approved evidence.
+- [x] Claim audit runs after successful generation when provider availability and inputs allow it.
+- [x] The generated draft and current audit state are persisted as latest application state.
+- [x] The frontend exposes this as one guided primary action rather than separate equally weighted generation and audit actions.
+- [x] Focused backend tests cover successful generation, audit orchestration, generation inputs, and persisted current state.
 
 ## Blocked by
 

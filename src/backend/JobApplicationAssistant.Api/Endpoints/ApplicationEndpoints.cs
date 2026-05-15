@@ -756,6 +756,14 @@ public static class ApplicationEndpoints
                 .ToList();
             var approvedCustomFacts = ReadApprovedCustomFactsForDraft(application);
             var gapDecisions = SelectGapDecisionsForDraft(savedGapDecisions, unmatchedRequirements, approvedCustomFacts);
+            if (HasUnhandledUnmatchedRequirements(unmatchedRequirements, savedGapDecisions))
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(application.GapDecisions)] = ["Decide how to handle each unmatched requirement before draft generation."]
+                }));
+            }
+
             var draftUnmatchedRequirements = SelectUnmatchedRequirementsForDraft(
                 unmatchedRequirements,
                 gapDecisions,
@@ -844,6 +852,56 @@ public static class ApplicationEndpoints
                 CoverLetterLength = result.CoverLetterText.Length,
                 ShortMotivationLength = result.ShortMotivationText.Length
             }, JsonOptions);
+
+            var auditRun = new AiRun
+            {
+                Id = Guid.NewGuid(),
+                JobApplicationId = application.Id,
+                Step = "ClaimAudit",
+                Provider = aiOptions.Provider,
+                Model = aiOptions.Model,
+                Status = "Running",
+                AttemptCount = 1,
+                StartedAt = DateTimeOffset.UtcNow,
+                InputSummary = JsonSerializer.Serialize(new
+                {
+                    ApprovedEvidenceCount = approvedEvidence.Count,
+                    CoverLetterLength = draft.CoverLetterText.Length,
+                    ShortMotivationLength = draft.ShortMotivationText.Length
+                }, JsonOptions)
+            };
+            db.AiRuns.Add(auditRun);
+
+            try
+            {
+                var auditResult = await aiProvider.AuditClaimsAsync(
+                    new ClaimAuditInput(
+                        draft.CoverLetterText,
+                        draft.ShortMotivationText,
+                        approvedEvidence),
+                    ct);
+
+                draft.ClaimAudit = JsonSerializer.Serialize(auditResult, JsonOptions);
+                draft.AuditUpdatedAt = DateTimeOffset.UtcNow;
+                draft.IsClaimAuditStale = false;
+                draft.UpdatedAt = draft.AuditUpdatedAt.Value;
+                application.UpdatedAt = draft.AuditUpdatedAt.Value;
+                auditRun.Status = auditResult.AttemptCount > 1 ? "RepairedSucceeded" : "Succeeded";
+                auditRun.AttemptCount = auditResult.AttemptCount;
+                auditRun.CompletedAt = DateTimeOffset.UtcNow;
+                auditRun.OutputSummary = JsonSerializer.Serialize(new
+                {
+                    ClaimCount = auditResult.Claims.Count
+                }, JsonOptions);
+            }
+            catch (AiProviderException exception)
+            {
+                auditRun.Status = "Failed";
+                auditRun.ErrorCode = exception.ErrorCode;
+                auditRun.ErrorMessage = exception.Message;
+                auditRun.AttemptCount = exception.AttemptCount;
+                auditRun.CompletedAt = DateTimeOffset.UtcNow;
+            }
 
             await db.SaveChangesAsync(ct);
 
@@ -1541,6 +1599,22 @@ public static class ApplicationEndpoints
         return unmatchedRequirements
             .Where(requirement => learningInterestIds.Contains(requirement.Id))
             .ToList();
+    }
+
+    private static bool HasUnhandledUnmatchedRequirements(
+        IReadOnlyList<UnmatchedRequirement> unmatchedRequirements,
+        IReadOnlyList<DraftGapDecision> gapDecisions)
+    {
+        if (unmatchedRequirements.Count == 0)
+        {
+            return false;
+        }
+
+        var handledRequirementIds = gapDecisions
+            .Select(decision => decision.UnmatchedRequirementId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return unmatchedRequirements.Any(requirement => !handledRequirementIds.Contains(requirement.Id));
     }
 
     private static IReadOnlyList<DraftGapDecision> SelectGapDecisionsForDraft(

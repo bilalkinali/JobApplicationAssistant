@@ -29,7 +29,7 @@ export type GuidedNextActionKind =
   | "save-posting"
   | "prepare-application"
   | "review-evidence"
-  | "evidence-ready"
+  | "generate-draft"
   | "ai-readiness"
   | "complete";
 
@@ -172,7 +172,7 @@ export function getDraftGenerationState(input: DraftGenerationInput): ActionStat
 
   return {
     canRun: true,
-    message: "Generate or edit the current cover letter and short motivation."
+    message: "Generate the current cover letter and short motivation, then audit claims against approved evidence."
   };
 }
 
@@ -271,12 +271,12 @@ export function getGuidedNextAction(input: {
 
   if (!input.hasGeneratedDraft) {
     return {
-      kind: "evidence-ready",
-      title: "Evidence reviewed",
-      buttonLabel: "Review evidence",
+      kind: "generate-draft",
+      title: "Generate and audit draft",
+      buttonLabel: "Generate draft",
       canRun: true,
       tone: "success",
-      message: "Approved evidence is saved. Continue with draft generation below when you are ready."
+      message: "Approved evidence and gap decisions are saved. Generate the draft and claim audit in one step."
     };
   }
 

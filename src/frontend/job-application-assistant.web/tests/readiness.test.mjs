@@ -228,9 +228,9 @@ test("guided next action stops at reviewed evidence before draft generation", ()
     hasGeneratedDraft: false
   });
 
-  assert.equal(action.kind, "evidence-ready");
-  assert.equal(action.title, "Evidence reviewed");
-  assert.equal(action.buttonLabel, "Review evidence");
+  assert.equal(action.kind, "generate-draft");
+  assert.equal(action.title, "Generate and audit draft");
+  assert.equal(action.buttonLabel, "Generate draft");
 });
 
 test("guided next action stays at evidence review while gaps are unresolved", () => {
@@ -262,8 +262,8 @@ test("guided next action allows draft generation after all gaps are resolved", (
     hasGeneratedDraft: false
   });
 
-  assert.equal(action.kind, "evidence-ready");
-  assert.equal(action.title, "Evidence reviewed");
+  assert.equal(action.kind, "generate-draft");
+  assert.equal(action.title, "Generate and audit draft");
 });
 
 test("guided next action points provider failures toward diagnostics", () => {

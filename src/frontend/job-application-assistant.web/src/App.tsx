@@ -797,7 +797,7 @@ function App() {
     try {
       const draft = await apiSend<GeneratedDraft>(`/api/applications/${selectedApplicationId}/generate-draft`, "POST", null);
       replaceGeneratedDraft(draft);
-      setNotice("Draft generated.");
+      setNotice(draft.auditUpdatedAt ? "Draft generated and claim audit updated." : "Draft generated.");
     } catch (apiError) {
       setError(formatError(apiError));
     } finally {
@@ -991,8 +991,10 @@ function App() {
         void prepareApplication();
         return;
       case "review-evidence":
-      case "evidence-ready":
         evidenceReviewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      case "generate-draft":
+        void generateDraft();
         return;
       case "ai-readiness":
         setView("settings");
@@ -1669,7 +1671,7 @@ function App() {
                     disabled={!draftGenerationState.canRun || workflowBusy !== null}
                     title={disabledTitle(!draftGenerationState.canRun || workflowBusy !== null, workflowBusyReason ?? draftGenerationState.message)}
                   >
-                    {workflowBusy === "draft" ? "Generating..." : "Generate draft"}
+                    {workflowBusy === "draft" ? "Generating..." : "Generate and audit draft"}
                   </button>
                 </div>
 
