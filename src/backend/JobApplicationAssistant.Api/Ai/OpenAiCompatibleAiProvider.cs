@@ -9,6 +9,8 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly string JobAnalysisPrompt = LoadPrompt("job-analysis.md");
     private static readonly string EvidenceMatchingPrompt = LoadPrompt("evidence-matching.md");
+    private static readonly string DraftGenerationPrompt = LoadPrompt("draft-generation.md");
+    private static readonly string ClaimAuditPrompt = LoadPrompt("claim-audit.md");
 
     private readonly HttpClient httpClient;
     private readonly AiOptions options;
@@ -157,11 +159,33 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         }
     }
 
-    public Task<DraftGenerationResult> GenerateDraftAsync(DraftGenerationInput input, CancellationToken ct) =>
-        throw ProviderUnavailable();
+    public async Task<DraftGenerationResult> GenerateDraftAsync(DraftGenerationInput input, CancellationToken ct)
+    {
+        var responseText = await ChatAsync(BuildDraftGenerationPrompt(input), attemptCount: 1, ct);
+        try
+        {
+            return ParseDraftGeneration(responseText, attemptCount: 1);
+        }
+        catch (AiInvalidOutputException firstFailure)
+        {
+            var repairedText = await ChatAsync(BuildDraftGenerationRepairPrompt(responseText, firstFailure.Message), attemptCount: 2, ct);
+            return ParseDraftGeneration(repairedText, attemptCount: 2);
+        }
+    }
 
-    public Task<ClaimAuditResult> AuditClaimsAsync(ClaimAuditInput input, CancellationToken ct) =>
-        throw ProviderUnavailable();
+    public async Task<ClaimAuditResult> AuditClaimsAsync(ClaimAuditInput input, CancellationToken ct)
+    {
+        var responseText = await ChatAsync(BuildClaimAuditPrompt(input), attemptCount: 1, ct);
+        try
+        {
+            return ParseClaimAudit(responseText, input, attemptCount: 1);
+        }
+        catch (AiInvalidOutputException firstFailure)
+        {
+            var repairedText = await ChatAsync(BuildClaimAuditRepairPrompt(responseText, firstFailure.Message), attemptCount: 2, ct);
+            return ParseClaimAudit(repairedText, input, attemptCount: 2);
+        }
+    }
 
     private AiDiagnosticsResult Result(bool isAvailable, string message, IReadOnlyList<AiDiagnosticCheck> checks) =>
         new("OpenAiCompatible", options.Model, options.Endpoint, isAvailable, message, checks);
@@ -422,6 +446,95 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         };
     }
 
+    private DraftGenerationResult ParseDraftGeneration(string responseText, int attemptCount)
+    {
+        OpenAiDraftGenerationResponse? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<OpenAiDraftGenerationResponse>(responseText, JsonOptions);
+        }
+        catch (JsonException exception)
+        {
+            throw new AiInvalidOutputException(
+                AppendRawPayload("OpenAI-compatible endpoint returned malformed draft generation JSON.", responseText),
+                attemptCount,
+                exception);
+        }
+
+        if (payload is null ||
+            string.IsNullOrWhiteSpace(payload.CoverLetterText) ||
+            string.IsNullOrWhiteSpace(payload.ShortMotivationText))
+        {
+            throw new AiInvalidOutputException(
+                AppendRawPayload("OpenAI-compatible endpoint returned structurally invalid draft generation JSON.", responseText),
+                attemptCount);
+        }
+
+        return new DraftGenerationResult(
+            payload.CoverLetterText.Trim(),
+            payload.ShortMotivationText.Trim())
+        {
+            AttemptCount = attemptCount
+        };
+    }
+
+    private ClaimAuditResult ParseClaimAudit(string responseText, ClaimAuditInput input, int attemptCount)
+    {
+        OpenAiClaimAuditResponse? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<OpenAiClaimAuditResponse>(responseText, JsonOptions);
+        }
+        catch (JsonException exception)
+        {
+            throw new AiInvalidOutputException(
+                AppendRawPayload("OpenAI-compatible endpoint returned malformed claim audit JSON.", responseText),
+                attemptCount,
+                exception);
+        }
+
+        if (payload?.Claims is null)
+        {
+            throw new AiInvalidOutputException(
+                AppendRawPayload("OpenAI-compatible endpoint returned structurally invalid claim audit JSON.", responseText),
+                attemptCount);
+        }
+
+        var approvedEvidenceIds = input.ApprovedEvidence
+            .Select(evidence => evidence.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var claims = new List<ClaimAuditClaim>();
+        var claimIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var claim in payload.Claims)
+        {
+            if (claim is null ||
+                string.IsNullOrWhiteSpace(claim.Id) ||
+                string.IsNullOrWhiteSpace(claim.Text) ||
+                string.IsNullOrWhiteSpace(claim.Status) ||
+                claim.EvidenceIds is null ||
+                !IsSupportedClaimStatus(claim.Status) ||
+                claim.EvidenceIds.Any(evidenceId => string.IsNullOrWhiteSpace(evidenceId) || !approvedEvidenceIds.Contains(evidenceId.Trim())) ||
+                !claimIds.Add(claim.Id.Trim()))
+            {
+                throw new AiInvalidOutputException(
+                    AppendRawPayload("OpenAI-compatible endpoint returned structurally invalid claim audit JSON.", responseText),
+                    attemptCount);
+            }
+
+            claims.Add(new ClaimAuditClaim(
+                claim.Id.Trim(),
+                claim.Text.Trim(),
+                NormalizeClaimStatus(claim.Status),
+                claim.EvidenceIds.Select(evidenceId => evidenceId.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList()));
+        }
+
+        return new ClaimAuditResult(claims)
+        {
+            AttemptCount = attemptCount
+        };
+    }
+
     private static string BuildJobAnalysisPrompt(JobAnalysisInput input) =>
         $"""
         {JobAnalysisPrompt}
@@ -466,6 +579,97 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         """;
     }
 
+    private static string BuildDraftGenerationPrompt(DraftGenerationInput input)
+    {
+        var approvedEvidence = input.ApprovedEvidence.Select(evidence => new
+        {
+            evidence.Id,
+            evidence.SignalId,
+            evidence.Signal,
+            evidence.Category,
+            evidence.ProfileFactTitle,
+            evidence.Summary,
+            evidence.MatchedTerms
+        });
+        var unmatchedRequirements = input.UnmatchedRequirements.Select(requirement => new
+        {
+            requirement.Id,
+            requirement.SignalId,
+            requirement.Requirement,
+            requirement.Category,
+            requirement.Recommendation
+        });
+        var gapDecisions = input.GapDecisions.Select(decision => new
+        {
+            decision.UnmatchedRequirementId,
+            decision.Decision,
+            decision.CustomFactId
+        });
+        var approvedCustomFacts = input.ApprovedCustomFacts.Select(fact => new
+        {
+            fact.Id,
+            fact.UnmatchedRequirementId,
+            fact.Title,
+            fact.Summary,
+            fact.Technologies,
+            fact.AllowedClaims
+        });
+
+        return $"""
+        {DraftGenerationPrompt}
+
+        Application context:
+        {JsonSerializer.Serialize(new
+        {
+            input.CompanyName,
+            input.RoleTitle,
+            input.SelectedLanguage,
+            input.ApplicantName,
+            input.TonePreference
+        }, JsonOptions)}
+
+        Approved evidence:
+        {JsonSerializer.Serialize(approvedEvidence, JsonOptions)}
+
+        Unmatched requirements:
+        {JsonSerializer.Serialize(unmatchedRequirements, JsonOptions)}
+
+        Gap decisions:
+        {JsonSerializer.Serialize(gapDecisions, JsonOptions)}
+
+        Approved job-local custom facts:
+        {JsonSerializer.Serialize(approvedCustomFacts, JsonOptions)}
+        """;
+    }
+
+    private static string BuildClaimAuditPrompt(ClaimAuditInput input)
+    {
+        var approvedEvidence = input.ApprovedEvidence.Select(evidence => new
+        {
+            evidence.Id,
+            evidence.SignalId,
+            evidence.Signal,
+            evidence.Category,
+            evidence.ProfileFactTitle,
+            evidence.Summary,
+            evidence.MatchedTerms
+        });
+
+        return $"""
+        {ClaimAuditPrompt}
+
+        Draft:
+        {JsonSerializer.Serialize(new
+        {
+            input.CoverLetterText,
+            input.ShortMotivationText
+        }, JsonOptions)}
+
+        Approved evidence:
+        {JsonSerializer.Serialize(approvedEvidence, JsonOptions)}
+        """;
+    }
+
     private static string BuildRepairPrompt(string invalidJson, string validationError) =>
         $"""
         Repair this job analysis JSON so it matches the required contract exactly.
@@ -490,6 +694,30 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         {invalidJson}
         """;
 
+    private static string BuildDraftGenerationRepairPrompt(string invalidJson, string validationError) =>
+        $"""
+        Repair this draft generation JSON so it matches the required contract exactly.
+        Return only strict JSON. Do not include markdown.
+
+        Validation error:
+        {validationError}
+
+        Invalid JSON:
+        {invalidJson}
+        """;
+
+    private static string BuildClaimAuditRepairPrompt(string invalidJson, string validationError) =>
+        $"""
+        Repair this claim audit JSON so it matches the required contract exactly.
+        Return only strict JSON. Do not include markdown.
+
+        Validation error:
+        {validationError}
+
+        Invalid JSON:
+        {invalidJson}
+        """;
+
     private static bool IsSupportedLanguage(string language) =>
         string.Equals(language.Trim(), "English", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(language.Trim(), "Danish", StringComparison.OrdinalIgnoreCase);
@@ -502,14 +730,24 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         string.Equals(category.Trim(), "PreferredSkill", StringComparison.Ordinal) ||
         string.Equals(category.Trim(), "Responsibility", StringComparison.Ordinal);
 
+    private static bool IsSupportedClaimStatus(string status) =>
+        string.Equals(status.Trim(), "Supported", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status.Trim(), "Unsupported", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status.Trim(), "NeedsReview", StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeClaimStatus(string status) =>
+        status.Trim().ToLowerInvariant() switch
+        {
+            "supported" => "Supported",
+            "unsupported" => "Unsupported",
+            _ => "NeedsReview"
+        };
+
     private static string LoadPrompt(string fileName)
     {
         var path = Path.Combine(AppContext.BaseDirectory, "Ai", "Prompts", fileName);
         return File.ReadAllText(path);
     }
-
-    private static AiProviderUnavailableException ProviderUnavailable() =>
-        new("OpenAI-compatible workflow calls are not implemented yet.");
 
     private sealed record OpenAiModelsResponse(IReadOnlyList<OpenAiModel?>? Data);
 
@@ -562,4 +800,17 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
     private sealed record OpenAiUnmatchedRequirementResponse(
         string SignalId,
         string Recommendation);
+
+    private sealed record OpenAiDraftGenerationResponse(
+        string CoverLetterText,
+        string ShortMotivationText);
+
+    private sealed record OpenAiClaimAuditResponse(
+        IReadOnlyList<OpenAiClaimAuditClaimResponse> Claims);
+
+    private sealed record OpenAiClaimAuditClaimResponse(
+        string Id,
+        string Text,
+        string Status,
+        IReadOnlyList<string> EvidenceIds);
 }

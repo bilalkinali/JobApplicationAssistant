@@ -60,6 +60,14 @@ Provider diagnostics should clearly report the configured provider, endpoint, mo
 }
 ```
 
+- Observed LM Studio server config from May 15, 2026:
+  - HTTP server listens on port `1234`.
+  - OpenAI-compatible base URL is `http://localhost:1234/v1`.
+  - OpenAI-compatible endpoints include `GET /v1/models`, `POST /v1/responses`, `POST /v1/chat/completions`, `POST /v1/completions`, and `POST /v1/embeddings`.
+  - LM Studio API endpoints include `GET /api/v1/models`, `POST /api/v1/chat`, `POST /api/v1/models/load`, and `POST /api/v1/models/download`.
+  - Server logs are saved under `C:\Users\Bilal Kinali\.lmstudio\server-logs`.
+  - Just-in-time model loading is active.
+
 - Use the configured endpoint as the OpenAI-compatible API base URL and call chat completions under that base, supporting values like `http://localhost:1234/v1`.
 - Use the configured model in every chat completion request.
 - Use the configured timeout for provider HTTP calls.

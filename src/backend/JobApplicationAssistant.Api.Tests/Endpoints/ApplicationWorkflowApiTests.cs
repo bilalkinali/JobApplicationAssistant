@@ -2075,6 +2075,187 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task GenerateDraft_with_openai_compatible_persists_current_draft_audit_and_records_successful_ai_runs()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent(ValidOllamaDraftGenerationJson()) },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent(ValidOllamaClaimAuditJson("match-dotnet-test")) }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.", "English");
+        await MarkApplicationReadyForDraftAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var draft = await response.Content.ReadFromJsonAsync<GeneratedDraftResponse>();
+        Assert.NotNull(draft);
+        Assert.Equal("Ollama cover letter from approved API evidence.", draft.CoverLetterText);
+        Assert.Equal("Ollama short motivation.", draft.ShortMotivationText);
+        Assert.NotNull(draft.AuditUpdatedAt);
+        Assert.False(draft.IsClaimAuditStale);
+
+        Assert.Equal(2, handler.Requests.Count);
+        var draftRequestJson = await handler.Requests[0].Content!.ReadAsStringAsync();
+        Assert.Contains("\"model\":\"local-model\"", draftRequestJson);
+        Assert.Contains("\"response_format\":{\"type\":\"json_object\"}", draftRequestJson);
+        Assert.Contains("Return only strict JSON", draftRequestJson);
+        Assert.Contains("Approved API work", draftRequestJson);
+        var auditRequestJson = await handler.Requests[1].Content!.ReadAsStringAsync();
+        Assert.Contains("Ollama cover letter from approved API evidence.", auditRequestJson);
+        Assert.Contains("match-dotnet-test", auditRequestJson);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var runs = db.AiRuns.ToList();
+        var draftRun = Assert.Single(runs, run => run.Step == "DraftGeneration");
+        Assert.Equal("OpenAiCompatible", draftRun.Provider);
+        Assert.Equal("local-model", draftRun.Model);
+        Assert.Equal("Succeeded", draftRun.Status);
+        Assert.Equal(1, draftRun.AttemptCount);
+        var auditRun = Assert.Single(runs, run => run.Step == "ClaimAudit");
+        Assert.Equal("Succeeded", auditRun.Status);
+        Assert.Equal(1, auditRun.AttemptCount);
+    }
+
+    [Fact]
+    public async Task GenerateDraft_with_openai_compatible_repairs_structurally_invalid_json_once()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent("""{"coverLetterText":"","shortMotivationText":""}""") },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent(ValidOllamaDraftGenerationJson()) },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent(ValidOllamaClaimAuditJson("match-dotnet-test")) }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.", "English");
+        await MarkApplicationReadyForDraftAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        Assert.Equal(3, handler.Requests.Count);
+        var repairRequestJson = await handler.Requests[1].Content!.ReadAsStringAsync();
+        Assert.Contains("Repair this draft generation JSON", repairRequestJson);
+        Assert.Contains("structurally invalid draft generation JSON", repairRequestJson);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns.Where(run => run.Step == "DraftGeneration"));
+        Assert.Equal("RepairedSucceeded", run.Status);
+        Assert.Equal(2, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task GenerateDraft_with_openai_compatible_invalid_output_after_repair_records_failure_raw_payload_and_preserves_draft()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent("{ malformed") },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent("""{"coverLetterText":"","shortMotivationText":""}""") }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(
+            handler,
+            model: "local-model",
+            storeRawPayloads: true);
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.", "English");
+        await MarkApplicationReadyForDraftAsync(factory, application.Id);
+        var existingDraft = await AddGeneratedDraftAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var reopenedResponse = await client.GetAsync($"/api/applications/{application.Id}");
+        reopenedResponse.EnsureSuccessStatusCode();
+        var reopened = await reopenedResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(reopened?.GeneratedDraft);
+        Assert.Equal(existingDraft.Id, reopened.GeneratedDraft.Id);
+        Assert.Equal(existingDraft.CoverLetterText, reopened.GeneratedDraft.CoverLetterText);
+        Assert.Equal(existingDraft.ClaimAudit, reopened.GeneratedDraft.ClaimAudit);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("InvalidOutput", run.ErrorCode);
+        Assert.Equal(2, run.AttemptCount);
+        Assert.Contains("Raw payload:", run.ErrorMessage);
+        Assert.Contains("coverLetterText", run.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task GenerateDraft_with_openai_compatible_api_error_records_failure()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { ReasonPhrase = "Service Unavailable" }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.", "English");
+        await MarkApplicationReadyForDraftAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+        Assert.Equal("DraftGeneration", run.Step);
+        Assert.Equal("OpenAiCompatible", run.Provider);
+        Assert.Equal("local-model", run.Model);
+        Assert.Equal(1, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task GenerateDraft_with_unreachable_openai_compatible_records_failure()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(
+            new Queue<HttpResponseMessage>(),
+            new HttpRequestException());
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.", "English");
+        await MarkApplicationReadyForDraftAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+    }
+
+    [Fact]
+    public async Task GenerateDraft_with_timed_out_openai_compatible_records_failure()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(
+            new Queue<HttpResponseMessage>(),
+            new TaskCanceledException());
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.", "English");
+        await MarkApplicationReadyForDraftAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+    }
+
+    [Fact]
     public async Task GetApplication_includes_current_generated_draft_when_one_exists()
     {
         await using var factory = new TestApplicationFactory();
@@ -2797,6 +2978,173 @@ public sealed class ApplicationWorkflowApiTests
         Assert.Equal("Ollama", run.Provider);
         Assert.Equal("llama3.1:8b", run.Model);
         Assert.Equal(1, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task AuditClaims_with_openai_compatible_persists_structured_results_and_records_successful_ai_run()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent(ValidOllamaClaimAuditJson("match-dotnet-test")) }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var draft = await CreateGeneratedDraftForOllamaAuditAsync(factory, client, "match-dotnet-test");
+
+        var response = await client.PostAsync($"/api/applications/{draft.JobApplicationId}/audit-claims", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var audited = await response.Content.ReadFromJsonAsync<GeneratedDraftResponse>();
+        Assert.NotNull(audited);
+        Assert.NotNull(audited.AuditUpdatedAt);
+        Assert.False(audited.IsClaimAuditStale);
+        var audit = JsonSerializer.Deserialize<ClaimAuditResult>(audited.ClaimAudit, JsonOptions);
+        Assert.NotNull(audit);
+        Assert.Contains(audit.Claims, claim => claim.Status == "Supported" && claim.EvidenceIds.Contains("match-dotnet-test"));
+        Assert.Contains(audit.Claims, claim => claim.Status == "Unsupported");
+        Assert.Contains(audit.Claims, claim => claim.Status == "NeedsReview");
+
+        var requestJson = await Assert.Single(handler.Requests).Content!.ReadAsStringAsync();
+        Assert.Contains("\"model\":\"local-model\"", requestJson);
+        Assert.Contains("\"response_format\":{\"type\":\"json_object\"}", requestJson);
+        Assert.Contains("Return only strict JSON", requestJson);
+        Assert.Contains("match-dotnet-test", requestJson);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("ClaimAudit", run.Step);
+        Assert.Equal("OpenAiCompatible", run.Provider);
+        Assert.Equal("Succeeded", run.Status);
+        Assert.Equal(1, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task AuditClaims_with_openai_compatible_repairs_unknown_evidence_reference_once()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent(ValidOllamaClaimAuditJson("unknown-match")) },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent(ValidOllamaClaimAuditJson("match-dotnet-test")) }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var draft = await CreateGeneratedDraftForOllamaAuditAsync(factory, client, "match-dotnet-test");
+
+        var response = await client.PostAsync($"/api/applications/{draft.JobApplicationId}/audit-claims", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        Assert.Equal(2, handler.Requests.Count);
+        var repairRequestJson = await handler.Requests[1].Content!.ReadAsStringAsync();
+        Assert.Contains("Repair this claim audit JSON", repairRequestJson);
+        Assert.Contains("structurally invalid claim audit JSON", repairRequestJson);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("RepairedSucceeded", run.Status);
+        Assert.Equal(2, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task AuditClaims_with_openai_compatible_invalid_output_after_repair_records_failure_raw_payload_and_preserves_audit()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent("{ malformed") },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent("""{"claims":[{"id":"claim-1","text":"Broken","status":"Maybe","evidenceIds":[]}]}""") }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(
+            handler,
+            model: "local-model",
+            storeRawPayloads: true);
+        using var client = factory.CreateClient();
+        var draft = await CreateGeneratedDraftForOllamaAuditAsync(factory, client, "match-dotnet-test");
+        await MarkDraftAuditedAsync(factory, draft.Id);
+
+        var response = await client.PostAsync($"/api/applications/{draft.JobApplicationId}/audit-claims", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var reopenedResponse = await client.GetAsync($"/api/applications/{draft.JobApplicationId}");
+        reopenedResponse.EnsureSuccessStatusCode();
+        var reopened = await reopenedResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(reopened?.GeneratedDraft);
+        Assert.Equal("""{"status":"current"}""", reopened.GeneratedDraft.ClaimAudit);
+        Assert.NotNull(reopened.GeneratedDraft.AuditUpdatedAt);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("InvalidOutput", run.ErrorCode);
+        Assert.Equal(2, run.AttemptCount);
+        Assert.Contains("Raw payload:", run.ErrorMessage);
+        Assert.Contains("Maybe", run.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task AuditClaims_with_openai_compatible_api_error_records_failure()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { ReasonPhrase = "Service Unavailable" }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var draft = await CreateGeneratedDraftForOllamaAuditAsync(factory, client, "match-dotnet-test");
+
+        var response = await client.PostAsync($"/api/applications/{draft.JobApplicationId}/audit-claims", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+        Assert.Equal("ClaimAudit", run.Step);
+        Assert.Equal("OpenAiCompatible", run.Provider);
+        Assert.Equal("local-model", run.Model);
+        Assert.Equal(1, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task AuditClaims_with_unreachable_openai_compatible_records_failure()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(
+            new Queue<HttpResponseMessage>(),
+            new HttpRequestException());
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var draft = await CreateGeneratedDraftForOllamaAuditAsync(factory, client, "match-dotnet-test");
+
+        var response = await client.PostAsync($"/api/applications/{draft.JobApplicationId}/audit-claims", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+    }
+
+    [Fact]
+    public async Task AuditClaims_with_timed_out_openai_compatible_records_failure()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(
+            new Queue<HttpResponseMessage>(),
+            new TaskCanceledException());
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var draft = await CreateGeneratedDraftForOllamaAuditAsync(factory, client, "match-dotnet-test");
+
+        var response = await client.PostAsync($"/api/applications/{draft.JobApplicationId}/audit-claims", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
     }
 
     private static async Task<ApplicationResponse> CreateApplicationAsync(

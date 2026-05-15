@@ -13,6 +13,14 @@ Harden the complete `OpenAiCompatible` real-provider path so LM Studio failures 
 
 The completed slice should make the local real AI path ready for V2 testing across prepare, draft generation, and claim audit.
 
+## LM Studio server assumptions
+
+- Use the OpenAI-compatible base URL `http://localhost:1234/v1`.
+- Diagnostics should check `GET /v1/models` through the configured base URL.
+- Workflow calls should use `POST /v1/chat/completions` through the configured base URL.
+- Do not switch this slice to LM Studio's native `/api/v1/chat` endpoint; keep the provider generic OpenAI-compatible.
+- LM Studio server logs are expected under `C:\Users\Bilal Kinali\.lmstudio\server-logs` when local server diagnostics need manual follow-up.
+
 ## Acceptance criteria
 
 - [ ] Invalid JSON, timeout, unreachable endpoint, non-success HTTP status, model/API error responses, and empty assistant content are mapped to graceful provider failures across all OpenAI-compatible operations.
