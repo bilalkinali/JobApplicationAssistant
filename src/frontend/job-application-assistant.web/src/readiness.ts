@@ -18,6 +18,7 @@ export type DraftGenerationInput = {
   hasSavedApprovedEvidence: boolean;
   unmatchedRequirementCount: number;
   savedGapDecisionCount: number;
+  aiStatus?: AiProviderReadinessInput | null;
 };
 
 export type ActionState = {
@@ -170,6 +171,13 @@ export function getDraftGenerationState(input: DraftGenerationInput): ActionStat
     };
   }
 
+  if (!input.hasGeneratedDraft && input.aiStatus && !isFakeProvider(input.aiStatus) && !input.aiStatus.isAvailable) {
+    return {
+      canRun: false,
+      message: getDraftReadinessLabel(input.aiStatus)
+    };
+  }
+
   return {
     canRun: true,
     message: "Generate the current cover letter and short motivation, then audit claims against approved evidence."
@@ -185,6 +193,7 @@ export function getGuidedNextAction(input: {
   unmatchedRequirementCount: number;
   savedGapDecisionCount: number;
   hasGeneratedDraft: boolean;
+  aiStatus?: AiProviderReadinessInput | null;
 }): GuidedNextAction {
   if (!input.selectedApplicationId || !input.hasSavedJobPosting) {
     return {
@@ -266,6 +275,17 @@ export function getGuidedNextAction(input: {
       canRun: true,
       tone: "info",
       message: "Approved evidence is saved. Decide how to handle each unmatched requirement before moving on."
+    };
+  }
+
+  if (input.aiStatus && !isFakeProvider(input.aiStatus) && !input.aiStatus.isAvailable) {
+    return {
+      kind: "ai-readiness",
+      title: "Check AI readiness",
+      buttonLabel: "Open AI settings",
+      canRun: true,
+      tone: "error",
+      message: getDraftReadinessLabel(input.aiStatus)
     };
   }
 

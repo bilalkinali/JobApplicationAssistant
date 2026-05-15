@@ -391,9 +391,10 @@ function App() {
         hasSavedJobPosting,
         hasSavedApprovedEvidence,
         unmatchedRequirementCount: unmatchedRequirements.length,
-        savedGapDecisionCount: currentGapDecisionCount
+        savedGapDecisionCount: currentGapDecisionCount,
+        aiStatus
       }),
-    [currentGapDecisionCount, hasSavedApprovedEvidence, hasSavedJobPosting, selectedApplicationId, unmatchedRequirements.length]
+    [aiStatus, currentGapDecisionCount, hasSavedApprovedEvidence, hasSavedJobPosting, selectedApplicationId, unmatchedRequirements.length]
   );
   const guidedNextAction = useMemo(
     () =>
@@ -405,9 +406,11 @@ function App() {
         savedApprovedEvidenceCount: savedApprovedEvidence.length + savedApprovedCustomFactEvidenceCount,
         unmatchedRequirementCount: unmatchedRequirements.length,
         savedGapDecisionCount: currentGapDecisionCount,
-        hasGeneratedDraft
+        hasGeneratedDraft,
+        aiStatus
       }),
     [
+      aiStatus,
       approvedProfileFacts.length,
       currentGapDecisionCount,
       hasGeneratedDraft,
@@ -797,7 +800,7 @@ function App() {
     try {
       const draft = await apiSend<GeneratedDraft>(`/api/applications/${selectedApplicationId}/generate-draft`, "POST", null);
       replaceGeneratedDraft(draft);
-      setNotice(draft.auditUpdatedAt ? "Draft generated and claim audit updated." : "Draft generated.");
+      setNotice(draft.auditUpdatedAt ? "Draft generated and claim audit updated." : "Draft generated. Claim audit needs retry before final review.");
     } catch (apiError) {
       setError(formatError(apiError));
     } finally {

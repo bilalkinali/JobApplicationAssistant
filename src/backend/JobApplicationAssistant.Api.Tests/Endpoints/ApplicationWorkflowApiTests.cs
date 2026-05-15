@@ -1413,6 +1413,43 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task GenerateDraft_with_ollama_audit_failure_preserves_generated_draft_and_records_failed_audit()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaDraftGenerationJson()) },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent("{ malformed") },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent("""{"claims":[{"id":"claim-1","text":"Broken","status":"Maybe","evidenceIds":[]}]}""") }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.", "English");
+        await MarkApplicationReadyForDraftAsync(factory, application.Id);
+        var existingDraft = await AddGeneratedDraftAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var draft = await response.Content.ReadFromJsonAsync<GeneratedDraftResponse>();
+        Assert.NotNull(draft);
+        Assert.Equal(existingDraft.Id, draft.Id);
+        Assert.Equal("Ollama cover letter from approved API evidence.", draft.CoverLetterText);
+        Assert.Equal("Ollama short motivation.", draft.ShortMotivationText);
+        Assert.Equal("{}", draft.ClaimAudit);
+        Assert.Null(draft.AuditUpdatedAt);
+        Assert.False(draft.IsClaimAuditStale);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var draftRun = Assert.Single(db.AiRuns.Where(run => run.Step == "DraftGeneration"));
+        Assert.Equal("Succeeded", draftRun.Status);
+        var auditRun = Assert.Single(db.AiRuns.Where(run => run.Step == "ClaimAudit"));
+        Assert.Equal("Failed", auditRun.Status);
+        Assert.Equal("InvalidOutput", auditRun.ErrorCode);
+        Assert.Equal(2, auditRun.AttemptCount);
+    }
+
+    [Fact]
     public async Task GetApplication_includes_current_generated_draft_when_one_exists()
     {
         await using var factory = new TestApplicationFactory();

@@ -1,6 +1,6 @@
 # Provider Failure Stable Draft Recovery
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,14 +15,14 @@ The user should understand what failed and what can be retried, while previously
 
 ## Acceptance criteria
 
-- [ ] A configured real provider that is unavailable blocks the guided draft action with recoverable provider guidance.
-- [ ] Invalid provider output fails plainly and does not persist partial draft or audit state.
-- [ ] If a previous stable draft exists, generation failure preserves that draft.
-- [ ] If a previous current audit exists, audit failure does not falsely mark a new audit as current.
-- [ ] If generation succeeds but audit fails, the app preserves the generated draft and clearly requires audit retry.
-- [ ] Provider failure behavior records AI run information consistently with existing provider workflow patterns.
-- [ ] The frontend shows the retry or recovery path without replacing stable draft review content with the failed attempt.
-- [ ] Focused tests cover unavailable provider, invalid output, generation failure, audit failure, and stable-state preservation.
+- [x] A configured real provider that is unavailable blocks the guided draft action with recoverable provider guidance.
+- [x] Invalid provider output fails plainly and does not persist partial draft or audit state.
+- [x] If a previous stable draft exists, generation failure preserves that draft.
+- [x] If a previous current audit exists, audit failure does not falsely mark a new audit as current.
+- [x] If generation succeeds but audit fails, the app preserves the generated draft and clearly requires audit retry.
+- [x] Provider failure behavior records AI run information consistently with existing provider workflow patterns.
+- [x] The frontend shows the retry or recovery path without replacing stable draft review content with the failed attempt.
+- [x] Focused tests cover unavailable provider, invalid output, generation failure, audit failure, and stable-state preservation.
 
 ## Blocked by
 
