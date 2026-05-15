@@ -1,11 +1,13 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using JobApplicationAssistant.Api.Ai;
 using JobApplicationAssistant.Api.Contracts;
 using JobApplicationAssistant.Api.Data;
 using JobApplicationAssistant.Api.Domain;
 using JobApplicationAssistant.Api.Imports;
 using JobApplicationAssistant.Api.Tests.Support;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Xunit;
@@ -229,6 +231,295 @@ public sealed class ProfileApiTests
         Assert.Equal("Uploaded PDF was malformed.", Assert.Single(error.Details!["file"]));
     }
 
+    [Fact]
+    public async Task PostPdfCvImport_rejects_empty_extracted_text_before_ai()
+    {
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor("   "));
+        });
+        using var client = factory.CreateClient();
+
+        var response = await PostPdfImportAsync(client);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Equal("Uploaded PDF did not contain importable text.", Assert.Single(error.Details!["file"]));
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.Empty(db.ProfileFacts);
+        Assert.Empty(db.AiRuns);
+    }
+
+    [Fact]
+    public async Task PostPdfCvImport_records_invalid_output_and_preserves_existing_state()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(new[]
+        {
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent("{ malformed") },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent("""{"facts":[]}""") }
+        }));
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor("Built .NET APIs."));
+        }).WithOpenAiCompatibleHandler(handler, model: "local-model", storeRawPayloads: true);
+        await SeedExistingImportedFactAsync(factory);
+        using var client = factory.CreateClient();
+
+        var response = await PostPdfImportAsync(client);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains("OpenAI-compatible endpoint returned assisted profile import without facts.", Assert.Single(error.Details!["AiProvider"]));
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var existingFact = Assert.Single(db.ProfileFacts);
+        Assert.Equal("Existing imported fact", existingFact.Title);
+        Assert.Contains("existing-import-session", existingFact.OriginalImportedSnapshot);
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("AssistedProfileImport", run.Step);
+        Assert.Equal("OpenAiCompatible", run.Provider);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("InvalidOutput", run.ErrorCode);
+        Assert.Equal(2, run.AttemptCount);
+        Assert.Contains("Raw payload:", run.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task PostPdfCvImport_rejects_incomplete_provider_result_without_persisting_facts()
+    {
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor("Built .NET APIs."));
+            services.RemoveAll<IAiProvider>();
+            services.AddSingleton<IAiProvider>(new StubAiProvider(new AssistedProfileImportResult(
+            [
+                new AssistedProfileImportFact(
+                    "Project",
+                    "",
+                    "Built APIs.",
+                    [],
+                    [],
+                    [],
+                    [],
+                    "CV project section")
+            ])));
+        });
+        using var client = factory.CreateClient();
+
+        var response = await PostPdfImportAsync(client);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Equal("AI provider returned structurally invalid assisted profile import facts.", Assert.Single(error.Details!["AiProvider"]));
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.Empty(db.ProfileFacts);
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("InvalidOutput", run.ErrorCode);
+    }
+
+    [Fact]
+    public async Task PostPdfCvImport_records_non_success_response_without_raw_payload_when_disabled()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(new[]
+        {
+            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { ReasonPhrase = "Service Unavailable" }
+        }));
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor("Built .NET APIs."));
+        }).WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+
+        var response = await PostPdfImportAsync(client);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.Empty(db.ProfileFacts);
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("OpenAiCompatible", run.Provider);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+        Assert.Contains("503 Service Unavailable", run.ErrorMessage);
+        Assert.DoesNotContain("Raw request:", run.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task PostPdfCvImport_records_unreachable_provider_without_fake_fallback()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(
+            new Queue<HttpResponseMessage>(),
+            new HttpRequestException("No connection could be made."));
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor("Built .NET APIs."));
+        }).WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+
+        var response = await PostPdfImportAsync(client);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.Empty(db.ProfileFacts);
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("OpenAiCompatible", run.Provider);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+        Assert.DoesNotContain("Fake assisted import", run.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task PostPdfCvImport_records_provider_timeout()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(
+            new Queue<HttpResponseMessage>(),
+            new TaskCanceledException("timed out"));
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor("Built .NET APIs."));
+        }).WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+
+        var response = await PostPdfImportAsync(client);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+        Assert.Contains("endpoint is unavailable", run.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task PostPdfCvImport_records_invalid_provider_json()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(new[]
+        {
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{ invalid", System.Text.Encoding.UTF8, "application/json") }
+        }));
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor("Built .NET APIs."));
+        }).WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+
+        var response = await PostPdfImportAsync(client);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("InvalidOutput", run.ErrorCode);
+        Assert.Contains("malformed chat completion JSON", run.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task PostPdfCvImport_imports_valid_real_provider_output_and_records_success()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(new[]
+        {
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent(ValidAssistedProfileImportJson()) }
+        }));
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor("Built .NET APIs."));
+        }).WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+
+        var response = await PostPdfImportAsync(client);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.Single(db.ProfileFacts);
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Succeeded", run.Status);
+        Assert.Equal("OpenAiCompatible", run.Provider);
+        Assert.Equal("Imported 1 draft profile fact(s).", run.OutputSummary);
+    }
+
+    private static async Task<HttpResponseMessage> PostPdfImportAsync(HttpClient client)
+    {
+        using var form = new MultipartFormDataContent();
+        using var file = new ByteArrayContent([1, 2, 3]);
+        file.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
+        form.Add(file, "file", "cv.pdf");
+        return await client.PostAsync("/api/profile/imports/pdf-cv", form);
+    }
+
+    private static JsonContent OpenAiChatCompletionContent(string content) =>
+        JsonContent.Create(new
+        {
+            choices = new[]
+            {
+                new
+                {
+                    message = new
+                    {
+                        role = "assistant",
+                        content
+                    }
+                }
+            }
+        });
+
+    private static string ValidAssistedProfileImportJson() =>
+        """
+        {
+          "facts": [
+            {
+              "type": "Project",
+              "title": "Imported API work",
+              "summary": "Built .NET APIs from imported CV evidence.",
+              "factItems": ["Built APIs"],
+              "technologies": [".NET"],
+              "allowedClaims": ["Built .NET APIs"],
+              "forbiddenClaims": ["Do not claim production ownership."],
+              "sourceContext": "CV project section"
+            }
+          ]
+        }
+        """;
+
+    private static async Task SeedExistingImportedFactAsync(WebApplicationFactory<Program> factory)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        db.ProfileFacts.Add(new ProfileFact
+        {
+            Id = Guid.NewGuid(),
+            Type = "ImportedCv",
+            Title = "Existing imported fact",
+            Summary = "Existing imported session fact.",
+            Status = ProfileFactStatus.Draft,
+            FactItems = "[]",
+            Technologies = "[]",
+            AllowedClaims = "[]",
+            ForbiddenClaims = "[]",
+            SourceDocumentIds = """["existing-import-session"]""",
+            OriginalImportedSnapshot = """{"importSessionId":"existing-import-session"}""",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
+    }
+
     private sealed class StubPdfTextExtractor : IPdfTextExtractor
     {
         private readonly PdfTextExtractionResult result;
@@ -245,5 +536,29 @@ public sealed class ProfileApiTests
 
         public Task<PdfTextExtractionResult> ExtractAsync(Stream pdfStream, CancellationToken ct) =>
             Task.FromResult(result);
+    }
+
+    private sealed class StubAiProvider(AssistedProfileImportResult importResult) : IAiProvider
+    {
+        public Task<AiProviderStatus> GetStatusAsync(CancellationToken ct) =>
+            Task.FromResult(new AiProviderStatus("Fake", "stub", null, true, "Stub provider is available."));
+
+        public Task<AiDiagnosticsResult> RunDiagnosticsAsync(CancellationToken ct) =>
+            Task.FromResult(new AiDiagnosticsResult("Fake", "stub", null, true, "Stub diagnostics passed.", []));
+
+        public Task<JobAnalysisResult> AnalyzeJobAsync(JobAnalysisInput input, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<EvidenceMatchResult> MatchEvidenceAsync(EvidenceMatchInput input, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<DraftGenerationResult> GenerateDraftAsync(DraftGenerationInput input, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<ClaimAuditResult> AuditClaimsAsync(ClaimAuditInput input, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<AssistedProfileImportResult> ImportProfileFactsAsync(AssistedProfileImportInput input, CancellationToken ct) =>
+            Task.FromResult(importResult);
     }
 }

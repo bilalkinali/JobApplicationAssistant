@@ -152,7 +152,7 @@ public static class ProfileEndpoints
             return Results.NoContent();
         });
 
-        group.MapPost("/imports/pdf-cv", async Task<IResult> (IFormFile? file, ApplicationDbContext db, IAiProvider aiProvider, IPdfTextExtractor pdfTextExtractor, CancellationToken ct) =>
+        group.MapPost("/imports/pdf-cv", async Task<IResult> (IFormFile? file, ApplicationDbContext db, IAiProvider aiProvider, IPdfTextExtractor pdfTextExtractor, AiOptions aiOptions, CancellationToken ct) =>
         {
             var errors = ValidatePdfImport(file);
             if (errors.Count > 0)
@@ -170,26 +170,55 @@ public static class ProfileEndpoints
                 }));
             }
 
-            var extractedText = extraction.Text!;
+            var extractedText = extraction.Text;
+            if (string.IsNullOrWhiteSpace(extractedText))
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(file)] = ["Uploaded PDF did not contain importable text."]
+                }));
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var run = new AiRun
+            {
+                Id = Guid.NewGuid(),
+                Step = "AssistedProfileImport",
+                Provider = aiOptions.Provider,
+                Model = aiOptions.Model,
+                Status = "Running",
+                StartedAt = now,
+                InputSummary = $"PDF CV import from {file.FileName} ({extractedText.Length} extracted characters)."
+            };
+            db.AiRuns.Add(run);
+
             AssistedProfileImportResult result;
             try
             {
                 result = await aiProvider.ImportProfileFactsAsync(new AssistedProfileImportInput(file.FileName, extractedText), ct);
+                ValidateAssistedProfileImportResult(result);
             }
             catch (AiProviderException exception)
             {
+                RecordFailedRun(run, exception);
+                await db.SaveChangesAsync(ct);
+
                 return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
                 {
                     ["AiProvider"] = [exception.Message]
                 }));
             }
 
-            var now = DateTimeOffset.UtcNow;
             var importSessionId = Guid.NewGuid();
             var sourceDocumentIds = JsonSerializer.Serialize(new[] { importSessionId.ToString("N") }, JsonOptions);
             var facts = result.Facts
                 .Select(importedFact => ToDraftImportedFact(importedFact, file.FileName, extractedText, importSessionId, sourceDocumentIds, now))
                 .ToList();
+
+            run.Status = "Succeeded";
+            run.AttemptCount = result.AttemptCount;
+            run.CompletedAt = DateTimeOffset.UtcNow;
+            run.OutputSummary = $"Imported {facts.Count} draft profile fact(s).";
 
             db.ProfileFacts.AddRange(facts);
             await db.SaveChangesAsync(ct);
@@ -288,6 +317,26 @@ public static class ProfileEndpoints
             UpdatedAt = now
         };
 
+    private static void ValidateAssistedProfileImportResult(AssistedProfileImportResult result)
+    {
+        if (result.Facts is null || result.Facts.Count == 0)
+        {
+            throw new AiInvalidOutputException("AI provider returned assisted profile import without facts.", result.AttemptCount);
+        }
+
+        if (result.Facts.Any(fact =>
+            string.IsNullOrWhiteSpace(fact.Type) ||
+            string.IsNullOrWhiteSpace(fact.Title) ||
+            string.IsNullOrWhiteSpace(fact.Summary) ||
+            fact.FactItems is null ||
+            fact.Technologies is null ||
+            fact.AllowedClaims is null ||
+            fact.ForbiddenClaims is null))
+        {
+            throw new AiInvalidOutputException("AI provider returned structurally invalid assisted profile import facts.", result.AttemptCount);
+        }
+    }
+
     private static Dictionary<string, string[]> Validate(ProfileRequest request)
     {
         var errors = new Dictionary<string, string[]>();
@@ -358,6 +407,24 @@ public static class ProfileEndpoints
 
         return errors;
     }
+
+    private const int MaxAiRunErrorMessageLength = 4000;
+
+    private static void RecordFailedRun(AiRun run, AiProviderException exception)
+    {
+        run.Status = "Failed";
+        run.ErrorCode = exception.ErrorCode;
+        run.ErrorMessage = TruncateAiRunErrorMessage(exception.Message);
+        run.AttemptCount = exception.AttemptCount;
+        run.CompletedAt = DateTimeOffset.UtcNow;
+    }
+
+    private static string TruncateAiRunErrorMessage(string message) =>
+        message.Length <= MaxAiRunErrorMessageLength
+            ? message
+            : string.Concat(
+                message.AsSpan(0, MaxAiRunErrorMessageLength - 34),
+                " ... [truncated for AiRun limit]");
 
     private static void AddRequired(Dictionary<string, string[]> errors, string field, string? value, int maxLength)
     {

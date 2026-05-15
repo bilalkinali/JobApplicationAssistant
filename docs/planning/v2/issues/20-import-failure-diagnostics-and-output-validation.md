@@ -1,6 +1,6 @@
 # Import Failure Diagnostics And Output Validation
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,14 +15,14 @@ This slice should keep real-provider behavior explicit: the app must not silentl
 
 ## Acceptance criteria
 
-- [ ] Malformed, invalid, or incomplete AI extraction output fails validation and does not persist partial imported facts.
-- [ ] Empty extraction output fails with a clear message that can be shown in the import UI.
-- [ ] Provider timeout, unreachable endpoint, non-success response, and invalid JSON are recorded with useful import diagnostics.
-- [ ] Existing profile facts and previously created import sessions remain intact after a failed import attempt.
-- [ ] Import AI runs follow existing provider diagnostics and failure recording patterns.
-- [ ] `StoreRawPayloads` behavior for import failures is consistent with other AI operations.
-- [ ] A configured real provider never silently falls back to Fake AI during import.
-- [ ] Tests cover malformed output, empty output, timeout or unreachable provider, non-success response, invalid JSON, no state corruption, raw payload behavior, and no silent Fake fallback.
+- [x] Malformed, invalid, or incomplete AI extraction output fails validation and does not persist partial imported facts.
+- [x] Empty extraction output fails with a clear message that can be shown in the import UI.
+- [x] Provider timeout, unreachable endpoint, non-success response, and invalid JSON are recorded with useful import diagnostics.
+- [x] Existing profile facts and previously created import sessions remain intact after a failed import attempt.
+- [x] Import AI runs follow existing provider diagnostics and failure recording patterns.
+- [x] `StoreRawPayloads` behavior for import failures is consistent with other AI operations.
+- [x] A configured real provider never silently falls back to Fake AI during import.
+- [x] Tests cover malformed output, empty output, timeout or unreachable provider, non-success response, invalid JSON, no state corruption, raw payload behavior, and no silent Fake fallback.
 
 ## Blocked by
 
