@@ -504,6 +504,37 @@ button:disabled {
   gap: 16px;
 }
 
+.profile-import-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #cdd7e1;
+  border-radius: 8px;
+  background: #f7f9fb;
+}
+
+.profile-import-panel h4 {
+  margin: 0;
+  color: #1b1f24;
+}
+
+.file-field {
+  display: grid;
+  gap: 8px;
+  color: #344250;
+  font-size: 0.88rem;
+  font-weight: 750;
+}
+
+.file-field input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #c8c5bd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1b1f24;
+}
+
 .import-review-queues {
   display: grid;
   gap: 14px;

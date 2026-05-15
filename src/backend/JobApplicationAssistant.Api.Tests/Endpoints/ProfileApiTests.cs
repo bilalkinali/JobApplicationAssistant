@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using JobApplicationAssistant.Api.Ai;
 using JobApplicationAssistant.Api.Contracts;
 using JobApplicationAssistant.Api.Data;
@@ -16,6 +17,8 @@ namespace JobApplicationAssistant.Api.Tests.Endpoints;
 
 public sealed class ProfileApiTests
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     [Fact]
     public async Task PutProfile_rejects_missing_required_fields_and_invalid_urls()
     {
@@ -207,6 +210,53 @@ public sealed class ProfileApiTests
         var error = await matchResponse.Content.ReadFromJsonAsync<ApiError>();
         Assert.NotNull(error);
         Assert.Contains("ProfileFacts", error.Details!.Keys);
+    }
+
+    [Fact]
+    public async Task FirstRunImportApproval_makes_imported_facts_available_for_application_evidence_matching()
+    {
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor("Built .NET and React APIs for workflow automation."));
+        });
+        using var client = factory.CreateClient();
+
+        var import = await ImportSingleFactAsync(client);
+        var importedFact = Assert.Single(import.ProfileFacts);
+
+        var decisionResponse = await client.PostAsJsonAsync(
+            $"/api/profile/imports/{import.ImportSessionId:N}/draft-facts/{importedFact.Id:N}/decision",
+            new ImportedDraftFactDecisionRequest("approve"));
+        decisionResponse.EnsureSuccessStatusCode();
+        var decision = await decisionResponse.Content.ReadFromJsonAsync<ImportedDraftFactDecisionResponse>();
+        Assert.NotNull(decision);
+        Assert.Equal("Approved", decision.ProfileFact.Status);
+
+        var applicationResponse = await client.PostAsJsonAsync(
+            "/api/applications",
+            new ApplicationRequest(
+                "ExampleCo",
+                ".NET React Developer",
+                null,
+                null,
+                "Draft",
+                "Role requires .NET, React, and REST APIs.",
+                null,
+                null));
+        applicationResponse.EnsureSuccessStatusCode();
+        var application = await applicationResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(application);
+
+        var prepareResponse = await client.PostAsync($"/api/applications/{application.Id}/prepare", null);
+        prepareResponse.EnsureSuccessStatusCode();
+        var prepared = await prepareResponse.Content.ReadFromJsonAsync<PrepareApplicationResponse>();
+        Assert.NotNull(prepared);
+
+        var evidenceMatches = JsonSerializer.Deserialize<List<EvidenceMatch>>(prepared.Application.EvidenceMatches, JsonOptions);
+        Assert.NotNull(evidenceMatches);
+        Assert.Contains(evidenceMatches, match => match.ProfileFactId == decision.ProfileFact.Id);
+        Assert.Equal("PreparedForEvidenceReview", prepared.Application.PreparationStatus);
     }
 
     [Fact]
@@ -558,6 +608,59 @@ public sealed class ProfileApiTests
         Assert.Equal(ProfileFactStatus.Archived, db.ProfileFacts.Single(fact => fact.Id == archivedFact.Id).Status);
         Assert.Equal(ProfileFactStatus.Draft, db.ProfileFacts.Single(fact => fact.Id == import.ProfileFacts[1].Id).Status);
         Assert.Empty(db.ProfileFacts.Where(fact => fact.Status == ProfileFactStatus.Approved));
+    }
+
+    [Fact]
+    public async Task PostImportedDraftFactMerge_rejects_archived_fact_without_merging()
+    {
+        await using var factory = MultiFactImportFactory();
+        using var client = factory.CreateClient();
+        var import = await ImportSingleBatchAsync(client);
+        var archivedFact = import.ProfileFacts[0];
+        var archiveResponse = await client.PostAsJsonAsync(
+            $"/api/profile/imports/{import.ImportSessionId:N}/draft-facts/{archivedFact.Id:N}/decision",
+            new ImportedDraftFactDecisionRequest("archive"));
+        archiveResponse.EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/profile/imports/{import.ImportSessionId:N}/draft-facts/merge",
+            new ImportedDraftFactMergeRequest([archivedFact.Id, import.ProfileFacts[1].Id]));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.Equal(ProfileFactStatus.Archived, db.ProfileFacts.Single(fact => fact.Id == archivedFact.Id).Status);
+        Assert.Equal(ProfileFactStatus.Draft, db.ProfileFacts.Single(fact => fact.Id == import.ProfileFacts[1].Id).Status);
+        Assert.DoesNotContain(db.ProfileFacts, fact => fact.Title.Contains(" + ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task PostImportedDraftFactSplit_rejects_approved_fact_without_creating_drafts()
+    {
+        await using var factory = MultiFactImportFactory();
+        using var client = factory.CreateClient();
+        var import = await ImportSingleBatchAsync(client);
+        var approvedFact = import.ProfileFacts[0];
+        var approveResponse = await client.PostAsJsonAsync(
+            $"/api/profile/imports/{import.ImportSessionId:N}/draft-facts/{approvedFact.Id:N}/decision",
+            new ImportedDraftFactDecisionRequest("approve"));
+        approveResponse.EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/profile/imports/{import.ImportSessionId:N}/draft-facts/{approvedFact.Id:N}/split",
+            new ImportedDraftFactSplitRequest(
+            [
+                new ProfileFactRequest("Project", "Split A", "Split A summary.", "Draft", "[]", "[]", "[]", "[]"),
+                new ProfileFactRequest("Project", "Split B", "Split B summary.", "Draft", "[]", "[]", "[]", "[]")
+            ]));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.Equal(ProfileFactStatus.Approved, db.ProfileFacts.Single(fact => fact.Id == approvedFact.Id).Status);
+        Assert.Equal(3, db.ProfileFacts.Count());
     }
 
     [Fact]

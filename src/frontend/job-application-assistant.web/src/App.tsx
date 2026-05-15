@@ -125,6 +125,15 @@ type ImportedDraftFactDuplicateIndicator = {
   reason: string;
 };
 
+type AssistedProfileImportResponse = {
+  importSessionId: string;
+  fileName: string;
+  importedFactCount: number;
+  profileFacts: ProfileFact[];
+  reviewQueue: ImportedDraftFactReviewQueue;
+  reviewUrl: string;
+};
+
 type ImportedDraftFactDecisionResponse = {
   profileFact: ProfileFact;
   reviewQueue: ImportedDraftFactReviewQueue;
@@ -301,6 +310,9 @@ function App() {
   const [importReviewQueues, setImportReviewQueues] = useState<ImportedDraftFactReviewQueue[]>([]);
   const [selectedImportedDraftFactIds, setSelectedImportedDraftFactIds] = useState<string[]>([]);
   const [splitImportedDraftFacts, setSplitImportedDraftFacts] = useState("");
+  const [profileImportFile, setProfileImportFile] = useState<File | null>(null);
+  const [profileImportBusy, setProfileImportBusy] = useState(false);
+  const [pendingImportReviewFocusId, setPendingImportReviewFocusId] = useState<string | null>(null);
   const [profileFactForm, setProfileFactForm] = useState<ProfileFactForm>(emptyProfileFact);
   const [selectedProfileFactId, setSelectedProfileFactId] = useState<string | null>(null);
   const [applications, setApplications] = useState<ApplicationSession[]>([]);
@@ -320,6 +332,7 @@ function App() {
   const [workflowBusy, setWorkflowBusy] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState<"txt" | "docx" | null>(null);
   const [exportFeedback, setExportFeedback] = useState<InlineFeedback | null>(null);
+  const [profileImportFeedback, setProfileImportFeedback] = useState<InlineFeedback | null>(null);
   const [isClipboardAvailable, setIsClipboardAvailable] = useState(false);
   const [aiStatus, setAiStatus] = useState<AiProviderStatus | null>(null);
   const [aiDiagnostics, setAiDiagnostics] = useState<AiDiagnostics | null>(null);
@@ -329,6 +342,8 @@ function App() {
   const [error, setError] = useState<ErrorPresentation | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const evidenceReviewRef = useRef<HTMLDivElement | null>(null);
+  const importReviewRef = useRef<HTMLDivElement | null>(null);
+  const profileImportFileRef = useRef<HTMLInputElement | null>(null);
   const draftReviewRef = useRef<HTMLElement | null>(null);
   const exportPanelRef = useRef<HTMLElement | null>(null);
 
@@ -575,6 +590,15 @@ function App() {
     void loadImportedDraftFactReviewQueues();
   }, [profileFacts]);
 
+  useEffect(() => {
+    if (!pendingImportReviewFocusId || !importReviewQueues.some((queue) => queue.importSessionId === pendingImportReviewFocusId)) {
+      return;
+    }
+
+    importReviewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setPendingImportReviewFocusId(null);
+  }, [importReviewQueues, pendingImportReviewFocusId]);
+
   async function loadProfileFacts() {
     try {
       const response = await apiGet<ProfileFact[]>("/api/profile/facts");
@@ -689,6 +713,55 @@ function App() {
     }
   }
 
+  async function importProfilePdfCv(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!profileImportFile) {
+      setError(plainError("Validation blocker", "Choose a PDF CV before starting assisted import."));
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setProfileImportFeedback(null);
+    setProfileImportBusy(true);
+
+    try {
+      const form = new FormData();
+      form.append("file", profileImportFile);
+      const response = await apiSendForm<AssistedProfileImportResponse>("/api/profile/imports/pdf-cv", form);
+      setImportReviewQueues((queues) => [
+        response.reviewQueue,
+        ...queues.filter((queue) => queue.importSessionId !== response.importSessionId)
+      ]);
+      setPendingImportReviewFocusId(response.importSessionId);
+      setSelectedImportedDraftFactIds([]);
+      if (response.profileFacts[0]) {
+        setSelectedProfileFactId(response.profileFacts[0].id);
+        setProfileFactForm(toProfileFactForm(response.profileFacts[0]));
+        setSplitImportedDraftFacts(splitDraftTemplate(response.profileFacts[0]));
+      }
+      await loadProfileFacts();
+      setProfileImportFile(null);
+      if (profileImportFileRef.current) {
+        profileImportFileRef.current.value = "";
+      }
+      setProfileImportFeedback({
+        tone: "success",
+        title: "Imported facts ready for review",
+        message: `${response.importedFactCount} draft profile fact${response.importedFactCount === 1 ? "" : "s"} from ${response.fileName} are grouped below. Approve the strong ones to make them available for application evidence matching.`
+      });
+    } catch (apiError) {
+      setError(formatError(apiError));
+      setProfileImportFeedback({
+        tone: "error",
+        title: "Assisted import did not change your profile",
+        message: "Review the diagnostics above, then retry the PDF import when the provider is ready."
+      });
+    } finally {
+      setProfileImportBusy(false);
+    }
+  }
+
   async function reviewImportedDraftFact(
     fact: ProfileFact,
     decision: "approve" | "archive" | "reject",
@@ -719,7 +792,11 @@ function App() {
       setProfileFactForm(toProfileFactForm(response.profileFact));
       setSelectedProfileFactId(response.profileFact.id);
       await loadProfileFacts();
-      setNotice(`Imported fact ${importDecisionPastTense(decision)}.`);
+      setNotice(
+        decision === "approve"
+          ? "Imported fact approved and available for application evidence matching."
+          : `Imported fact ${importDecisionPastTense(decision)}.`
+      );
     } catch (apiError) {
       setError(formatError(apiError));
     }
@@ -743,7 +820,11 @@ function App() {
       updateImportReviewQueue(response.reviewQueue);
       setSelectedImportedDraftFactIds((ids) => ids.filter((id) => !profileFactIds.includes(id)));
       await loadProfileFacts();
-      setNotice(`${profileFactIds.length} imported facts ${importDecisionPastTense(decision)}.`);
+      setNotice(
+        decision === "approve"
+          ? `${profileFactIds.length} imported facts approved and available for application evidence matching.`
+          : `${profileFactIds.length} imported facts ${importDecisionPastTense(decision)}.`
+      );
     } catch (apiError) {
       setError(formatError(apiError));
     }
@@ -1502,11 +1583,40 @@ function App() {
                 <h3>Profile facts</h3>
                 <p>{profileReadiness.evidenceMessage}</p>
               </div>
+              <form className="profile-import-panel" onSubmit={importProfilePdfCv}>
+                <div className="section-heading">
+                  <h4>Assisted CV import</h4>
+                  <p>Upload a PDF CV to draft profile facts, review the grouped queue, and approve evidence for saved applications.</p>
+                </div>
+                {aiStatus && isFakeProvider(aiStatus) && (
+                  <p className="workflow-note warning">Fake AI mode is active. Import will use deterministic demo/test extraction behavior.</p>
+                )}
+                <label className="file-field">
+                  <span>PDF CV</span>
+                  <input
+                    accept="application/pdf,.pdf"
+                    ref={profileImportFileRef}
+                    type="file"
+                    onChange={(event) => setProfileImportFile(event.target.files?.[0] ?? null)}
+                  />
+                </label>
+                <div className="form-actions">
+                  <button className="primary-action" type="submit" disabled={profileImportBusy}>
+                    {profileImportBusy ? "Importing..." : "Import PDF CV"}
+                  </button>
+                </div>
+                {profileImportFeedback && (
+                  <div className={`message compact ${profileImportFeedback.tone}`} role="status">
+                    <strong>{profileImportFeedback.title}</strong>
+                    <p>{profileImportFeedback.message}</p>
+                  </div>
+                )}
+              </form>
               {!profileReadiness.hasApprovedEvidence && (
                 <p className="workflow-note warning">Approved evidence is required before evidence matching and draft generation. Draft or archived facts will not be used as proof.</p>
               )}
               {importReviewQueues.length > 0 && (
-                <div className="import-review-queues">
+                <div className="import-review-queues" ref={importReviewRef}>
                   {importReviewQueues.map((queue) => (
                     <section className="import-review-queue" key={queue.importSessionId}>
                       <div className="section-heading">
@@ -2406,6 +2516,14 @@ async function apiSend<T>(path: string, method: "POST" | "PUT", body: unknown): 
       "Content-Type": "application/json"
     },
     body: JSON.stringify(body)
+  });
+  return readResponse<T>(response);
+}
+
+async function apiSendForm<T>(path: string, body: FormData): Promise<T> {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    method: "POST",
+    body
   });
   return readResponse<T>(response);
 }
