@@ -892,6 +892,11 @@ button:disabled {
   background: #edf5f2;
 }
 
+.approved-item.custom-proof {
+  border-color: #b9d8cd;
+  background: #f3faf7;
+}
+
 .approved-item div,
 .gap-decision-item div {
   display: grid;

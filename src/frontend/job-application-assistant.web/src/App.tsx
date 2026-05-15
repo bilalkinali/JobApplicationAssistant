@@ -323,6 +323,10 @@ function App() {
     () => countApprovedCustomFactEvidence(savedGapDecisions, unmatchedRequirements, customFacts),
     [customFacts, savedGapDecisions, unmatchedRequirements]
   );
+  const savedApprovedCustomFactEvidence = useMemo(
+    () => approvedCustomFactEvidenceItems(savedGapDecisions, unmatchedRequirements, customFacts),
+    [customFacts, savedGapDecisions, unmatchedRequirements]
+  );
   const currentGapDecisionCount = useMemo(
     () => countCurrentGapDecisions(savedGapDecisions, unmatchedRequirements, customFacts),
     [customFacts, savedGapDecisions, unmatchedRequirements]
@@ -1586,15 +1590,26 @@ function App() {
                 </div>
 
                 <div className="approved-list">
-                  {approvedEvidenceDraft.length === 0 && <p className="empty-state compact">No approved evidence selected.</p>}
+                  {approvedEvidenceDraft.length === 0 && savedApprovedCustomFactEvidence.length === 0 && (
+                    <p className="empty-state compact">No approved evidence selected.</p>
+                  )}
                   {approvedEvidenceDraft.map((match) => (
                     <article className="approved-item" key={match.id}>
                       <div>
-                        <StatusBadge tone="approved">Approved evidence</StatusBadge>
+                        <StatusBadge tone="approved">Approved profile evidence</StatusBadge>
                         <strong>{match.signal}</strong>
                         <span>{match.profileFactTitle}</span>
                       </div>
                       <button type="button" onClick={() => removeApprovedEvidence(match.id)}>Remove</button>
+                    </article>
+                  ))}
+                  {savedApprovedCustomFactEvidence.map((item) => (
+                    <article className="approved-item custom-proof" key={item.fact.id}>
+                      <div>
+                        <StatusBadge tone="approved">Approved job-local fact</StatusBadge>
+                        <strong>{item.requirement.requirement}</strong>
+                        <span>{item.fact.title}</span>
+                      </div>
                     </article>
                   ))}
                 </div>
@@ -2281,6 +2296,29 @@ function countApprovedCustomFactEvidence(
   ).size;
 }
 
+function approvedCustomFactEvidenceItems(
+  decisions: GapDecision[],
+  requirements: UnmatchedRequirement[],
+  customFacts: CustomFact[]
+): Array<{ requirement: UnmatchedRequirement; fact: CustomFact }> {
+  const requirementsById = new Map(requirements.map((requirement) => [requirement.id, requirement]));
+  const approvedCustomFactsById = new Map(
+    customFacts
+      .filter((fact) => fact.status === "Approved")
+      .map((fact) => [fact.id, fact])
+  );
+
+  return decisions
+    .filter((decision) => decision.decision === "CoveredByCustomFact" && decision.customFactId)
+    .map((decision) => {
+      const requirement = requirementsById.get(decision.unmatchedRequirementId);
+      const fact = approvedCustomFactsById.get(decision.customFactId ?? "");
+
+      return requirement && fact?.unmatchedRequirementId === requirement.id ? { requirement, fact } : null;
+    })
+    .filter((item): item is { requirement: UnmatchedRequirement; fact: CustomFact } => item !== null);
+}
+
 function customFactsForRequirement(facts: CustomFact[], unmatchedRequirementId: string): CustomFact[] {
   return facts.filter((fact) => fact.unmatchedRequirementId === unmatchedRequirementId);
 }
@@ -2294,7 +2332,7 @@ function gapDecisionLabel(decision: GapDecisionValue): string {
     case "Ignore":
       return "Ignored gap";
     case "MentionAsLearningInterest":
-      return "Learning interest";
+      return "Learning-interest gap";
     case "CoveredByCustomFact":
       return "Covered by custom fact";
     default:

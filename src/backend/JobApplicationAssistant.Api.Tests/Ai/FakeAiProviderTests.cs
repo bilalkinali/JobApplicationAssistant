@@ -302,4 +302,43 @@ public sealed class FakeAiProviderTests
                 Assert.Empty(claim.EvidenceIds);
             });
     }
+
+    [Fact]
+    public async Task AuditClaimsAsync_preserves_gap_and_custom_fact_trust_boundary()
+    {
+        var provider = new FakeAiProvider();
+        var approvedCustomFactId = Guid.NewGuid();
+        var approvedEvidence = new[]
+        {
+            new EvidenceMatch(
+                $"custom-fact-{approvedCustomFactId:N}",
+                "docker",
+                "Docker",
+                "PreferredSkill",
+                approvedCustomFactId,
+                "Approved Docker deployment",
+                "Shipped Docker deployment for a client.",
+                ["Docker"])
+        };
+        var input = new ClaimAuditInput(
+            """
+            I am interested in learning Azure.
+            I have Azure platform experience.
+            Built React UI.
+            Shipped Docker deployment for a client.
+            """,
+            "",
+            approvedEvidence);
+
+        var result = await provider.AuditClaimsAsync(input, CancellationToken.None);
+
+        Assert.Contains(result.Claims, claim => claim.Text == "I am interested in learning Azure." && claim.Status == "NeedsReview");
+        Assert.Contains(result.Claims, claim => claim.Text == "I have Azure platform experience." && claim.Status == "Unsupported");
+        Assert.Contains(result.Claims, claim => claim.Text == "Built React UI." && claim.Status == "Unsupported");
+        Assert.Contains(
+            result.Claims,
+            claim => claim.Text == "Shipped Docker deployment for a client." &&
+                claim.Status == "Supported" &&
+                claim.EvidenceIds.Contains($"custom-fact-{approvedCustomFactId:N}"));
+    }
 }
