@@ -84,3 +84,11 @@ public sealed record ImportedDraftFactDuplicateIndicatorResponse(
     Guid ProfileFactId,
     string ProfileFactTitle,
     string Reason);
+
+public sealed record ImportedDraftFactDecisionRequest(
+    string Decision,
+    ProfileFactRequest? ProfileFact = null);
+
+public sealed record ImportedDraftFactDecisionResponse(
+    ProfileFactResponse ProfileFact,
+    ImportedDraftFactReviewQueueResponse ReviewQueue);

@@ -634,6 +634,12 @@ button:disabled {
   background: #f3f3f0;
 }
 
+.fact-card.rejected {
+  border-left: 4px solid #b5534a;
+  color: #6f2824;
+  background: #fff5f3;
+}
+
 .fact-card span {
   color: #64717c;
   font-size: 0.88rem;

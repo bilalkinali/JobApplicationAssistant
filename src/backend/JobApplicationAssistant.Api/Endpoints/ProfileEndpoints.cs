@@ -122,15 +122,7 @@ public static class ProfileEndpoints
                 return Results.NotFound(ApiError.NotFound("Profile fact was not found."));
             }
 
-            fact.Type = request.Type!.Trim();
-            fact.Title = request.Title!.Trim();
-            fact.Summary = request.Summary!.Trim();
-            fact.Status = ParseStatus(request.Status!);
-            fact.FactItems = NormalizeJsonArray(request.FactItems);
-            fact.Technologies = NormalizeJsonArray(request.Technologies);
-            fact.AllowedClaims = NormalizeJsonArray(request.AllowedClaims);
-            fact.ForbiddenClaims = NormalizeJsonArray(request.ForbiddenClaims);
-            fact.ManuallyEdited = true;
+            ApplyProfileFactRequest(fact, request, markEdited: true);
             fact.UpdatedAt = DateTimeOffset.UtcNow;
 
             await db.SaveChangesAsync(ct);
@@ -254,6 +246,59 @@ public static class ProfileEndpoints
 
             var fileName = ImportSnapshot(importFacts[0])?.FileName ?? "Imported CV";
             return Results.Ok(ToImportedDraftFactReviewQueue(importSessionId, fileName, importFacts, facts));
+        });
+
+        group.MapPost("/imports/{importSessionId:guid}/draft-facts/{factId:guid}/decision", async Task<IResult> (Guid importSessionId, Guid factId, ImportedDraftFactDecisionRequest request, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var decision = NormalizeOptional(request.Decision)?.ToLowerInvariant();
+            if (decision is not ("approve" or "archive" or "reject"))
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(request.Decision)] = ["Decision must be approve, archive, or reject."]
+                }));
+            }
+
+            var fact = await db.ProfileFacts.FindAsync([factId], ct);
+            if (fact is null || fact.Status != ProfileFactStatus.Draft || !ImportedFromSession(fact, importSessionId))
+            {
+                return Results.NotFound(ApiError.NotFound("Imported draft fact was not found for this import session."));
+            }
+
+            if (request.ProfileFact is not null)
+            {
+                var errors = Validate(request.ProfileFact);
+                if (errors.Count > 0)
+                {
+                    return Results.BadRequest(ApiError.Validation(errors));
+                }
+
+                ApplyProfileFactRequest(fact, request.ProfileFact, markEdited: true);
+            }
+
+            fact.Status = decision switch
+            {
+                "approve" => ProfileFactStatus.Approved,
+                "archive" => ProfileFactStatus.Archived,
+                _ => ProfileFactStatus.Rejected
+            };
+            fact.UpdatedAt = DateTimeOffset.UtcNow;
+
+            await db.SaveChangesAsync(ct);
+
+            var facts = await db.ProfileFacts
+                .AsNoTracking()
+                .OrderBy(existingFact => existingFact.Type)
+                .ThenBy(existingFact => existingFact.Title)
+                .ToListAsync(ct);
+            var remainingImportFacts = facts
+                .Where(existingFact => existingFact.Status == ProfileFactStatus.Draft && ImportedFromSession(existingFact, importSessionId))
+                .ToList();
+            var fileName = ImportSnapshot(fact)?.FileName ?? "Imported CV";
+
+            return Results.Ok(new ImportedDraftFactDecisionResponse(
+                ToResponse(fact),
+                ToImportedDraftFactReviewQueue(importSessionId, fileName, remainingImportFacts, facts)));
         });
 
         return app;
@@ -547,7 +592,7 @@ public static class ProfileEndpoints
 
         if (!Enum.TryParse<ProfileFactStatus>(request.Status, ignoreCase: true, out _))
         {
-            errors[nameof(request.Status)] = ["Status must be Draft, Approved, or Archived."];
+            errors[nameof(request.Status)] = ["Status must be Draft, Approved, Archived, or Rejected."];
         }
 
         AddJsonArrayError(errors, nameof(request.FactItems), request.FactItems);
@@ -639,6 +684,19 @@ public static class ProfileEndpoints
 
     private static ProfileFactStatus ParseStatus(string status) =>
         Enum.Parse<ProfileFactStatus>(status, ignoreCase: true);
+
+    private static void ApplyProfileFactRequest(ProfileFact fact, ProfileFactRequest request, bool markEdited)
+    {
+        fact.Type = request.Type!.Trim();
+        fact.Title = request.Title!.Trim();
+        fact.Summary = request.Summary!.Trim();
+        fact.Status = ParseStatus(request.Status!);
+        fact.FactItems = NormalizeJsonArray(request.FactItems);
+        fact.Technologies = NormalizeJsonArray(request.Technologies);
+        fact.AllowedClaims = NormalizeJsonArray(request.AllowedClaims);
+        fact.ForbiddenClaims = NormalizeJsonArray(request.ForbiddenClaims);
+        fact.ManuallyEdited = markEdited || fact.ManuallyEdited;
+    }
 
     private static string NormalizeJsonArray(string? value) =>
         string.IsNullOrWhiteSpace(value) ? "[]" : value.Trim();

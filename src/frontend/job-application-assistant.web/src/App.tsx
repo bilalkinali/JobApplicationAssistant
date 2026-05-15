@@ -62,7 +62,7 @@ const emptyProfileFact: ProfileFactForm = {
 };
 const applicationStatuses = ["Draft", "PostingCaptured", "ReadyForReview", "PreparedForEvidenceReview", "Applied", "Archived"];
 const auditReadinessOptions = ["All", "Current", "Stale", "Missing", "NotApplicable"];
-const profileFactStatuses = ["Draft", "Approved", "Archived"];
+const profileFactStatuses = ["Draft", "Approved", "Archived", "Rejected"];
 
 type ProfileForm = {
   fullName: string;
@@ -123,6 +123,11 @@ type ImportedDraftFactDuplicateIndicator = {
   profileFactId: string;
   profileFactTitle: string;
   reason: string;
+};
+
+type ImportedDraftFactDecisionResponse = {
+  profileFact: ProfileFact;
+  reviewQueue: ImportedDraftFactReviewQueue;
 };
 
 type ApplicationForm = {
@@ -320,6 +325,16 @@ function App() {
   const approvedProfileFacts = useMemo(
     () => profileFacts.filter((fact) => fact.status === "Approved"),
     [profileFacts]
+  );
+  const selectedImportedDraftFact = useMemo(
+    () =>
+      profileFacts.find(
+        (fact) =>
+          fact.id === selectedProfileFactId &&
+          fact.status === "Draft" &&
+          Boolean(importSessionIdFromProfileFact(fact))
+      ),
+    [profileFacts, selectedProfileFactId]
   );
   const filteredApplications = useMemo(() => {
     const search = applicationSearch.trim().toLowerCase();
@@ -648,6 +663,42 @@ function App() {
       startNewProfileFact();
       await loadProfileFacts();
       setNotice("Profile fact deleted.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    }
+  }
+
+  async function reviewImportedDraftFact(
+    fact: ProfileFact,
+    decision: "approve" | "archive" | "reject",
+    importSessionId = importSessionIdFromProfileFact(fact),
+    profileFact?: ProfileFactForm
+  ) {
+    if (!importSessionId) {
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+
+    try {
+      const response = await apiSend<ImportedDraftFactDecisionResponse>(
+        `/api/profile/imports/${importSessionId}/draft-facts/${fact.id}/decision`,
+        "POST",
+        {
+          decision,
+          profileFact
+        }
+      );
+      setImportReviewQueues((queues) =>
+        response.reviewQueue.draftFactCount > 0
+          ? queues.map((queue) => (queue.importSessionId === response.reviewQueue.importSessionId ? response.reviewQueue : queue))
+          : queues.filter((queue) => queue.importSessionId !== response.reviewQueue.importSessionId)
+      );
+      setProfileFactForm(toProfileFactForm(response.profileFact));
+      setSelectedProfileFactId(response.profileFact.id);
+      await loadProfileFacts();
+      setNotice(`Imported fact ${importDecisionPastTense(decision)}.`);
     } catch (apiError) {
       setError(formatError(apiError));
     }
@@ -1389,6 +1440,30 @@ function App() {
                 <Textarea label="Allowed claims JSON" value={profileFactForm.allowedClaims} onChange={(allowedClaims) => setProfileFactForm({ ...profileFactForm, allowedClaims })} />
                 <Textarea label="Forbidden claims JSON" value={profileFactForm.forbiddenClaims} onChange={(forbiddenClaims) => setProfileFactForm({ ...profileFactForm, forbiddenClaims })} />
                 <div className="form-actions">
+                  {selectedImportedDraftFact && (
+                    <>
+                      <button
+                        className="primary-action"
+                        type="button"
+                        onClick={() =>
+                          void reviewImportedDraftFact(
+                            selectedImportedDraftFact,
+                            "approve",
+                            undefined,
+                            profileFactFormChanged(selectedImportedDraftFact, profileFactForm) ? profileFactForm : undefined
+                          )
+                        }
+                      >
+                        Approve import
+                      </button>
+                      <button type="button" onClick={() => void reviewImportedDraftFact(selectedImportedDraftFact, "archive")}>
+                        Archive import
+                      </button>
+                      <button className="danger-action" type="button" onClick={() => void reviewImportedDraftFact(selectedImportedDraftFact, "reject")}>
+                        Reject import
+                      </button>
+                    </>
+                  )}
                   <button className="primary-action" type="submit">{selectedProfileFactId ? "Save fact" : "Create fact"}</button>
                   <button type="button" onClick={startNewProfileFact}>Clear</button>
                   {selectedProfileFactId && (
@@ -2238,6 +2313,30 @@ function duplicateScopeLabel(scope: string): string {
   return "Overlap";
 }
 
+function importDecisionPastTense(decision: "approve" | "archive" | "reject"): string {
+  switch (decision) {
+    case "approve":
+      return "approved";
+    case "archive":
+      return "archived";
+    case "reject":
+      return "rejected";
+  }
+}
+
+function profileFactFormChanged(fact: ProfileFact, form: ProfileFactForm): boolean {
+  return (
+    fact.type !== form.type ||
+    fact.title !== form.title ||
+    fact.summary !== form.summary ||
+    fact.status !== form.status ||
+    fact.factItems !== form.factItems ||
+    fact.technologies !== form.technologies ||
+    fact.allowedClaims !== form.allowedClaims ||
+    fact.forbiddenClaims !== form.forbiddenClaims
+  );
+}
+
 function toApplicationForm(application: ApplicationForm) {
   return {
     ...application,
@@ -2679,6 +2778,8 @@ function profileFactStatusLabel(status: string): string {
       return "Approved evidence";
     case "Archived":
       return "Archived evidence";
+    case "Rejected":
+      return "Rejected evidence";
     default:
       return status;
   }
@@ -2731,6 +2832,8 @@ function statusTone(status: string): string {
       return "approved";
     case "Archived":
       return "archived";
+    case "Rejected":
+      return "rejected";
     default:
       return "neutral";
   }

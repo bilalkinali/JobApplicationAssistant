@@ -295,6 +295,174 @@ public sealed class ProfileApiTests
     }
 
     [Fact]
+    public async Task PostImportedDraftFactDecision_approves_imported_fact_and_updates_review_queue()
+    {
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor("Built .NET APIs."));
+        });
+        using var client = factory.CreateClient();
+        var import = await ImportSingleFactAsync(client);
+        var importedFact = Assert.Single(import.ProfileFacts);
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/profile/imports/{import.ImportSessionId:N}/draft-facts/{importedFact.Id:N}/decision",
+            new ImportedDraftFactDecisionRequest("approve"));
+
+        response.EnsureSuccessStatusCode();
+        var decision = await response.Content.ReadFromJsonAsync<ImportedDraftFactDecisionResponse>();
+        Assert.NotNull(decision);
+        Assert.Equal("Approved", decision.ProfileFact.Status);
+        Assert.False(decision.ProfileFact.ManuallyEdited);
+        Assert.Equal(0, decision.ReviewQueue.DraftFactCount);
+        Assert.Empty(decision.ReviewQueue.Groups);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var fact = Assert.Single(db.ProfileFacts);
+        Assert.Equal(ProfileFactStatus.Approved, fact.Status);
+    }
+
+    [Fact]
+    public async Task PostImportedDraftFactDecision_edits_before_approving_imported_fact()
+    {
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor("Built .NET APIs."));
+        });
+        using var client = factory.CreateClient();
+        var import = await ImportSingleFactAsync(client);
+        var importedFact = Assert.Single(import.ProfileFacts);
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/profile/imports/{import.ImportSessionId:N}/draft-facts/{importedFact.Id:N}/decision",
+            new ImportedDraftFactDecisionRequest(
+                "approve",
+                new ProfileFactRequest(
+                    "Project",
+                    "Edited imported API work",
+                    "Edited summary from reviewed CV evidence.",
+                    "Draft",
+                    """["Edited item"]""",
+                    """[".NET","React"]""",
+                    """["Edited allowed claim"]""",
+                    "[]")));
+
+        response.EnsureSuccessStatusCode();
+        var decision = await response.Content.ReadFromJsonAsync<ImportedDraftFactDecisionResponse>();
+        Assert.NotNull(decision);
+        Assert.Equal("Approved", decision.ProfileFact.Status);
+        Assert.Equal("Edited imported API work", decision.ProfileFact.Title);
+        Assert.True(decision.ProfileFact.ManuallyEdited);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var fact = Assert.Single(db.ProfileFacts);
+        Assert.Equal(ProfileFactStatus.Approved, fact.Status);
+        Assert.Equal("Edited imported API work", fact.Title);
+        Assert.True(fact.ManuallyEdited);
+    }
+
+    [Fact]
+    public async Task PostImportedDraftFactDecision_archives_imported_fact_without_approving()
+    {
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor("Built .NET APIs."));
+        });
+        using var client = factory.CreateClient();
+        var import = await ImportSingleFactAsync(client);
+        var importedFact = Assert.Single(import.ProfileFacts);
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/profile/imports/{import.ImportSessionId:N}/draft-facts/{importedFact.Id:N}/decision",
+            new ImportedDraftFactDecisionRequest("archive"));
+
+        response.EnsureSuccessStatusCode();
+        var decision = await response.Content.ReadFromJsonAsync<ImportedDraftFactDecisionResponse>();
+        Assert.NotNull(decision);
+        Assert.Equal("Archived", decision.ProfileFact.Status);
+        Assert.Equal(0, decision.ReviewQueue.DraftFactCount);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.Equal(ProfileFactStatus.Archived, Assert.Single(db.ProfileFacts).Status);
+    }
+
+    [Fact]
+    public async Task PostImportedDraftFactDecision_rejects_imported_fact_without_approving()
+    {
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor("Built .NET APIs."));
+        });
+        using var client = factory.CreateClient();
+        var import = await ImportSingleFactAsync(client);
+        var importedFact = Assert.Single(import.ProfileFacts);
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/profile/imports/{import.ImportSessionId:N}/draft-facts/{importedFact.Id:N}/decision",
+            new ImportedDraftFactDecisionRequest("reject"));
+
+        response.EnsureSuccessStatusCode();
+        var decision = await response.Content.ReadFromJsonAsync<ImportedDraftFactDecisionResponse>();
+        Assert.NotNull(decision);
+        Assert.Equal("Rejected", decision.ProfileFact.Status);
+        Assert.Equal(0, decision.ReviewQueue.DraftFactCount);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.Equal(ProfileFactStatus.Rejected, Assert.Single(db.ProfileFacts).Status);
+    }
+
+    [Fact]
+    public async Task Approved_imported_fact_can_support_evidence_matching()
+    {
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor("Built .NET React APIs for internal workflow automation."));
+        });
+        using var client = factory.CreateClient();
+        var import = await ImportSingleFactAsync(client);
+        var importedFact = Assert.Single(import.ProfileFacts);
+        var approveResponse = await client.PostAsJsonAsync(
+            $"/api/profile/imports/{import.ImportSessionId:N}/draft-facts/{importedFact.Id:N}/decision",
+            new ImportedDraftFactDecisionRequest("approve"));
+        approveResponse.EnsureSuccessStatusCode();
+
+        var applicationResponse = await client.PostAsJsonAsync(
+            "/api/applications",
+            new ApplicationRequest(
+                "ExampleCo",
+                ".NET Developer",
+                null,
+                null,
+                "Draft",
+                "Role requires .NET and React APIs.",
+                null,
+                null));
+        applicationResponse.EnsureSuccessStatusCode();
+        var application = await applicationResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(application);
+
+        var analysisResponse = await client.PostAsync($"/api/applications/{application.Id}/analyze-job", null);
+        analysisResponse.EnsureSuccessStatusCode();
+
+        var matchResponse = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
+
+        matchResponse.EnsureSuccessStatusCode();
+        var matched = await matchResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(matched);
+        Assert.Contains(importedFact.Id.ToString(), matched.EvidenceMatches);
+        Assert.Contains(importedFact.Title, matched.EvidenceMatches);
+    }
+
+    [Fact]
     public async Task PostPdfCvImport_returns_pdf_extraction_validation()
     {
         await using var factory = new TestApplicationFactory(services =>
@@ -546,6 +714,16 @@ public sealed class ProfileApiTests
         file.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
         form.Add(file, "file", "cv.pdf");
         return await client.PostAsync("/api/profile/imports/pdf-cv", form);
+    }
+
+    private static async Task<AssistedProfileImportResponse> ImportSingleFactAsync(HttpClient client)
+    {
+        var importResponse = await PostPdfImportAsync(client);
+        importResponse.EnsureSuccessStatusCode();
+        var import = await importResponse.Content.ReadFromJsonAsync<AssistedProfileImportResponse>();
+        Assert.NotNull(import);
+        Assert.Single(import.ProfileFacts);
+        return import;
     }
 
     private static JsonContent OpenAiChatCompletionContent(string content) =>
