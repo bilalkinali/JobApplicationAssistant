@@ -92,6 +92,37 @@ type ProfileFact = ProfileFactForm & {
   id: string;
   createdAt: string;
   updatedAt: string;
+  sourceDocumentIds: string;
+  originalImportedSnapshot: string | null;
+  manuallyEdited: boolean;
+};
+
+type ImportedDraftFactReviewQueue = {
+  importSessionId: string;
+  fileName: string;
+  draftFactCount: number;
+  groups: ImportedDraftFactReviewGroup[];
+};
+
+type ImportedDraftFactReviewGroup = {
+  key: string;
+  label: string;
+  draftFactCount: number;
+  facts: ImportedDraftFactReviewItem[];
+};
+
+type ImportedDraftFactReviewItem = {
+  profileFact: ProfileFact;
+  sourceContext: string;
+  hasDuplicateIndicators: boolean;
+  duplicateIndicators: ImportedDraftFactDuplicateIndicator[];
+};
+
+type ImportedDraftFactDuplicateIndicator = {
+  scope: "ImportBatch" | "ExistingProfileFact" | string;
+  profileFactId: string;
+  profileFactTitle: string;
+  reason: string;
 };
 
 type ApplicationForm = {
@@ -250,6 +281,7 @@ function App() {
   const [view, setView] = useState<View>("home");
   const [profile, setProfile] = useState<ProfileForm>(emptyProfile);
   const [profileFacts, setProfileFacts] = useState<ProfileFact[]>([]);
+  const [importReviewQueues, setImportReviewQueues] = useState<ImportedDraftFactReviewQueue[]>([]);
   const [profileFactForm, setProfileFactForm] = useState<ProfileFactForm>(emptyProfileFact);
   const [selectedProfileFactId, setSelectedProfileFactId] = useState<string | null>(null);
   const [applications, setApplications] = useState<ApplicationSession[]>([]);
@@ -503,10 +535,31 @@ function App() {
     void loadApplications();
   }, [includeArchivedApplications]);
 
+  useEffect(() => {
+    void loadImportedDraftFactReviewQueues();
+  }, [profileFacts]);
+
   async function loadProfileFacts() {
     try {
       const response = await apiGet<ProfileFact[]>("/api/profile/facts");
       setProfileFacts(response.map(toProfileFact));
+    } catch (apiError) {
+      setError(formatError(apiError));
+    }
+  }
+
+  async function loadImportedDraftFactReviewQueues() {
+    const importSessionIds = Array.from(new Set(profileFacts.map(importSessionIdFromProfileFact).filter((id): id is string => Boolean(id))));
+    if (importSessionIds.length === 0) {
+      setImportReviewQueues([]);
+      return;
+    }
+
+    try {
+      const queues = await Promise.all(
+        importSessionIds.map((importSessionId) => apiGet<ImportedDraftFactReviewQueue>(`/api/profile/imports/${importSessionId}/draft-facts`))
+      );
+      setImportReviewQueues(queues.filter((queue) => queue.draftFactCount > 0));
     } catch (apiError) {
       setError(formatError(apiError));
     }
@@ -1267,6 +1320,48 @@ function App() {
               </div>
               {!profileReadiness.hasApprovedEvidence && (
                 <p className="workflow-note warning">Approved evidence is required before evidence matching and draft generation. Draft or archived facts will not be used as proof.</p>
+              )}
+              {importReviewQueues.length > 0 && (
+                <div className="import-review-queues">
+                  {importReviewQueues.map((queue) => (
+                    <section className="import-review-queue" key={queue.importSessionId}>
+                      <div className="section-heading">
+                        <h4>{queue.fileName}</h4>
+                        <p>{queue.draftFactCount} imported draft facts grouped for review.</p>
+                      </div>
+                      {queue.groups.map((group) => (
+                        <div className="import-review-group" key={group.key}>
+                          <div className="import-review-group-header">
+                            <strong>{group.label}</strong>
+                            <span>{group.draftFactCount}</span>
+                          </div>
+                          <div className="import-review-items">
+                            {group.facts.map((item) => (
+                              <button
+                                className={`import-review-item${item.hasDuplicateIndicators ? " duplicate" : ""}`}
+                                key={item.profileFact.id}
+                                type="button"
+                                onClick={() => openProfileFact(item.profileFact)}
+                              >
+                                <span className="import-review-title">{item.profileFact.title}</span>
+                                <span className="import-review-context">{item.sourceContext}</span>
+                                {item.hasDuplicateIndicators && (
+                                  <span className="duplicate-indicators">
+                                    {item.duplicateIndicators.map((indicator) => (
+                                      <small key={`${indicator.scope}-${indicator.profileFactId}`}>
+                                        {duplicateScopeLabel(indicator.scope)}: {indicator.profileFactTitle} - {indicator.reason}
+                                      </small>
+                                    ))}
+                                  </span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </section>
+                  ))}
+                </div>
               )}
               {profileFacts.length === 0 && <p className="empty-state">No profile facts yet.</p>}
               <div className="fact-list">
@@ -2111,8 +2206,36 @@ function toProfileFact(fact: ProfileFact): ProfileFact {
     ...toProfileFactForm(fact),
     id: fact.id,
     createdAt: fact.createdAt,
-    updatedAt: fact.updatedAt
+    updatedAt: fact.updatedAt,
+    sourceDocumentIds: fact.sourceDocumentIds ?? "[]",
+    originalImportedSnapshot: fact.originalImportedSnapshot ?? null,
+    manuallyEdited: Boolean(fact.manuallyEdited)
   };
+}
+
+function importSessionIdFromProfileFact(fact: ProfileFact): string | null {
+  if (!fact.originalImportedSnapshot || fact.status !== "Draft") {
+    return null;
+  }
+
+  try {
+    const snapshot = JSON.parse(fact.originalImportedSnapshot) as { importSessionId?: string };
+    return snapshot.importSessionId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function duplicateScopeLabel(scope: string): string {
+  if (scope === "ImportBatch") {
+    return "Same import";
+  }
+
+  if (scope === "ExistingProfileFact") {
+    return "Existing fact";
+  }
+
+  return "Overlap";
 }
 
 function toApplicationForm(application: ApplicationForm) {

@@ -210,6 +210,91 @@ public sealed class ProfileApiTests
     }
 
     [Fact]
+    public async Task GetImportDraftFacts_returns_grouped_source_context_and_duplicate_indicators()
+    {
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor("Project Alpha: Built .NET React APIs. Project Beta: Built .NET React APIs."));
+            services.RemoveAll<IAiProvider>();
+            services.AddSingleton<IAiProvider>(new StubAiProvider(new AssistedProfileImportResult(
+            [
+                new AssistedProfileImportFact(
+                    "Project",
+                    "Built workflow APIs",
+                    "Built .NET React APIs for workflow automation.",
+                    ["Built APIs"],
+                    [".NET", "React"],
+                    ["Built .NET APIs"],
+                    [],
+                    "Project Alpha: Built .NET React APIs."),
+                new AssistedProfileImportFact(
+                    "Project",
+                    "Built workflow APIs",
+                    "Built .NET React APIs for internal automation.",
+                    ["Built APIs"],
+                    [".NET", "React"],
+                    ["Built React workflows"],
+                    [],
+                    "Project Beta: Built .NET React APIs."),
+                new AssistedProfileImportFact(
+                    "Education",
+                    "Completed cloud course",
+                    "Completed cloud architecture coursework.",
+                    ["Cloud coursework"],
+                    ["Azure"],
+                    ["Completed cloud coursework"],
+                    [],
+                    "Education: cloud architecture coursework.")
+            ])));
+        });
+        await SeedApprovedProfileFactAsync(factory);
+        using var client = factory.CreateClient();
+
+        var importResponse = await PostPdfImportAsync(client);
+
+        Assert.Equal(HttpStatusCode.Created, importResponse.StatusCode);
+        var import = await importResponse.Content.ReadFromJsonAsync<AssistedProfileImportResponse>();
+        Assert.NotNull(import);
+
+        var response = await client.GetAsync($"/api/profile/imports/{import.ImportSessionId:N}/draft-facts");
+
+        response.EnsureSuccessStatusCode();
+        var queue = await response.Content.ReadFromJsonAsync<ImportedDraftFactReviewQueueResponse>();
+        Assert.NotNull(queue);
+        Assert.Equal(import.ImportSessionId, queue.ImportSessionId);
+        Assert.Equal("cv.pdf", queue.FileName);
+        Assert.Equal(3, queue.DraftFactCount);
+        Assert.Collection(
+            queue.Groups,
+            group =>
+            {
+                Assert.Equal("Education", group.Key);
+                Assert.Single(group.Facts);
+                Assert.Contains("cloud architecture", group.Facts[0].SourceContext);
+                Assert.False(group.Facts[0].HasDuplicateIndicators);
+            },
+            group =>
+            {
+                Assert.Equal("Project", group.Key);
+                Assert.Equal(2, group.DraftFactCount);
+                Assert.All(group.Facts, fact =>
+                {
+                    Assert.Contains("Built .NET React APIs", fact.SourceContext);
+                    Assert.Contains(fact.DuplicateIndicators, indicator => indicator.Scope == "ImportBatch");
+                    Assert.Contains(fact.DuplicateIndicators, indicator => indicator.Scope == "ExistingProfileFact");
+                    Assert.Equal("Draft", fact.ProfileFact.Status);
+                    Assert.Null(fact.ProfileFact.OriginalImportedSnapshot);
+                });
+            });
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.Contains(db.ProfileFacts, fact => fact.Status == ProfileFactStatus.Approved && fact.Title == "Existing workflow API work");
+        Assert.Equal(3, db.ProfileFacts.Count(fact => fact.Status == ProfileFactStatus.Draft));
+    }
+
+    [Fact]
     public async Task PostPdfCvImport_returns_pdf_extraction_validation()
     {
         await using var factory = new TestApplicationFactory(services =>
@@ -514,6 +599,28 @@ public sealed class ProfileApiTests
             ForbiddenClaims = "[]",
             SourceDocumentIds = """["existing-import-session"]""",
             OriginalImportedSnapshot = """{"importSessionId":"existing-import-session"}""",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedApprovedProfileFactAsync(WebApplicationFactory<Program> factory)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        db.ProfileFacts.Add(new ProfileFact
+        {
+            Id = Guid.NewGuid(),
+            Type = "Project",
+            Title = "Existing workflow API work",
+            Summary = "Built .NET React APIs for workflow automation.",
+            Status = ProfileFactStatus.Approved,
+            FactItems = """["Built APIs"]""",
+            Technologies = """[".NET","React"]""",
+            AllowedClaims = """["Built .NET APIs"]""",
+            ForbiddenClaims = "[]",
+            SourceDocumentIds = "[]",
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
         });

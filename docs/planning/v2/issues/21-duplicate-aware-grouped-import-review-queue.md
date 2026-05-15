@@ -1,6 +1,6 @@
 # Duplicate-Aware Grouped Import Review Queue
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,14 +15,14 @@ This slice should make the review queue feel organized rather than like a random
 
 ## Acceptance criteria
 
-- [ ] A user can list draft facts for an import session.
-- [ ] Draft facts are grouped by type or theme in the API response and frontend review queue.
-- [ ] Each draft fact shows concise source context from the uploaded PDF CV.
-- [ ] Duplicate or overlapping draft facts are detected within the import batch.
-- [ ] Duplicate or overlapping draft facts are detected against existing profile facts.
-- [ ] Duplicate indicators do not automatically reject, merge, approve, or archive facts.
-- [ ] The review queue avoids exposing the full raw document everywhere while preserving enough context for verification.
-- [ ] Tests cover grouped listing, source context display data, duplicate detection within a batch, and duplicate detection against existing facts.
+- [x] A user can list draft facts for an import session.
+- [x] Draft facts are grouped by type or theme in the API response and frontend review queue.
+- [x] Each draft fact shows concise source context from the uploaded PDF CV.
+- [x] Duplicate or overlapping draft facts are detected within the import batch.
+- [x] Duplicate or overlapping draft facts are detected against existing profile facts.
+- [x] Duplicate indicators do not automatically reject, merge, approve, or archive facts.
+- [x] The review queue avoids exposing the full raw document everywhere while preserving enough context for verification.
+- [x] Tests cover grouped listing, source context display data, duplicate detection within a batch, and duplicate detection against existing facts.
 
 ## Blocked by
 

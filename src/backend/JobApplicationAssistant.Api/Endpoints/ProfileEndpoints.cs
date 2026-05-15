@@ -211,9 +211,11 @@ public static class ProfileEndpoints
 
             var importSessionId = Guid.NewGuid();
             var sourceDocumentIds = JsonSerializer.Serialize(new[] { importSessionId.ToString("N") }, JsonOptions);
+            var existingFacts = await db.ProfileFacts.AsNoTracking().ToListAsync(ct);
             var facts = result.Facts
                 .Select(importedFact => ToDraftImportedFact(importedFact, file.FileName, extractedText, importSessionId, sourceDocumentIds, now))
                 .ToList();
+            var reviewQueue = ToImportedDraftFactReviewQueue(importSessionId, file.FileName, facts, existingFacts);
 
             run.Status = "Succeeded";
             run.AttemptCount = result.AttemptCount;
@@ -230,8 +232,29 @@ public static class ProfileEndpoints
                     file.FileName,
                     facts.Count,
                     facts.Select(ToResponse).ToList(),
+                    reviewQueue,
                     "/profile/facts?status=Draft"));
         }).DisableAntiforgery();
+
+        group.MapGet("/imports/{importSessionId:guid}/draft-facts", async Task<IResult> (Guid importSessionId, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var facts = await db.ProfileFacts
+                .AsNoTracking()
+                .OrderBy(fact => fact.Type)
+                .ThenBy(fact => fact.Title)
+                .ToListAsync(ct);
+            var importFacts = facts
+                .Where(fact => fact.Status == ProfileFactStatus.Draft && ImportedFromSession(fact, importSessionId))
+                .ToList();
+
+            if (importFacts.Count == 0)
+            {
+                return Results.NotFound(ApiError.NotFound("Imported draft facts were not found for this import session."));
+            }
+
+            var fileName = ImportSnapshot(importFacts[0])?.FileName ?? "Imported CV";
+            return Results.Ok(ToImportedDraftFactReviewQueue(importSessionId, fileName, importFacts, facts));
+        });
 
         return app;
     }
@@ -334,6 +357,156 @@ public static class ProfileEndpoints
             fact.ForbiddenClaims is null))
         {
             throw new AiInvalidOutputException("AI provider returned structurally invalid assisted profile import facts.", result.AttemptCount);
+        }
+    }
+
+    private static ImportedDraftFactReviewQueueResponse ToImportedDraftFactReviewQueue(
+        Guid importSessionId,
+        string fileName,
+        IReadOnlyList<ProfileFact> importFacts,
+        IReadOnlyList<ProfileFact> comparisonFacts)
+    {
+        var importFactIds = importFacts.Select(fact => fact.Id).ToHashSet();
+        var duplicateIndicators = importFacts.ToDictionary(
+            fact => fact.Id,
+            fact => DuplicateIndicators(fact, importFacts, comparisonFacts.Where(other => !importFactIds.Contains(other.Id)).ToList()));
+
+        var groups = importFacts
+            .GroupBy(fact => string.IsNullOrWhiteSpace(fact.Type) ? "ImportedCv" : fact.Type.Trim(), StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key)
+            .Select(group => new ImportedDraftFactReviewGroupResponse(
+                group.Key,
+                group.Key,
+                group.Count(),
+                group
+                    .OrderBy(fact => fact.Title)
+                    .Select(fact =>
+                    {
+                        var indicators = duplicateIndicators[fact.Id];
+                        return new ImportedDraftFactReviewItemResponse(
+                            ToReviewResponse(fact),
+                            SourceContext(fact),
+                            indicators.Count > 0,
+                            indicators);
+                    })
+                    .ToList()))
+            .ToList();
+
+        return new ImportedDraftFactReviewQueueResponse(importSessionId, fileName, importFacts.Count, groups);
+    }
+
+    private static List<ImportedDraftFactDuplicateIndicatorResponse> DuplicateIndicators(
+        ProfileFact fact,
+        IReadOnlyList<ProfileFact> importFacts,
+        IReadOnlyList<ProfileFact> existingFacts)
+    {
+        var indicators = new List<ImportedDraftFactDuplicateIndicatorResponse>();
+
+        foreach (var other in importFacts.Where(other => other.Id != fact.Id))
+        {
+            var reason = DuplicateReason(fact, other);
+            if (reason is not null)
+            {
+                indicators.Add(new ImportedDraftFactDuplicateIndicatorResponse("ImportBatch", other.Id, other.Title, reason));
+            }
+        }
+
+        foreach (var other in existingFacts)
+        {
+            var reason = DuplicateReason(fact, other);
+            if (reason is not null)
+            {
+                indicators.Add(new ImportedDraftFactDuplicateIndicatorResponse("ExistingProfileFact", other.Id, other.Title, reason));
+            }
+        }
+
+        return indicators
+            .GroupBy(indicator => new { indicator.Scope, indicator.ProfileFactId })
+            .Select(group => group.First())
+            .OrderBy(indicator => indicator.Scope)
+            .ThenBy(indicator => indicator.ProfileFactTitle)
+            .ToList();
+    }
+
+    private static ProfileFactResponse ToReviewResponse(ProfileFact fact) =>
+        ToResponse(fact) with { OriginalImportedSnapshot = null };
+
+    private static string? DuplicateReason(ProfileFact left, ProfileFact right)
+    {
+        if (NormalizeComparison(left.Title) == NormalizeComparison(right.Title))
+        {
+            return "Title matches another fact.";
+        }
+
+        if (NormalizeComparison(left.Summary) == NormalizeComparison(right.Summary))
+        {
+            return "Summary matches another fact.";
+        }
+
+        var sharedTechnologies = JsonArrayValues(left.Technologies)
+            .Intersect(JsonArrayValues(right.Technologies), StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (sharedTechnologies.Count >= 2)
+        {
+            return $"Shares technologies: {string.Join(", ", sharedTechnologies.Take(4))}.";
+        }
+
+        var leftTerms = ComparisonTerms(string.Join(" ", left.Title, left.Summary, string.Join(" ", JsonArrayValues(left.FactItems))));
+        var rightTerms = ComparisonTerms(string.Join(" ", right.Title, right.Summary, string.Join(" ", JsonArrayValues(right.FactItems))));
+        var sharedTerms = leftTerms.Intersect(rightTerms, StringComparer.OrdinalIgnoreCase).ToList();
+        return sharedTerms.Count >= 5 ? "Content substantially overlaps another fact." : null;
+    }
+
+    private static ImportedFactSnapshot? ImportSnapshot(ProfileFact fact)
+    {
+        if (string.IsNullOrWhiteSpace(fact.OriginalImportedSnapshot))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<ImportedFactSnapshot>(fact.OriginalImportedSnapshot, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static bool ImportedFromSession(ProfileFact fact, Guid importSessionId) =>
+        ImportSnapshot(fact)?.ImportSessionId == importSessionId;
+
+    private static string SourceContext(ProfileFact fact) =>
+        NormalizeRequired(ImportSnapshot(fact)?.SourceContext ?? string.Empty, "No source context captured.", 700);
+
+    private static string NormalizeComparison(string value) =>
+        new(value
+            .Trim()
+            .ToLowerInvariant()
+            .Select(character => char.IsLetterOrDigit(character) ? character : ' ')
+            .ToArray());
+
+    private static IReadOnlyList<string> ComparisonTerms(string value) =>
+        NormalizeComparison(value)
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(term => term.Length >= 4)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private static IReadOnlyList<string> JsonArrayValues(string value)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<IReadOnlyList<string>>(value, JsonOptions)?
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Select(item => item.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList() ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
         }
     }
 
@@ -496,4 +669,11 @@ public static class ProfileEndpoints
             return false;
         }
     }
+
+    private sealed record ImportedFactSnapshot(
+        Guid ImportSessionId,
+        string FileName,
+        DateTimeOffset ImportedAt,
+        string SourceContext,
+        string? ExtractedTextPreview);
 }
