@@ -18,6 +18,7 @@ export type DraftGenerationInput = {
   hasSavedApprovedEvidence: boolean;
   unmatchedRequirementCount: number;
   savedGapDecisionCount: number;
+  hasGeneratedDraft: boolean;
   aiStatus?: AiProviderReadinessInput | null;
 };
 
@@ -31,6 +32,8 @@ export type GuidedNextActionKind =
   | "prepare-application"
   | "review-evidence"
   | "generate-draft"
+  | "refresh-audit"
+  | "copy-export"
   | "ai-readiness"
   | "complete";
 
@@ -193,6 +196,9 @@ export function getGuidedNextAction(input: {
   unmatchedRequirementCount: number;
   savedGapDecisionCount: number;
   hasGeneratedDraft: boolean;
+  auditReadiness: string;
+  hasUnsavedDraftEdits?: boolean;
+  canCopyOrExport?: boolean;
   aiStatus?: AiProviderReadinessInput | null;
 }): GuidedNextAction {
   if (!input.selectedApplicationId || !input.hasSavedJobPosting) {
@@ -278,18 +284,18 @@ export function getGuidedNextAction(input: {
     };
   }
 
-  if (input.aiStatus && !isFakeProvider(input.aiStatus) && !input.aiStatus.isAvailable) {
-    return {
-      kind: "ai-readiness",
-      title: "Check AI readiness",
-      buttonLabel: "Open AI settings",
-      canRun: true,
-      tone: "error",
-      message: getDraftReadinessLabel(input.aiStatus)
-    };
-  }
-
   if (!input.hasGeneratedDraft) {
+    if (input.aiStatus && !isFakeProvider(input.aiStatus) && !input.aiStatus.isAvailable) {
+      return {
+        kind: "ai-readiness",
+        title: "Check AI readiness",
+        buttonLabel: "Open AI settings",
+        canRun: true,
+        tone: "error",
+        message: getDraftReadinessLabel(input.aiStatus)
+      };
+    }
+
     return {
       kind: "generate-draft",
       title: "Generate and audit draft",
@@ -297,6 +303,41 @@ export function getGuidedNextAction(input: {
       canRun: true,
       tone: "success",
       message: "Approved evidence and gap decisions are saved. Generate the draft and claim audit in one step."
+    };
+  }
+
+  if (input.hasUnsavedDraftEdits || input.auditReadiness === "Stale" || input.auditReadiness === "Missing") {
+    if (input.aiStatus && !isFakeProvider(input.aiStatus) && !input.aiStatus.isAvailable) {
+      return {
+        kind: "ai-readiness",
+        title: "Check AI readiness",
+        buttonLabel: "Open AI settings",
+        canRun: true,
+        tone: "error",
+        message: getDraftReadinessLabel(input.aiStatus)
+      };
+    }
+
+    return {
+      kind: "refresh-audit",
+      title: "Refresh claim audit",
+      buttonLabel: "Refresh claim audit",
+      canRun: true,
+      tone: input.auditReadiness === "Current" ? "info" : "warning",
+      message: input.hasUnsavedDraftEdits
+        ? "Draft edits need to be saved and checked against approved evidence before final use."
+        : "The current draft needs a fresh claim audit before copy or export is the final guided action."
+    };
+  }
+
+  if (input.auditReadiness === "Current") {
+    return {
+      kind: "copy-export",
+      title: "Copy or export",
+      buttonLabel: input.canCopyOrExport ? "Copy cover letter" : "Review export options",
+      canRun: true,
+      tone: "success",
+      message: "The claim audit is current. Copy the cover letter or download TXT/DOCX when ready."
     };
   }
 

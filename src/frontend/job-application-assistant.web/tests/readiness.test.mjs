@@ -313,7 +313,7 @@ test("guided next action points unavailable real provider toward diagnostics bef
   assert.equal(action.message, "Ollama llama3.1:8b is unavailable. Run diagnostics before retrying draft generation.");
 });
 
-test("guided next action keeps stable draft review available when provider is unavailable", () => {
+test("guided next action keeps current draft available when provider is unavailable", () => {
   const action = getGuidedNextAction({
     selectedApplicationId: "application-1",
     hasSavedJobPosting: true,
@@ -323,6 +323,8 @@ test("guided next action keeps stable draft review available when provider is un
     unmatchedRequirementCount: 0,
     savedGapDecisionCount: 0,
     hasGeneratedDraft: true,
+    auditReadiness: "Current",
+    canCopyOrExport: true,
     aiStatus: {
       provider: "Ollama",
       model: "llama3.1:8b",
@@ -332,8 +334,63 @@ test("guided next action keeps stable draft review available when provider is un
     }
   });
 
-  assert.equal(action.kind, "complete");
-  assert.equal(action.buttonLabel, "Review draft");
+  assert.equal(action.kind, "copy-export");
+  assert.equal(action.buttonLabel, "Copy cover letter");
+});
+
+test("guided next action refreshes stale audit before final use", () => {
+  const action = getGuidedNextAction({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: true,
+    preparationStatus: "PreparedForEvidenceReview",
+    approvedProfileFactCount: 2,
+    savedApprovedEvidenceCount: 1,
+    unmatchedRequirementCount: 0,
+    savedGapDecisionCount: 0,
+    hasGeneratedDraft: true,
+    auditReadiness: "Stale"
+  });
+
+  assert.equal(action.kind, "refresh-audit");
+  assert.equal(action.title, "Refresh claim audit");
+  assert.equal(action.buttonLabel, "Refresh claim audit");
+});
+
+test("guided next action treats unsaved draft edits as stale audit", () => {
+  const action = getGuidedNextAction({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: true,
+    preparationStatus: "PreparedForEvidenceReview",
+    approvedProfileFactCount: 2,
+    savedApprovedEvidenceCount: 1,
+    unmatchedRequirementCount: 0,
+    savedGapDecisionCount: 0,
+    hasGeneratedDraft: true,
+    auditReadiness: "Current",
+    hasUnsavedDraftEdits: true
+  });
+
+  assert.equal(action.kind, "refresh-audit");
+  assert.match(action.message, /Draft edits need to be saved/);
+});
+
+test("guided next action makes copy and export final when audit is current", () => {
+  const action = getGuidedNextAction({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: true,
+    preparationStatus: "PreparedForEvidenceReview",
+    approvedProfileFactCount: 2,
+    savedApprovedEvidenceCount: 1,
+    unmatchedRequirementCount: 0,
+    savedGapDecisionCount: 0,
+    hasGeneratedDraft: true,
+    auditReadiness: "Current",
+    canCopyOrExport: true
+  });
+
+  assert.equal(action.kind, "copy-export");
+  assert.equal(action.title, "Copy or export");
+  assert.equal(action.buttonLabel, "Copy cover letter");
 });
 
 test("guided next action points provider failures toward diagnostics", () => {

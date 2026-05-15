@@ -1,6 +1,6 @@
 # Draft Review Audit Staleness and Guided Actions
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -13,15 +13,15 @@ Complete the draft review checkpoint by keeping claim audit status honest after 
 
 ## Acceptance criteria
 
-- [ ] After successful assistant-led generation and audit, the workflow stops at draft review.
-- [ ] Draft review shows the generated cover letter, short motivation text, and current audit feedback.
-- [ ] Manual edits to cover letter or short motivation text mark the audit stale.
-- [ ] A stale audit makes `Refresh claim audit` the guided next action.
-- [ ] Refreshing audit updates the current audit state for the edited draft.
-- [ ] Unsupported or weak claims remain visible in audit feedback after refresh.
-- [ ] A current audit makes copy/export the guided next action.
-- [ ] Existing copy/export mechanisms remain available without export format redesign.
-- [ ] Focused tests cover manual edit staleness, audit refresh, current-audit next action, and copy/export next action.
+- [x] After successful assistant-led generation and audit, the workflow stops at draft review.
+- [x] Draft review shows the generated cover letter, short motivation text, and current audit feedback.
+- [x] Manual edits to cover letter or short motivation text mark the audit stale.
+- [x] A stale audit makes `Refresh claim audit` the guided next action.
+- [x] Refreshing audit updates the current audit state for the edited draft.
+- [x] Unsupported or weak claims remain visible in audit feedback after refresh.
+- [x] A current audit makes copy/export the guided next action.
+- [x] Existing copy/export mechanisms remain available without export format redesign.
+- [x] Focused tests cover manual edit staleness, audit refresh, current-audit next action, and copy/export next action.
 
 ## Blocked by
 

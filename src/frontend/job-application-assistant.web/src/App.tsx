@@ -278,6 +278,8 @@ function App() {
   const [error, setError] = useState<ErrorPresentation | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const evidenceReviewRef = useRef<HTMLDivElement | null>(null);
+  const draftReviewRef = useRef<HTMLElement | null>(null);
+  const exportPanelRef = useRef<HTMLElement | null>(null);
 
   const selectedApplication = useMemo(
     () => applications.find((application) => application.id === selectedApplicationId),
@@ -363,6 +365,15 @@ function App() {
     () => getAuditExportNotice(selectedApplication),
     [selectedApplication]
   );
+  const effectiveAuditReadiness = hasUnsavedDraftEdits
+    ? "Stale"
+    : selectedApplication?.auditReadiness ?? auditReadinessForDraft(selectedApplication?.generatedDraft ?? null);
+  const effectiveAuditExportNotice = hasUnsavedDraftEdits
+    ? {
+        tone: "warning" as const,
+        message: "Claim audit is stale because the draft has unsaved edits. Refresh claim audit to save and re-check the edited text."
+      }
+    : auditExportNotice;
   const profileReadiness = useMemo(
     () => getProfileReadiness(profile, approvedProfileFacts.length),
     [approvedProfileFacts.length, profile]
@@ -392,9 +403,10 @@ function App() {
         hasSavedApprovedEvidence,
         unmatchedRequirementCount: unmatchedRequirements.length,
         savedGapDecisionCount: currentGapDecisionCount,
+        hasGeneratedDraft,
         aiStatus
       }),
-    [aiStatus, currentGapDecisionCount, hasSavedApprovedEvidence, hasSavedJobPosting, selectedApplicationId, unmatchedRequirements.length]
+    [aiStatus, currentGapDecisionCount, hasGeneratedDraft, hasSavedApprovedEvidence, hasSavedJobPosting, selectedApplicationId, unmatchedRequirements.length]
   );
   const guidedNextAction = useMemo(
     () =>
@@ -407,14 +419,21 @@ function App() {
         unmatchedRequirementCount: unmatchedRequirements.length,
         savedGapDecisionCount: currentGapDecisionCount,
         hasGeneratedDraft,
+        auditReadiness: effectiveAuditReadiness,
+        hasUnsavedDraftEdits,
+        canCopyOrExport: coverLetterExportState.canCopy || coverLetterExportState.canExport,
         aiStatus
       }),
     [
       aiStatus,
       approvedProfileFacts.length,
+      coverLetterExportState.canCopy,
+      coverLetterExportState.canExport,
       currentGapDecisionCount,
+      effectiveAuditReadiness,
       hasGeneratedDraft,
       hasSavedJobPosting,
+      hasUnsavedDraftEdits,
       savedApprovedEvidence.length,
       savedApprovedCustomFactEvidenceCount,
       selectedApplication?.preparationStatus,
@@ -801,6 +820,7 @@ function App() {
       const draft = await apiSend<GeneratedDraft>(`/api/applications/${selectedApplicationId}/generate-draft`, "POST", null);
       replaceGeneratedDraft(draft);
       setNotice(draft.auditUpdatedAt ? "Draft generated and claim audit updated." : "Draft generated. Claim audit needs retry before final review.");
+      scrollDraftReviewSoon();
     } catch (apiError) {
       setError(formatError(apiError));
     } finally {
@@ -808,10 +828,10 @@ function App() {
     }
   }
 
-  async function saveGeneratedDraft() {
+  async function saveGeneratedDraft(): Promise<GeneratedDraft | null> {
     if (!selectedApplicationId) {
       setError(plainError("Validation blocker", "Save the application before editing a draft."));
-      return;
+      return null;
     }
 
     setError(null);
@@ -826,17 +846,19 @@ function App() {
       );
       replaceGeneratedDraft(draft);
       setNotice("Draft edits saved.");
+      return draft;
     } catch (apiError) {
       setError(formatError(apiError));
+      return null;
     } finally {
       setWorkflowBusy(null);
     }
   }
 
-  async function auditClaims() {
+  async function auditClaims(): Promise<GeneratedDraft | null> {
     if (!selectedApplicationId) {
       setError(plainError("Validation blocker", "Save the application before auditing a draft."));
-      return;
+      return null;
     }
 
     setError(null);
@@ -847,11 +869,25 @@ function App() {
       const draft = await apiSend<GeneratedDraft>(`/api/applications/${selectedApplicationId}/audit-claims`, "POST", null);
       replaceGeneratedDraft(draft);
       setNotice("Claim audit updated.");
+      scrollDraftReviewSoon();
+      return draft;
     } catch (apiError) {
       setError(formatError(apiError));
+      return null;
     } finally {
       setWorkflowBusy(null);
     }
+  }
+
+  async function refreshClaimAudit() {
+    if (hasUnsavedDraftEdits) {
+      const saved = await saveGeneratedDraft();
+      if (!saved) {
+        return;
+      }
+    }
+
+    await auditClaims();
   }
 
   async function copyCoverLetter() {
@@ -999,15 +1035,30 @@ function App() {
       case "generate-draft":
         void generateDraft();
         return;
+      case "refresh-audit":
+        void refreshClaimAudit();
+        return;
+      case "copy-export":
+        if (coverLetterExportState.canCopy) {
+          void copyCoverLetter();
+          return;
+        }
+
+        exportPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
       case "ai-readiness":
         setView("settings");
         return;
       case "complete":
-        setNotice("Draft is ready for review.");
+        draftReviewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
         return;
       default:
         return;
     }
+  }
+
+  function scrollDraftReviewSoon() {
+    window.setTimeout(() => draftReviewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
 
   function replaceApplication(application: ApplicationSession) {
@@ -1388,8 +1439,8 @@ function App() {
                     <StatusBadge tone={hasGeneratedDraft ? "approved" : "draft"}>
                       {hasGeneratedDraft ? "Draft saved" : "No draft"}
                     </StatusBadge>
-                    <StatusBadge tone={auditReadinessTone(selectedApplication.auditReadiness)}>
-                      {auditReadinessLabel(selectedApplication.auditReadiness)}
+                    <StatusBadge tone={auditReadinessTone(effectiveAuditReadiness)}>
+                      {auditReadinessLabel(effectiveAuditReadiness)}
                     </StatusBadge>
                     <StatusBadge tone={coverLetterExportState.canExport ? "approved" : "pending"}>
                       {coverLetterExportState.canExport ? "Export ready" : "Export blocked"}
@@ -1679,16 +1730,16 @@ function App() {
                 </div>
 
                 {selectedApplication?.generatedDraft ? (
-                  <section className="draft-editor">
+                  <section className="draft-editor" ref={draftReviewRef}>
                     <div className="section-heading">
                       <h4>Current draft</h4>
                       <p>
                         Generated {formatDate(selectedApplication.generatedDraft.generatedAt)}
                         {selectedApplication.generatedDraft.lastEditedAt ? ` - Edited ${formatDate(selectedApplication.generatedDraft.lastEditedAt)}` : ""}
-                        {selectedApplication.generatedDraft.isClaimAuditStale ? " - Audit stale" : ""}
+                        {effectiveAuditReadiness === "Stale" ? " - Audit stale" : ""}
                       </p>
                     </div>
-                    {auditExportNotice && <p className={`workflow-note ${auditExportNotice.tone}`}>{auditExportNotice.message}</p>}
+                    {effectiveAuditExportNotice && <p className={`workflow-note ${effectiveAuditExportNotice.tone}`}>{effectiveAuditExportNotice.message}</p>}
                     <Textarea
                       label="Cover letter"
                       value={generatedDraftForm.coverLetterText}
@@ -1721,16 +1772,16 @@ function App() {
                         disabled={workflowBusy !== null}
                         title={disabledTitle(workflowBusy !== null, workflowBusyReason)}
                       >
-                        {workflowBusy === "audit" ? "Auditing..." : "Run claim audit"}
+                        {workflowBusy === "audit" ? "Auditing..." : "Refresh claim audit"}
                       </button>
                     </div>
-                    <section className="export-panel">
+                    <section className="export-panel" ref={exportPanelRef}>
                       <div className="section-heading">
                         <h4>Export cover letter</h4>
                         <p>{coverLetterExportState.reason ?? "Copy or download the current saved cover letter exactly as edited."}</p>
                       </div>
                       <p className="workflow-note info">Copy uses the visible edited text. TXT and DOCX downloads use the current saved draft edits and never regenerate or re-run claim audit.</p>
-                      {auditExportNotice && <p className={`workflow-note ${auditExportNotice.tone}`}>{auditExportNotice.message}</p>}
+                      {effectiveAuditExportNotice && <p className={`workflow-note ${effectiveAuditExportNotice.tone}`}>{effectiveAuditExportNotice.message}</p>}
                       {!coverLetterExportState.canCopy && coverLetterExportState.canExport && (
                         <p className="workflow-note neutral">Clipboard copy is not available in this browser. TXT and DOCX export are still available.</p>
                       )}
@@ -1774,7 +1825,7 @@ function App() {
                             : "Run claim audit after the generated text is ready."}
                         </p>
                       </div>
-                      {auditExportNotice && <p className={`workflow-note ${auditExportNotice.tone}`}>{auditExportNotice.message}</p>}
+                      {effectiveAuditExportNotice && <p className={`workflow-note ${effectiveAuditExportNotice.tone}`}>{effectiveAuditExportNotice.message}</p>}
                       {claimAudit.claims.length === 0 ? (
                         <p className="empty-state compact">No claim audit results yet.</p>
                       ) : (
@@ -2278,7 +2329,9 @@ function applicationNextActionLabel(application: ApplicationSession, approvedPro
       countApprovedCustomFactEvidence(gapDecisions, unmatchedRequirements, customFacts),
     unmatchedRequirementCount: unmatchedRequirements.length,
     savedGapDecisionCount: countCurrentGapDecisions(gapDecisions, unmatchedRequirements, customFacts),
-    hasGeneratedDraft: application.hasGeneratedDraft
+    hasGeneratedDraft: application.hasGeneratedDraft,
+    auditReadiness: application.auditReadiness ?? auditReadinessForDraft(application.generatedDraft),
+    canCopyOrExport: Boolean(application.generatedDraft?.coverLetterText.trim())
   }).title;
 }
 
@@ -2438,6 +2491,14 @@ function guidedActionButtonLabel(label: string, kind: string, workflowBusy: stri
 
   if (workflowBusy === "review" && kind === "review-evidence") {
     return "Saving...";
+  }
+
+  if ((workflowBusy === "draft-edit" || workflowBusy === "audit") && kind === "refresh-audit") {
+    return workflowBusy === "draft-edit" ? "Saving..." : "Auditing...";
+  }
+
+  if (workflowBusy === "draft" && kind === "generate-draft") {
+    return "Generating...";
   }
 
   return label;
