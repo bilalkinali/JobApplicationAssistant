@@ -1,6 +1,7 @@
 using JobApplicationAssistant.Api.Ai;
 using JobApplicationAssistant.Api.Data;
 using JobApplicationAssistant.Api.Endpoints;
+using JobApplicationAssistant.Api.Imports;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -45,6 +46,7 @@ builder.Services.AddSingleton<IAiProvider>(serviceProvider =>
 
     return new UnavailableAiProvider(options);
 });
+builder.Services.AddSingleton<IPdfTextExtractor, PdfTextExtractor>();
 builder.Services.AddCors(options =>
 {
     var allowedOrigins = builder.Configuration

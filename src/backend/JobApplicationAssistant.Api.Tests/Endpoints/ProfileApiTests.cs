@@ -1,12 +1,13 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Text;
 using JobApplicationAssistant.Api.Contracts;
 using JobApplicationAssistant.Api.Data;
 using JobApplicationAssistant.Api.Domain;
+using JobApplicationAssistant.Api.Imports;
 using JobApplicationAssistant.Api.Tests.Support;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Xunit;
 
 namespace JobApplicationAssistant.Api.Tests.Endpoints;
@@ -148,10 +149,14 @@ public sealed class ProfileApiTests
     [Fact]
     public async Task PostPdfCvImport_creates_draft_imported_facts_that_do_not_support_matching()
     {
-        await using var factory = new TestApplicationFactory();
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor("Built .NET React APIs for internal workflow automation."));
+        });
         using var client = factory.CreateClient();
         using var form = new MultipartFormDataContent();
-        using var file = new ByteArrayContent(BuildPdf("Built .NET React APIs for internal workflow automation."));
+        using var file = new ByteArrayContent([1, 2, 3]);
         file.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
         form.Add(file, "file", "cv.pdf");
 
@@ -202,22 +207,43 @@ public sealed class ProfileApiTests
         Assert.Contains("ProfileFacts", error.Details!.Keys);
     }
 
-    private static byte[] BuildPdf(string text) =>
-        Encoding.ASCII.GetBytes($"""
-        %PDF-1.4
-        1 0 obj
-        << /Type /Page /Contents 2 0 R >>
-        endobj
-        2 0 obj
-        << /Length 80 >>
-        stream
-        BT
-        /F1 12 Tf
-        72 720 Td
-        ({text}) Tj
-        ET
-        endstream
-        endobj
-        %%EOF
-        """);
+    [Fact]
+    public async Task PostPdfCvImport_returns_pdf_extraction_validation()
+    {
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor(PdfTextExtractionResult.Failure("Uploaded PDF was malformed.")));
+        });
+        using var client = factory.CreateClient();
+        using var form = new MultipartFormDataContent();
+        using var file = new ByteArrayContent([1, 2, 3]);
+        file.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
+        form.Add(file, "file", "cv.pdf");
+
+        var response = await client.PostAsync("/api/profile/imports/pdf-cv", form);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Equal("Uploaded PDF was malformed.", Assert.Single(error.Details!["file"]));
+    }
+
+    private sealed class StubPdfTextExtractor : IPdfTextExtractor
+    {
+        private readonly PdfTextExtractionResult result;
+
+        public StubPdfTextExtractor(string text)
+            : this(PdfTextExtractionResult.Success(text))
+        {
+        }
+
+        public StubPdfTextExtractor(PdfTextExtractionResult result)
+        {
+            this.result = result;
+        }
+
+        public Task<PdfTextExtractionResult> ExtractAsync(Stream pdfStream, CancellationToken ct) =>
+            Task.FromResult(result);
+    }
 }

@@ -9,6 +9,13 @@ namespace JobApplicationAssistant.Api.Tests.Support;
 
 public sealed class TestApplicationFactory : WebApplicationFactory<Program>
 {
+    private readonly Action<IServiceCollection>? configureServices;
+
+    public TestApplicationFactory(Action<IServiceCollection>? configureServices = null)
+    {
+        this.configureServices = configureServices;
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.ConfigureServices(services =>
@@ -18,6 +25,7 @@ public sealed class TestApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<DbContextOptions<ApplicationDbContext>>();
             services.AddDbContext<ApplicationDbContext>(options =>
                 options.UseInMemoryDatabase(databaseName));
+            configureServices?.Invoke(services);
         });
     }
 }

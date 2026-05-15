@@ -1,9 +1,8 @@
-using System.Text;
-using System.Text.RegularExpressions;
 using JobApplicationAssistant.Api.Ai;
 using JobApplicationAssistant.Api.Contracts;
 using JobApplicationAssistant.Api.Data;
 using JobApplicationAssistant.Api.Domain;
+using JobApplicationAssistant.Api.Imports;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
@@ -153,7 +152,7 @@ public static class ProfileEndpoints
             return Results.NoContent();
         });
 
-        group.MapPost("/imports/pdf-cv", async Task<IResult> (IFormFile? file, ApplicationDbContext db, IAiProvider aiProvider, CancellationToken ct) =>
+        group.MapPost("/imports/pdf-cv", async Task<IResult> (IFormFile? file, ApplicationDbContext db, IAiProvider aiProvider, IPdfTextExtractor pdfTextExtractor, CancellationToken ct) =>
         {
             var errors = ValidatePdfImport(file);
             if (errors.Count > 0)
@@ -162,27 +161,16 @@ public static class ProfileEndpoints
             }
 
             await using var stream = file!.OpenReadStream();
-            using var memory = new MemoryStream();
-            await stream.CopyToAsync(memory, ct);
-            var pdfBytes = memory.ToArray();
-
-            if (!HasPdfHeader(pdfBytes))
+            var extraction = await pdfTextExtractor.ExtractAsync(stream, ct);
+            if (!extraction.Succeeded)
             {
                 return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
                 {
-                    [nameof(file)] = ["Uploaded CV must be a PDF file."]
+                    [nameof(file)] = [extraction.Error ?? "Uploaded PDF could not be imported."]
                 }));
             }
 
-            var extractedText = ExtractPdfText(pdfBytes);
-            if (string.IsNullOrWhiteSpace(extractedText))
-            {
-                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
-                {
-                    [nameof(file)] = ["Uploaded PDF did not contain extractable CV text."]
-                }));
-            }
-
+            var extractedText = extraction.Text!;
             AssistedProfileImportResult result;
             try
             {
@@ -351,7 +339,7 @@ public static class ProfileEndpoints
     private static Dictionary<string, string[]> ValidatePdfImport(IFormFile? file)
     {
         var errors = new Dictionary<string, string[]>();
-        if (file is null || file.Length == 0)
+        if (file is null)
         {
             errors[nameof(file)] = ["A PDF CV file is required."];
             return errors;
@@ -423,44 +411,6 @@ public static class ProfileEndpoints
 
     private static string SerializeJsonArray(IReadOnlyList<string> values) =>
         JsonSerializer.Serialize(values.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim()).ToList(), JsonOptions);
-
-    private static bool HasPdfHeader(byte[] bytes) =>
-        bytes.Length >= 5 && Encoding.ASCII.GetString(bytes, 0, 5) == "%PDF-";
-
-    private static string ExtractPdfText(byte[] bytes)
-    {
-        var text = Encoding.Latin1.GetString(bytes);
-        var values = Regex.Matches(text, @"\((?<text>(?:\\.|[^\\)])*)\)")
-            .Select(match => DecodePdfLiteralString(match.Groups["text"].Value))
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .ToList();
-
-        if (values.Count == 0)
-        {
-            values = Regex.Matches(text, @"[A-Za-z0-9][A-Za-z0-9 .,;:/+#@&_\-]{8,}")
-                .Select(match => match.Value.Trim())
-                .Where(value => !value.StartsWith("obj", StringComparison.OrdinalIgnoreCase) &&
-                    !value.StartsWith("endobj", StringComparison.OrdinalIgnoreCase) &&
-                    !value.StartsWith("stream", StringComparison.OrdinalIgnoreCase))
-                .ToList();
-        }
-
-        return Regex.Replace(string.Join(' ', values), @"\s+", " ").Trim();
-    }
-
-    private static string DecodePdfLiteralString(string value) =>
-        Regex.Replace(value, @"\\([nrtbf\\()])", match => match.Groups[1].Value switch
-        {
-            "n" => "\n",
-            "r" => "\r",
-            "t" => "\t",
-            "b" => "\b",
-            "f" => "\f",
-            "\\" => "\\",
-            "(" => "(",
-            ")" => ")",
-            _ => match.Value
-        });
 
     private static bool IsJsonArray(string? value)
     {
