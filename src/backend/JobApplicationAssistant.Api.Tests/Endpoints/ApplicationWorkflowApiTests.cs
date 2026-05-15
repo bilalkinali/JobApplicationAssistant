@@ -318,6 +318,228 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task AnalyzeJob_with_openai_compatible_updates_application_from_chat_completion_json()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = OpenAiChatCompletionContent(ValidOllamaAnalysisJson("Contoso", "Platform Engineer"))
+            }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET, PostgreSQL, Kubernetes, and REST APIs.");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/analyze-job", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var analyzed = await response.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(analyzed);
+        Assert.Equal("Contoso", analyzed.CompanyName);
+        Assert.Equal("Platform Engineer", analyzed.RoleTitle);
+
+        var signals = JsonSerializer.Deserialize<JobSignalsDocument>(analyzed.JobSignals, JsonOptions);
+        Assert.NotNull(signals);
+        Assert.Equal("OpenAiCompatible", signals.Provider);
+        Assert.Contains(".NET", signals.RequiredSkills);
+
+        var requestJson = await Assert.Single(handler.Requests).Content!.ReadAsStringAsync();
+        Assert.Contains("chat/completions", handler.Requests[0].RequestUri!.ToString());
+        Assert.Contains("\"model\":\"local-model\"", requestJson);
+        Assert.Contains("\"response_format\":{\"type\":\"json_object\"}", requestJson);
+        Assert.Contains("Return only strict JSON", requestJson);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("OpenAiCompatible", run.Provider);
+        Assert.Equal("local-model", run.Model);
+        Assert.Equal("Succeeded", run.Status);
+        Assert.Equal(1, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task AnalyzeJob_with_openai_compatible_repairs_malformed_json_once()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent("{ malformed") },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent(ValidOllamaAnalysisJson("Northwind", "API Engineer")) }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET and REST APIs.");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/analyze-job", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        Assert.Equal(2, handler.Requests.Count);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("RepairedSucceeded", run.Status);
+        Assert.Equal(2, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task AnalyzeJob_with_openai_compatible_repairs_structurally_invalid_json_once()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent("""{"companyName":"","roleTitle":"Missing Signals"}""") },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent(ValidOllamaAnalysisJson("Tailspin", "Backend Engineer")) }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need PostgreSQL and Kubernetes.");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/analyze-job", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var analyzed = await response.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(analyzed);
+        Assert.Equal("Tailspin", analyzed.CompanyName);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task AnalyzeJob_with_openai_compatible_empty_assistant_content_records_failure()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent(" ") },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent(" ") }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/analyze-job", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Single(handler.Requests);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("InvalidOutput", run.ErrorCode);
+        Assert.Equal(1, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task AnalyzeJob_with_openai_compatible_invalid_output_after_repair_records_raw_payload_when_enabled()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent("{ malformed") },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent("""{"companyName":"","roleTitle":""}""") }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(
+            handler,
+            model: "local-model",
+            storeRawPayloads: true);
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/analyze-job", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var reopenedResponse = await client.GetAsync($"/api/applications/{application.Id}");
+        reopenedResponse.EnsureSuccessStatusCode();
+        var reopened = await reopenedResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(reopened);
+        Assert.Equal("Fallback Company", reopened.CompanyName);
+        Assert.Equal("Fallback Role", reopened.RoleTitle);
+        Assert.Equal("Draft", reopened.Status);
+        Assert.Equal("{}", reopened.JobSignals);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("InvalidOutput", run.ErrorCode);
+        Assert.Equal(2, run.AttemptCount);
+        Assert.Contains("""{"companyName":"","roleTitle":""}""", run.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task AnalyzeJob_with_openai_compatible_api_error_records_raw_payload_when_enabled()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                ReasonPhrase = "Service Unavailable",
+                Content = JsonContent.Create(new { error = new { message = "model unavailable" } })
+            }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(
+            handler,
+            model: "local-model",
+            storeRawPayloads: true);
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/analyze-job", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+        Assert.Contains("model unavailable", run.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task AnalyzeJob_with_openai_compatible_timeout_records_failure()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(
+            new Queue<HttpResponseMessage>(),
+            new TaskCanceledException("timed out"));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/analyze-job", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+        Assert.Equal(1, run.AttemptCount);
+    }
+
+    [Fact]
+    public async Task AnalyzeJob_with_openai_compatible_unreachable_endpoint_records_failure()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(
+            new Queue<HttpResponseMessage>(),
+            new HttpRequestException("unreachable"));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/analyze-job", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+        Assert.Equal(1, run.AttemptCount);
+    }
+
+    [Fact]
     public async Task MatchEvidence_rejects_application_without_analyzed_job_signals()
     {
         await using var factory = new TestApplicationFactory();
@@ -2470,6 +2692,22 @@ public sealed class ApplicationWorkflowApiTests
 
     private static JsonContent OllamaGenerateContent(string response) =>
         JsonContent.Create(new { response });
+
+    private static JsonContent OpenAiChatCompletionContent(string content) =>
+        JsonContent.Create(new
+        {
+            choices = new[]
+            {
+                new
+                {
+                    message = new
+                    {
+                        role = "assistant",
+                        content
+                    }
+                }
+            }
+        });
 
     private static string ValidOllamaAnalysisJson(string companyName, string roleTitle) =>
         $$"""

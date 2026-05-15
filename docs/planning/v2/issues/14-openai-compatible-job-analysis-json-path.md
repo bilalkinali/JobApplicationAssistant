@@ -1,6 +1,6 @@
 # OpenAI-Compatible Job Analysis JSON Path
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,15 +15,15 @@ The completed slice should prove that a saved application can run job analysis t
 
 ## Acceptance criteria
 
-- [ ] Job analysis calls the configured OpenAI-compatible chat completions endpoint using the configured model.
-- [ ] The chat completion request asks for strict JSON output and does not use OpenAI cloud.
-- [ ] Valid assistant JSON is parsed into the existing job analysis result shape.
-- [ ] Existing structural validation rules still reject malformed or incomplete job analysis output.
-- [ ] Existing repair-attempt behavior is preserved for invalid job analysis JSON.
-- [ ] Failed job analysis calls return graceful provider errors and do not corrupt application workflow state.
-- [ ] Raw request/response or error payloads are stored or logged for failed job analysis calls when `StoreRawPayloads` is enabled.
-- [ ] Backend tests prove job analysis works with `OpenAiCompatible` and persists valid parsed JSON.
-- [ ] Backend tests cover malformed JSON, structurally invalid JSON, empty assistant content, provider API error, timeout, and unreachable endpoint for job analysis.
+- [x] Job analysis calls the configured OpenAI-compatible chat completions endpoint using the configured model.
+- [x] The chat completion request asks for strict JSON output and does not use OpenAI cloud.
+- [x] Valid assistant JSON is parsed into the existing job analysis result shape.
+- [x] Existing structural validation rules still reject malformed or incomplete job analysis output.
+- [x] Existing repair-attempt behavior is preserved for invalid job analysis JSON.
+- [x] Failed job analysis calls return graceful provider errors and do not corrupt application workflow state.
+- [x] Raw request/response or error payloads are stored or logged for failed job analysis calls when `StoreRawPayloads` is enabled.
+- [x] Backend tests prove job analysis works with `OpenAiCompatible` and persists valid parsed JSON.
+- [x] Backend tests cover malformed JSON, structurally invalid JSON, empty assistant content, provider API error, timeout, and unreachable endpoint for job analysis.
 
 ## Blocked by
 

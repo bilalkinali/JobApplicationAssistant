@@ -1,11 +1,13 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace JobApplicationAssistant.Api.Ai;
 
 public sealed class OpenAiCompatibleAiProvider : IAiProvider
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly string JobAnalysisPrompt = LoadPrompt("job-analysis.md");
 
     private readonly HttpClient httpClient;
     private readonly AiOptions options;
@@ -126,8 +128,19 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         }
     }
 
-    public Task<JobAnalysisResult> AnalyzeJobAsync(JobAnalysisInput input, CancellationToken ct) =>
-        throw ProviderUnavailable();
+    public async Task<JobAnalysisResult> AnalyzeJobAsync(JobAnalysisInput input, CancellationToken ct)
+    {
+        var responseText = await ChatAsync(BuildJobAnalysisPrompt(input), attemptCount: 1, ct);
+        try
+        {
+            return ParseJobAnalysis(responseText, attemptCount: 1);
+        }
+        catch (AiInvalidOutputException firstFailure)
+        {
+            var repairedText = await ChatAsync(BuildRepairPrompt(responseText, firstFailure.Message), attemptCount: 2, ct);
+            return ParseJobAnalysis(repairedText, attemptCount: 2);
+        }
+    }
 
     public Task<EvidenceMatchResult> MatchEvidenceAsync(EvidenceMatchInput input, CancellationToken ct) =>
         throw ProviderUnavailable();
@@ -141,10 +154,233 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
     private AiDiagnosticsResult Result(bool isAvailable, string message, IReadOnlyList<AiDiagnosticCheck> checks) =>
         new("OpenAiCompatible", options.Model, options.Endpoint, isAvailable, message, checks);
 
+    private async Task<string> ChatAsync(string prompt, int attemptCount, CancellationToken ct)
+    {
+        var request = new OpenAiChatCompletionRequest(
+            options.Model,
+            [
+                new OpenAiChatMessage("system", "Return only strict JSON. Do not include markdown."),
+                new OpenAiChatMessage("user", prompt)
+            ],
+            new OpenAiResponseFormat("json_object"),
+            Temperature: 0,
+            Stream: false);
+
+        try
+        {
+            using var response = await httpClient.PostAsJsonAsync("chat/completions", request, JsonOptions, ct);
+            var rawResponse = await response.Content.ReadAsStringAsync(ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new AiProviderUnavailableException(
+                    AppendRawPayload(
+                        $"OpenAI-compatible endpoint returned {(int)response.StatusCode} {response.ReasonPhrase}.",
+                        rawResponse),
+                    attemptCount);
+            }
+
+            OpenAiChatCompletionResponse? payload;
+            try
+            {
+                payload = JsonSerializer.Deserialize<OpenAiChatCompletionResponse>(rawResponse, JsonOptions);
+            }
+            catch (JsonException exception)
+            {
+                throw new AiInvalidOutputException(
+                    AppendRawPayload("OpenAI-compatible endpoint returned malformed chat completion JSON.", rawResponse),
+                    attemptCount,
+                    exception);
+            }
+
+            var content = payload?.Choices?.FirstOrDefault()?.Message?.Content;
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                throw new AiInvalidOutputException(
+                    AppendRawPayload("OpenAI-compatible endpoint returned empty assistant content.", rawResponse),
+                    attemptCount);
+            }
+
+            return content;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new AiProviderUnavailableException("OpenAI-compatible endpoint is unavailable.", attemptCount);
+        }
+        catch (HttpRequestException exception)
+        {
+            throw new AiProviderUnavailableException("OpenAI-compatible endpoint is unavailable.", attemptCount, exception);
+        }
+    }
+
+    private string AppendRawPayload(string message, string rawPayload) =>
+        options.StoreRawPayloads && !string.IsNullOrWhiteSpace(rawPayload)
+            ? $"{message} Raw payload: {rawPayload}"
+            : message;
+
+    private JobAnalysisResult ParseJobAnalysis(string responseText, int attemptCount)
+    {
+        OpenAiJobAnalysisResponse? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<OpenAiJobAnalysisResponse>(responseText, JsonOptions);
+        }
+        catch (JsonException exception)
+        {
+            throw new AiInvalidOutputException(
+                AppendRawPayload("OpenAI-compatible endpoint returned malformed job analysis JSON.", responseText),
+                attemptCount,
+                exception);
+        }
+
+        if (payload is null ||
+            string.IsNullOrWhiteSpace(payload.CompanyName) ||
+            string.IsNullOrWhiteSpace(payload.RoleTitle) ||
+            string.IsNullOrWhiteSpace(payload.DetectedLanguage) ||
+            string.IsNullOrWhiteSpace(payload.SelectedLanguage) ||
+            !IsSupportedLanguage(payload.DetectedLanguage) ||
+            !IsSupportedLanguage(payload.SelectedLanguage) ||
+            payload.JobSignals is null ||
+            payload.JobSignals.RequiredSkills is null ||
+            payload.JobSignals.PreferredSkills is null ||
+            payload.JobSignals.Responsibilities is null ||
+            payload.JobSignals.Signals is null)
+        {
+            throw new AiInvalidOutputException(
+                AppendRawPayload("OpenAI-compatible endpoint returned structurally invalid job analysis JSON.", responseText),
+                attemptCount);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (payload.JobSignals.Signals.Any(signal =>
+            signal is null ||
+            string.IsNullOrWhiteSpace(signal.Id) ||
+            string.IsNullOrWhiteSpace(signal.Label) ||
+            string.IsNullOrWhiteSpace(signal.Category) ||
+            !IsSupportedSignalCategory(signal.Category) ||
+            signal.Keywords is null ||
+            signal.Keywords.Count == 0 ||
+            signal.Keywords.All(string.IsNullOrWhiteSpace)))
+        {
+            throw new AiInvalidOutputException(
+                AppendRawPayload("OpenAI-compatible endpoint returned structurally invalid job signal JSON.", responseText),
+                attemptCount);
+        }
+
+        var signals = payload.JobSignals.Signals
+            .Select(signal => new JobSignal(
+                signal.Id.Trim(),
+                signal.Label.Trim(),
+                signal.Category.Trim(),
+                signal.Keywords.Where(keyword => !string.IsNullOrWhiteSpace(keyword)).Select(keyword => keyword.Trim()).ToList()))
+            .ToList();
+
+        if (signals.Count == 0)
+        {
+            throw new AiInvalidOutputException(
+                AppendRawPayload("OpenAI-compatible endpoint returned job analysis without any job signals.", responseText),
+                attemptCount);
+        }
+
+        var document = new JobSignalsDocument(
+            "OpenAiCompatible",
+            now,
+            payload.JobSignals.RequiredSkills.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim()).ToList(),
+            payload.JobSignals.PreferredSkills.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim()).ToList(),
+            payload.JobSignals.Responsibilities.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim()).ToList(),
+            signals);
+
+        return new JobAnalysisResult(
+            payload.CompanyName.Trim(),
+            payload.RoleTitle.Trim(),
+            NormalizeLanguage(payload.DetectedLanguage),
+            NormalizeLanguage(payload.SelectedLanguage),
+            document)
+        {
+            AttemptCount = attemptCount
+        };
+    }
+
+    private static string BuildJobAnalysisPrompt(JobAnalysisInput input) =>
+        $"""
+        {JobAnalysisPrompt}
+
+        Existing application metadata:
+        Company name: {input.CompanyName}
+        Role title: {input.RoleTitle}
+        Selected language: {input.SelectedLanguage ?? "(none)"}
+
+        Job posting:
+        {input.JobPostingText}
+        """;
+
+    private static string BuildRepairPrompt(string invalidJson, string validationError) =>
+        $"""
+        Repair this job analysis JSON so it matches the required contract exactly.
+        Return only strict JSON. Do not include markdown.
+
+        Validation error:
+        {validationError}
+
+        Invalid JSON:
+        {invalidJson}
+        """;
+
+    private static bool IsSupportedLanguage(string language) =>
+        string.Equals(language.Trim(), "English", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(language.Trim(), "Danish", StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeLanguage(string language) =>
+        string.Equals(language.Trim(), "Danish", StringComparison.OrdinalIgnoreCase) ? "Danish" : "English";
+
+    private static bool IsSupportedSignalCategory(string category) =>
+        string.Equals(category.Trim(), "RequiredSkill", StringComparison.Ordinal) ||
+        string.Equals(category.Trim(), "PreferredSkill", StringComparison.Ordinal) ||
+        string.Equals(category.Trim(), "Responsibility", StringComparison.Ordinal);
+
+    private static string LoadPrompt(string fileName)
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Ai", "Prompts", fileName);
+        return File.ReadAllText(path);
+    }
+
     private static AiProviderUnavailableException ProviderUnavailable() =>
         new("OpenAI-compatible workflow calls are not implemented yet.");
 
     private sealed record OpenAiModelsResponse(IReadOnlyList<OpenAiModel?>? Data);
 
     private sealed record OpenAiModel(string Id);
+
+    private sealed record OpenAiChatCompletionRequest(
+        string Model,
+        IReadOnlyList<OpenAiChatMessage> Messages,
+        [property: JsonPropertyName("response_format")] OpenAiResponseFormat ResponseFormat,
+        decimal Temperature,
+        bool Stream);
+
+    private sealed record OpenAiChatMessage(string Role, string Content);
+
+    private sealed record OpenAiResponseFormat(string Type);
+
+    private sealed record OpenAiChatCompletionResponse(IReadOnlyList<OpenAiChoice>? Choices);
+
+    private sealed record OpenAiChoice(OpenAiChatMessage? Message);
+
+    private sealed record OpenAiJobAnalysisResponse(
+        string CompanyName,
+        string RoleTitle,
+        string DetectedLanguage,
+        string SelectedLanguage,
+        OpenAiJobSignalsResponse JobSignals);
+
+    private sealed record OpenAiJobSignalsResponse(
+        IReadOnlyList<string> RequiredSkills,
+        IReadOnlyList<string> PreferredSkills,
+        IReadOnlyList<string> Responsibilities,
+        IReadOnlyList<OpenAiJobSignalResponse> Signals);
+
+    private sealed record OpenAiJobSignalResponse(
+        string Id,
+        string Label,
+        string Category,
+        IReadOnlyList<string> Keywords);
 }
