@@ -130,6 +130,18 @@ type ImportedDraftFactDecisionResponse = {
   reviewQueue: ImportedDraftFactReviewQueue;
 };
 
+type ImportedDraftFactBulkDecisionResponse = {
+  profileFacts: ProfileFact[];
+  reviewQueue: ImportedDraftFactReviewQueue;
+};
+
+type ImportedDraftFactMergeResponse = ImportedDraftFactDecisionResponse;
+
+type ImportedDraftFactSplitResponse = {
+  profileFacts: ProfileFact[];
+  reviewQueue: ImportedDraftFactReviewQueue;
+};
+
 type ApplicationForm = {
   companyName: string;
   roleTitle: string;
@@ -287,6 +299,8 @@ function App() {
   const [profile, setProfile] = useState<ProfileForm>(emptyProfile);
   const [profileFacts, setProfileFacts] = useState<ProfileFact[]>([]);
   const [importReviewQueues, setImportReviewQueues] = useState<ImportedDraftFactReviewQueue[]>([]);
+  const [selectedImportedDraftFactIds, setSelectedImportedDraftFactIds] = useState<string[]>([]);
+  const [splitImportedDraftFacts, setSplitImportedDraftFacts] = useState("");
   const [profileFactForm, setProfileFactForm] = useState<ProfileFactForm>(emptyProfileFact);
   const [selectedProfileFactId, setSelectedProfileFactId] = useState<string | null>(null);
   const [applications, setApplications] = useState<ApplicationSession[]>([]);
@@ -335,6 +349,13 @@ function App() {
           Boolean(importSessionIdFromProfileFact(fact))
       ),
     [profileFacts, selectedProfileFactId]
+  );
+  const selectedImportReviewQueue = useMemo(
+    () =>
+      selectedImportedDraftFact
+        ? importReviewQueues.find((queue) => queue.importSessionId === importSessionIdFromProfileFact(selectedImportedDraftFact))
+        : null,
+    [importReviewQueues, selectedImportedDraftFact]
   );
   const filteredApplications = useMemo(() => {
     const search = applicationSearch.trim().toLowerCase();
@@ -702,6 +723,116 @@ function App() {
     } catch (apiError) {
       setError(formatError(apiError));
     }
+  }
+
+  async function bulkReviewImportedDraftFacts(queue: ImportedDraftFactReviewQueue, decision: "approve" | "archive") {
+    const profileFactIds = selectedIdsForQueue(queue);
+    if (profileFactIds.length === 0) {
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+
+    try {
+      const response = await apiSend<ImportedDraftFactBulkDecisionResponse>(
+        `/api/profile/imports/${queue.importSessionId}/draft-facts/bulk-decision`,
+        "POST",
+        { decision, profileFactIds }
+      );
+      updateImportReviewQueue(response.reviewQueue);
+      setSelectedImportedDraftFactIds((ids) => ids.filter((id) => !profileFactIds.includes(id)));
+      await loadProfileFacts();
+      setNotice(`${profileFactIds.length} imported facts ${importDecisionPastTense(decision)}.`);
+    } catch (apiError) {
+      setError(formatError(apiError));
+    }
+  }
+
+  async function mergeImportedDraftFacts(queue: ImportedDraftFactReviewQueue) {
+    const profileFactIds = selectedIdsForQueue(queue);
+    if (profileFactIds.length < 2) {
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+
+    try {
+      const response = await apiSend<ImportedDraftFactMergeResponse>(
+        `/api/profile/imports/${queue.importSessionId}/draft-facts/merge`,
+        "POST",
+        { profileFactIds }
+      );
+      updateImportReviewQueue(response.reviewQueue);
+      setSelectedImportedDraftFactIds((ids) => ids.filter((id) => !profileFactIds.includes(id)));
+      setSelectedProfileFactId(response.profileFact.id);
+      setProfileFactForm(toProfileFactForm(response.profileFact));
+      await loadProfileFacts();
+      setNotice("Imported facts merged.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    }
+  }
+
+  async function splitImportedDraftFact() {
+    if (!selectedImportedDraftFact) {
+      return;
+    }
+
+    const importSessionId = importSessionIdFromProfileFact(selectedImportedDraftFact);
+    if (!importSessionId) {
+      return;
+    }
+
+    let profileFacts: ProfileFactForm[];
+    try {
+      profileFacts = JSON.parse(splitImportedDraftFacts) as ProfileFactForm[];
+    } catch {
+      setError(plainError("Validation blocker", "Split facts must be a JSON array of profile fact drafts."));
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+
+    try {
+      const response = await apiSend<ImportedDraftFactSplitResponse>(
+        `/api/profile/imports/${importSessionId}/draft-facts/${selectedImportedDraftFact.id}/split`,
+        "POST",
+        { profileFacts }
+      );
+      updateImportReviewQueue(response.reviewQueue);
+      setSelectedImportedDraftFactIds((ids) => ids.filter((id) => id !== selectedImportedDraftFact.id));
+      if (response.profileFacts[0]) {
+        setSelectedProfileFactId(response.profileFacts[0].id);
+        setProfileFactForm(toProfileFactForm(response.profileFacts[0]));
+      }
+      setSplitImportedDraftFacts("");
+      await loadProfileFacts();
+      setNotice("Imported fact split.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    }
+  }
+
+  function updateImportReviewQueue(reviewQueue: ImportedDraftFactReviewQueue) {
+    setImportReviewQueues((queues) =>
+      reviewQueue.draftFactCount > 0
+        ? queues.map((queue) => (queue.importSessionId === reviewQueue.importSessionId ? reviewQueue : queue))
+        : queues.filter((queue) => queue.importSessionId !== reviewQueue.importSessionId)
+    );
+  }
+
+  function toggleImportedDraftFactSelection(factId: string) {
+    setSelectedImportedDraftFactIds((ids) =>
+      ids.includes(factId) ? ids.filter((id) => id !== factId) : [...ids, factId]
+    );
+  }
+
+  function selectedIdsForQueue(queue: ImportedDraftFactReviewQueue) {
+    const queueIds = new Set(queue.groups.flatMap((group) => group.facts.map((item) => item.profileFact.id)));
+    return selectedImportedDraftFactIds.filter((id) => queueIds.has(id));
   }
 
   async function deleteApplication() {
@@ -1231,6 +1362,7 @@ function App() {
   function openProfileFact(fact: ProfileFact) {
     setSelectedProfileFactId(fact.id);
     setProfileFactForm(toProfileFactForm(fact));
+    setSplitImportedDraftFacts(importSessionIdFromProfileFact(fact) ? splitDraftTemplate(fact) : "");
     setError(null);
     setNotice(null);
   }
@@ -1238,6 +1370,7 @@ function App() {
   function startNewProfileFact() {
     setSelectedProfileFactId(null);
     setProfileFactForm(emptyProfileFact);
+    setSplitImportedDraftFacts("");
     setError(null);
     setNotice(null);
   }
@@ -1380,6 +1513,29 @@ function App() {
                         <h4>{queue.fileName}</h4>
                         <p>{queue.draftFactCount} imported draft facts grouped for review.</p>
                       </div>
+                      <div className="import-review-actions">
+                        <button
+                          type="button"
+                          disabled={selectedIdsForQueue(queue).length < 2}
+                          onClick={() => void mergeImportedDraftFacts(queue)}
+                        >
+                          Merge selected
+                        </button>
+                        <button
+                          type="button"
+                          disabled={selectedIdsForQueue(queue).length === 0}
+                          onClick={() => void bulkReviewImportedDraftFacts(queue, "approve")}
+                        >
+                          Approve selected
+                        </button>
+                        <button
+                          type="button"
+                          disabled={selectedIdsForQueue(queue).length === 0}
+                          onClick={() => void bulkReviewImportedDraftFacts(queue, "archive")}
+                        >
+                          Archive selected
+                        </button>
+                      </div>
                       {queue.groups.map((group) => (
                         <div className="import-review-group" key={group.key}>
                           <div className="import-review-group-header">
@@ -1388,24 +1544,32 @@ function App() {
                           </div>
                           <div className="import-review-items">
                             {group.facts.map((item) => (
-                              <button
+                              <article
                                 className={`import-review-item${item.hasDuplicateIndicators ? " duplicate" : ""}`}
                                 key={item.profileFact.id}
-                                type="button"
-                                onClick={() => openProfileFact(item.profileFact)}
                               >
-                                <span className="import-review-title">{item.profileFact.title}</span>
-                                <span className="import-review-context">{item.sourceContext}</span>
-                                {item.hasDuplicateIndicators && (
-                                  <span className="duplicate-indicators">
-                                    {item.duplicateIndicators.map((indicator) => (
-                                      <small key={`${indicator.scope}-${indicator.profileFactId}`}>
-                                        {duplicateScopeLabel(indicator.scope)}: {indicator.profileFactTitle} - {indicator.reason}
-                                      </small>
-                                    ))}
-                                  </span>
-                                )}
-                              </button>
+                                <label className="import-review-select">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedImportedDraftFactIds.includes(item.profileFact.id)}
+                                    onChange={() => toggleImportedDraftFactSelection(item.profileFact.id)}
+                                  />
+                                  <span>Select</span>
+                                </label>
+                                <button type="button" onClick={() => openProfileFact(item.profileFact)}>
+                                  <span className="import-review-title">{item.profileFact.title}</span>
+                                  <span className="import-review-context">{item.sourceContext}</span>
+                                  {item.hasDuplicateIndicators && (
+                                    <span className="duplicate-indicators">
+                                      {item.duplicateIndicators.map((indicator) => (
+                                        <small key={`${indicator.scope}-${indicator.profileFactId}`}>
+                                          {duplicateScopeLabel(indicator.scope)}: {indicator.profileFactTitle} - {indicator.reason}
+                                        </small>
+                                      ))}
+                                    </span>
+                                  )}
+                                </button>
+                              </article>
                             ))}
                           </div>
                         </div>
@@ -1439,6 +1603,13 @@ function App() {
                 <Textarea label="Technologies JSON" value={profileFactForm.technologies} onChange={(technologies) => setProfileFactForm({ ...profileFactForm, technologies })} />
                 <Textarea label="Allowed claims JSON" value={profileFactForm.allowedClaims} onChange={(allowedClaims) => setProfileFactForm({ ...profileFactForm, allowedClaims })} />
                 <Textarea label="Forbidden claims JSON" value={profileFactForm.forbiddenClaims} onChange={(forbiddenClaims) => setProfileFactForm({ ...profileFactForm, forbiddenClaims })} />
+                {selectedImportedDraftFact && selectedImportReviewQueue && (
+                  <Textarea
+                    label="Split into imported draft facts JSON"
+                    value={splitImportedDraftFacts}
+                    onChange={setSplitImportedDraftFacts}
+                  />
+                )}
                 <div className="form-actions">
                   {selectedImportedDraftFact && (
                     <>
@@ -1458,6 +1629,9 @@ function App() {
                       </button>
                       <button type="button" onClick={() => void reviewImportedDraftFact(selectedImportedDraftFact, "archive")}>
                         Archive import
+                      </button>
+                      <button type="button" disabled={!splitImportedDraftFacts.trim()} onClick={() => void splitImportedDraftFact()}>
+                        Split import
                       </button>
                       <button className="danger-action" type="button" onClick={() => void reviewImportedDraftFact(selectedImportedDraftFact, "reject")}>
                         Reject import
@@ -2335,6 +2509,17 @@ function profileFactFormChanged(fact: ProfileFact, form: ProfileFactForm): boole
     fact.allowedClaims !== form.allowedClaims ||
     fact.forbiddenClaims !== form.forbiddenClaims
   );
+}
+
+function splitDraftTemplate(fact: ProfileFact): string {
+  const first = toProfileFactForm(fact);
+  const second = toProfileFactForm(fact);
+  first.title = `${fact.title} - part 1`;
+  second.title = `${fact.title} - part 2`;
+  first.summary = "";
+  second.summary = "";
+
+  return JSON.stringify([first, second], null, 2);
 }
 
 function toApplicationForm(application: ApplicationForm) {

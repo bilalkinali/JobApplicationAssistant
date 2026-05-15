@@ -523,6 +523,12 @@ button:disabled {
   gap: 8px;
 }
 
+.import-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .import-review-group-header {
   display: flex;
   align-items: center;
@@ -561,13 +567,32 @@ button:disabled {
 }
 
 .import-review-item:hover,
-.import-review-item:focus-visible {
+.import-review-item:focus-within {
   border-color: #7da996;
   background: #edf5f2;
 }
 
 .import-review-item.duplicate {
   border-left: 4px solid #d3a23c;
+}
+
+.import-review-item button {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+
+.import-review-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #344250;
+  font-size: 0.82rem;
+  font-weight: 800;
 }
 
 .import-review-title {

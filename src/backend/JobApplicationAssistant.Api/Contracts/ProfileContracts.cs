@@ -92,3 +92,26 @@ public sealed record ImportedDraftFactDecisionRequest(
 public sealed record ImportedDraftFactDecisionResponse(
     ProfileFactResponse ProfileFact,
     ImportedDraftFactReviewQueueResponse ReviewQueue);
+
+public sealed record ImportedDraftFactBulkDecisionRequest(
+    string Decision,
+    IReadOnlyList<Guid> ProfileFactIds);
+
+public sealed record ImportedDraftFactBulkDecisionResponse(
+    IReadOnlyList<ProfileFactResponse> ProfileFacts,
+    ImportedDraftFactReviewQueueResponse ReviewQueue);
+
+public sealed record ImportedDraftFactMergeRequest(
+    IReadOnlyList<Guid> ProfileFactIds,
+    ProfileFactRequest? ProfileFact = null);
+
+public sealed record ImportedDraftFactMergeResponse(
+    ProfileFactResponse ProfileFact,
+    ImportedDraftFactReviewQueueResponse ReviewQueue);
+
+public sealed record ImportedDraftFactSplitRequest(
+    IReadOnlyList<ProfileFactRequest> ProfileFacts);
+
+public sealed record ImportedDraftFactSplitResponse(
+    IReadOnlyList<ProfileFactResponse> ProfileFacts,
+    ImportedDraftFactReviewQueueResponse ReviewQueue);

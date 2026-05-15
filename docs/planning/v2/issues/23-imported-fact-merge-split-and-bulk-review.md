@@ -1,6 +1,6 @@
 # Imported Fact Merge Split And Bulk Review
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,15 +15,15 @@ This slice should make review efficient after a real CV import produces many use
 
 ## Acceptance criteria
 
-- [ ] A user can merge selected imported draft facts into a single draft fact before approval.
-- [ ] Merged facts preserve useful source context and duplicate metadata where practical.
-- [ ] A user can split an imported draft fact into multiple narrower draft facts before approval.
-- [ ] Split facts preserve useful source context where practical.
-- [ ] A user can bulk approve selected imported draft facts.
-- [ ] A user can bulk archive selected imported draft facts.
-- [ ] Bulk actions do not approve duplicate or archived facts unexpectedly.
-- [ ] The frontend review queue supports merge, split, bulk approve, and bulk archive without requiring a full page reload.
-- [ ] Tests cover merge, split, bulk approve, bulk archive, and trust-boundary behavior after each action.
+- [x] A user can merge selected imported draft facts into a single draft fact before approval.
+- [x] Merged facts preserve useful source context and duplicate metadata where practical.
+- [x] A user can split an imported draft fact into multiple narrower draft facts before approval.
+- [x] Split facts preserve useful source context where practical.
+- [x] A user can bulk approve selected imported draft facts.
+- [x] A user can bulk archive selected imported draft facts.
+- [x] Bulk actions do not approve duplicate or archived facts unexpectedly.
+- [x] The frontend review queue supports merge, split, bulk approve, and bulk archive without requiring a full page reload.
+- [x] Tests cover merge, split, bulk approve, bulk archive, and trust-boundary behavior after each action.
 
 ## Blocked by
 

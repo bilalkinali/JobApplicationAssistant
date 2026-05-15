@@ -301,6 +301,144 @@ public static class ProfileEndpoints
                 ToImportedDraftFactReviewQueue(importSessionId, fileName, remainingImportFacts, facts)));
         });
 
+        group.MapPost("/imports/{importSessionId:guid}/draft-facts/bulk-decision", async Task<IResult> (Guid importSessionId, ImportedDraftFactBulkDecisionRequest request, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var decision = NormalizeOptional(request.Decision)?.ToLowerInvariant();
+            if (decision is not ("approve" or "archive"))
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(request.Decision)] = ["Decision must be approve or archive."]
+                }));
+            }
+
+            var selectedIds = request.ProfileFactIds?.Distinct().ToList() ?? new List<Guid>();
+            if (selectedIds.Count == 0)
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(request.ProfileFactIds)] = ["At least one imported draft fact is required."]
+                }));
+            }
+
+            var selectedFacts = await db.ProfileFacts
+                .Where(fact => selectedIds.Contains(fact.Id))
+                .ToListAsync(ct);
+            if (selectedFacts.Count != selectedIds.Count || selectedFacts.Any(fact => fact.Status != ProfileFactStatus.Draft || !ImportedFromSession(fact, importSessionId)))
+            {
+                return Results.NotFound(ApiError.NotFound("One or more imported draft facts were not found for this import session."));
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var status = decision == "approve" ? ProfileFactStatus.Approved : ProfileFactStatus.Archived;
+            foreach (var fact in selectedFacts)
+            {
+                fact.Status = status;
+                fact.UpdatedAt = now;
+            }
+
+            await db.SaveChangesAsync(ct);
+
+            var facts = await LoadFactsForImportReviewAsync(db, ct);
+            var fileName = ImportSnapshot(selectedFacts[0])?.FileName ?? "Imported CV";
+            return Results.Ok(new ImportedDraftFactBulkDecisionResponse(
+                selectedFacts.Select(ToResponse).ToList(),
+                ToImportedDraftFactReviewQueue(importSessionId, fileName, DraftImportFacts(facts, importSessionId), facts)));
+        });
+
+        group.MapPost("/imports/{importSessionId:guid}/draft-facts/merge", async Task<IResult> (Guid importSessionId, ImportedDraftFactMergeRequest request, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            var selectedIds = request.ProfileFactIds?.Distinct().ToList() ?? new List<Guid>();
+            if (selectedIds.Count < 2)
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(request.ProfileFactIds)] = ["At least two imported draft facts are required."]
+                }));
+            }
+
+            if (request.ProfileFact is not null)
+            {
+                var errors = Validate(request.ProfileFact);
+                if (errors.Count > 0)
+                {
+                    return Results.BadRequest(ApiError.Validation(errors));
+                }
+            }
+
+            var selectedFacts = await db.ProfileFacts
+                .Where(fact => selectedIds.Contains(fact.Id))
+                .ToListAsync(ct);
+            if (selectedFacts.Count != selectedIds.Count || selectedFacts.Any(fact => fact.Status != ProfileFactStatus.Draft || !ImportedFromSession(fact, importSessionId)))
+            {
+                return Results.NotFound(ApiError.NotFound("One or more imported draft facts were not found for this import session."));
+            }
+
+            var orderedFacts = selectedFacts.OrderBy(fact => selectedIds.IndexOf(fact.Id)).ToList();
+            var now = DateTimeOffset.UtcNow;
+            var mergedFact = orderedFacts[0];
+            ApplyMergedImportedFact(mergedFact, orderedFacts, request.ProfileFact, now);
+
+            foreach (var archivedFact in orderedFacts.Skip(1))
+            {
+                archivedFact.Status = ProfileFactStatus.Archived;
+                archivedFact.UpdatedAt = now;
+            }
+
+            await db.SaveChangesAsync(ct);
+
+            var facts = await LoadFactsForImportReviewAsync(db, ct);
+            var fileName = ImportSnapshot(mergedFact)?.FileName ?? "Imported CV";
+            return Results.Ok(new ImportedDraftFactMergeResponse(
+                ToResponse(mergedFact),
+                ToImportedDraftFactReviewQueue(importSessionId, fileName, DraftImportFacts(facts, importSessionId), facts)));
+        });
+
+        group.MapPost("/imports/{importSessionId:guid}/draft-facts/{factId:guid}/split", async Task<IResult> (Guid importSessionId, Guid factId, ImportedDraftFactSplitRequest request, ApplicationDbContext db, CancellationToken ct) =>
+        {
+            if (request.ProfileFacts is null || request.ProfileFacts.Count < 2)
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(request.ProfileFacts)] = ["At least two split imported draft facts are required."]
+                }));
+            }
+
+            for (var index = 0; index < request.ProfileFacts.Count; index++)
+            {
+                var errors = Validate(request.ProfileFacts[index]);
+                if (errors.Count > 0)
+                {
+                    return Results.BadRequest(ApiError.Validation(errors.ToDictionary(
+                        pair => $"{nameof(request.ProfileFacts)}[{index}].{pair.Key}",
+                        pair => pair.Value)));
+                }
+            }
+
+            var fact = await db.ProfileFacts.FindAsync([factId], ct);
+            if (fact is null || fact.Status != ProfileFactStatus.Draft || !ImportedFromSession(fact, importSessionId))
+            {
+                return Results.NotFound(ApiError.NotFound("Imported draft fact was not found for this import session."));
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            fact.Status = ProfileFactStatus.Archived;
+            fact.UpdatedAt = now;
+
+            var splitFacts = request.ProfileFacts
+                .Select(splitRequest => ToSplitImportedFact(fact, splitRequest, now))
+                .ToList();
+            db.ProfileFacts.AddRange(splitFacts);
+
+            await db.SaveChangesAsync(ct);
+
+            var facts = await LoadFactsForImportReviewAsync(db, ct);
+            var fileName = ImportSnapshot(fact)?.FileName ?? "Imported CV";
+            return Results.Ok(new ImportedDraftFactSplitResponse(
+                splitFacts.Select(ToResponse).ToList(),
+                ToImportedDraftFactReviewQueue(importSessionId, fileName, DraftImportFacts(facts, importSessionId), facts)));
+        });
+
         return app;
     }
 
@@ -384,6 +522,98 @@ public static class ProfileEndpoints
             CreatedAt = now,
             UpdatedAt = now
         };
+
+    private static ProfileFact ToSplitImportedFact(ProfileFact originalFact, ProfileFactRequest request, DateTimeOffset now) =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            Type = request.Type!.Trim(),
+            Title = request.Title!.Trim(),
+            Summary = request.Summary!.Trim(),
+            Status = ProfileFactStatus.Draft,
+            FactItems = NormalizeJsonArray(request.FactItems),
+            Technologies = NormalizeJsonArray(request.Technologies),
+            AllowedClaims = NormalizeJsonArray(request.AllowedClaims),
+            ForbiddenClaims = NormalizeJsonArray(request.ForbiddenClaims),
+            SourceDocumentIds = originalFact.SourceDocumentIds,
+            OriginalImportedSnapshot = originalFact.OriginalImportedSnapshot,
+            ManuallyEdited = true,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+    private static void ApplyMergedImportedFact(ProfileFact mergedFact, IReadOnlyList<ProfileFact> sourceFacts, ProfileFactRequest? request, DateTimeOffset now)
+    {
+        if (request is not null)
+        {
+            ApplyProfileFactRequest(mergedFact, request, markEdited: true);
+            mergedFact.Status = ProfileFactStatus.Draft;
+        }
+        else
+        {
+            mergedFact.Type = MostCommonValue(sourceFacts.Select(fact => fact.Type), "ImportedCv", 80);
+            mergedFact.Title = NormalizeRequired(string.Join(" + ", sourceFacts.Select(fact => fact.Title).Distinct(StringComparer.OrdinalIgnoreCase)), "Merged imported CV fact", 200);
+            mergedFact.Summary = NormalizeRequired(string.Join("\n\n", sourceFacts.Select(fact => fact.Summary).Where(summary => !string.IsNullOrWhiteSpace(summary)).Distinct(StringComparer.OrdinalIgnoreCase)), "Merged imported CV fact.", 4000);
+            mergedFact.FactItems = SerializeJsonArray(sourceFacts.SelectMany(fact => JsonArrayValues(fact.FactItems)).ToList());
+            mergedFact.Technologies = SerializeJsonArray(sourceFacts.SelectMany(fact => JsonArrayValues(fact.Technologies)).ToList());
+            mergedFact.AllowedClaims = SerializeJsonArray(sourceFacts.SelectMany(fact => JsonArrayValues(fact.AllowedClaims)).ToList());
+            mergedFact.ForbiddenClaims = SerializeJsonArray(sourceFacts.SelectMany(fact => JsonArrayValues(fact.ForbiddenClaims)).ToList());
+            mergedFact.ManuallyEdited = true;
+        }
+
+        mergedFact.SourceDocumentIds = SerializeJsonArray(sourceFacts.SelectMany(fact => JsonArrayValues(fact.SourceDocumentIds)).ToList());
+        mergedFact.OriginalImportedSnapshot = MergedImportSnapshot(sourceFacts);
+        mergedFact.UpdatedAt = now;
+    }
+
+    private static string MergedImportSnapshot(IReadOnlyList<ProfileFact> sourceFacts)
+    {
+        var firstSnapshot = sourceFacts.Select(ImportSnapshot).FirstOrDefault(snapshot => snapshot is not null);
+        var sourceContexts = sourceFacts
+            .Select(SourceContext)
+            .Where(context => !string.IsNullOrWhiteSpace(context))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var extractedTextPreviews = sourceFacts
+            .Select(fact => ImportSnapshot(fact)?.ExtractedTextPreview)
+            .Where(preview => !string.IsNullOrWhiteSpace(preview))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(2)
+            .ToList();
+
+        return JsonSerializer.Serialize(new
+        {
+            importSessionId = firstSnapshot?.ImportSessionId ?? Guid.Empty,
+            fileName = firstSnapshot?.FileName ?? "Imported CV",
+            importedAt = firstSnapshot?.ImportedAt ?? DateTimeOffset.UtcNow,
+            sourceContext = string.Join("\n\n", sourceContexts),
+            extractedTextPreview = string.Join("\n\n", extractedTextPreviews)
+        }, JsonOptions);
+    }
+
+    private static string MostCommonValue(IEnumerable<string> values, string fallback, int maxLength) =>
+        NormalizeRequired(
+            values
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .GroupBy(value => value.Trim(), StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(group => group.Count())
+                .ThenBy(group => group.Key)
+                .Select(group => group.Key)
+                .FirstOrDefault() ?? fallback,
+            fallback,
+            maxLength);
+
+    private static async Task<List<ProfileFact>> LoadFactsForImportReviewAsync(ApplicationDbContext db, CancellationToken ct) =>
+        await db.ProfileFacts
+            .AsNoTracking()
+            .OrderBy(fact => fact.Type)
+            .ThenBy(fact => fact.Title)
+            .ToListAsync(ct);
+
+    private static List<ProfileFact> DraftImportFacts(IReadOnlyList<ProfileFact> facts, Guid importSessionId) =>
+        facts
+            .Where(fact => fact.Status == ProfileFactStatus.Draft && ImportedFromSession(fact, importSessionId))
+            .ToList();
 
     private static void ValidateAssistedProfileImportResult(AssistedProfileImportResult result)
     {

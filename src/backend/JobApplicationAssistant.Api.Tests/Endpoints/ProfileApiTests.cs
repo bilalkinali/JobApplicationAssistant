@@ -420,6 +420,147 @@ public sealed class ProfileApiTests
     }
 
     [Fact]
+    public async Task PostImportedDraftFactMerge_combines_selected_drafts_and_archives_sources()
+    {
+        await using var factory = MultiFactImportFactory();
+        using var client = factory.CreateClient();
+        var import = await ImportSingleBatchAsync(client);
+        var selectedIds = import.ProfileFacts.Take(2).Select(fact => fact.Id).ToList();
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/profile/imports/{import.ImportSessionId:N}/draft-facts/merge",
+            new ImportedDraftFactMergeRequest(selectedIds));
+
+        response.EnsureSuccessStatusCode();
+        var merge = await response.Content.ReadFromJsonAsync<ImportedDraftFactMergeResponse>();
+        Assert.NotNull(merge);
+        Assert.Equal("Draft", merge.ProfileFact.Status);
+        Assert.Contains("Alpha API", merge.ProfileFact.Title);
+        Assert.Contains("Beta UI", merge.ProfileFact.Title);
+        Assert.Contains(".NET", merge.ProfileFact.Technologies);
+        Assert.Contains("React", merge.ProfileFact.Technologies);
+        Assert.Contains("Alpha source", merge.ProfileFact.OriginalImportedSnapshot);
+        Assert.Contains("Beta source", merge.ProfileFact.OriginalImportedSnapshot);
+        Assert.Equal(2, merge.ReviewQueue.DraftFactCount);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.Equal(1, db.ProfileFacts.Count(fact => fact.Status == ProfileFactStatus.Archived));
+        Assert.Equal(2, db.ProfileFacts.Count(fact => fact.Status == ProfileFactStatus.Draft));
+        Assert.Empty(db.ProfileFacts.Where(fact => fact.Status == ProfileFactStatus.Approved));
+    }
+
+    [Fact]
+    public async Task PostImportedDraftFactSplit_creates_narrower_drafts_and_preserves_source_context()
+    {
+        await using var factory = MultiFactImportFactory();
+        using var client = factory.CreateClient();
+        var import = await ImportSingleBatchAsync(client);
+        var importedFact = import.ProfileFacts[0];
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/profile/imports/{import.ImportSessionId:N}/draft-facts/{importedFact.Id:N}/split",
+            new ImportedDraftFactSplitRequest(
+            [
+                new ProfileFactRequest("Project", "Alpha API backend", "Built backend APIs.", "Draft", """["Built backend"]""", """[".NET"]""", """["Built backend APIs"]""", "[]"),
+                new ProfileFactRequest("Project", "Alpha API delivery", "Shipped the API workflow.", "Draft", """["Shipped workflow"]""", """["Azure"]""", """["Shipped API workflow"]""", "[]")
+            ]));
+
+        response.EnsureSuccessStatusCode();
+        var split = await response.Content.ReadFromJsonAsync<ImportedDraftFactSplitResponse>();
+        Assert.NotNull(split);
+        Assert.Equal(2, split.ProfileFacts.Count);
+        Assert.All(split.ProfileFacts, fact =>
+        {
+            Assert.Equal("Draft", fact.Status);
+            Assert.True(fact.ManuallyEdited);
+            Assert.Contains(import.ImportSessionId.ToString("N"), fact.SourceDocumentIds);
+            Assert.Contains("Alpha source", fact.OriginalImportedSnapshot);
+        });
+        Assert.Equal(4, split.ReviewQueue.DraftFactCount);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.Equal(ProfileFactStatus.Archived, db.ProfileFacts.Single(fact => fact.Id == importedFact.Id).Status);
+        Assert.Equal(4, db.ProfileFacts.Count(fact => fact.Status == ProfileFactStatus.Draft));
+    }
+
+    [Fact]
+    public async Task PostImportedDraftFactBulkDecision_approves_only_selected_imported_drafts()
+    {
+        await using var factory = MultiFactImportFactory();
+        using var client = factory.CreateClient();
+        var import = await ImportSingleBatchAsync(client);
+        var selectedIds = import.ProfileFacts.Take(2).Select(fact => fact.Id).ToList();
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/profile/imports/{import.ImportSessionId:N}/draft-facts/bulk-decision",
+            new ImportedDraftFactBulkDecisionRequest("approve", selectedIds));
+
+        response.EnsureSuccessStatusCode();
+        var bulk = await response.Content.ReadFromJsonAsync<ImportedDraftFactBulkDecisionResponse>();
+        Assert.NotNull(bulk);
+        Assert.All(bulk.ProfileFacts, fact => Assert.Equal("Approved", fact.Status));
+        Assert.Equal(1, bulk.ReviewQueue.DraftFactCount);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.Equal(2, db.ProfileFacts.Count(fact => fact.Status == ProfileFactStatus.Approved));
+        Assert.Equal(1, db.ProfileFacts.Count(fact => fact.Status == ProfileFactStatus.Draft));
+        Assert.Empty(db.ProfileFacts.Where(fact => fact.Status == ProfileFactStatus.Archived));
+    }
+
+    [Fact]
+    public async Task PostImportedDraftFactBulkDecision_archives_selected_imported_drafts_without_approving()
+    {
+        await using var factory = MultiFactImportFactory();
+        using var client = factory.CreateClient();
+        var import = await ImportSingleBatchAsync(client);
+        var selectedIds = import.ProfileFacts.Take(2).Select(fact => fact.Id).ToList();
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/profile/imports/{import.ImportSessionId:N}/draft-facts/bulk-decision",
+            new ImportedDraftFactBulkDecisionRequest("archive", selectedIds));
+
+        response.EnsureSuccessStatusCode();
+        var bulk = await response.Content.ReadFromJsonAsync<ImportedDraftFactBulkDecisionResponse>();
+        Assert.NotNull(bulk);
+        Assert.All(bulk.ProfileFacts, fact => Assert.Equal("Archived", fact.Status));
+        Assert.Equal(1, bulk.ReviewQueue.DraftFactCount);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.Equal(2, db.ProfileFacts.Count(fact => fact.Status == ProfileFactStatus.Archived));
+        Assert.Equal(1, db.ProfileFacts.Count(fact => fact.Status == ProfileFactStatus.Draft));
+        Assert.Empty(db.ProfileFacts.Where(fact => fact.Status == ProfileFactStatus.Approved));
+    }
+
+    [Fact]
+    public async Task PostImportedDraftFactBulkDecision_rejects_archived_or_untrusted_fact_ids()
+    {
+        await using var factory = MultiFactImportFactory();
+        using var client = factory.CreateClient();
+        var import = await ImportSingleBatchAsync(client);
+        var archivedFact = import.ProfileFacts[0];
+        var archiveResponse = await client.PostAsJsonAsync(
+            $"/api/profile/imports/{import.ImportSessionId:N}/draft-facts/{archivedFact.Id:N}/decision",
+            new ImportedDraftFactDecisionRequest("archive"));
+        archiveResponse.EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/profile/imports/{import.ImportSessionId:N}/draft-facts/bulk-decision",
+            new ImportedDraftFactBulkDecisionRequest("approve", [archivedFact.Id, import.ProfileFacts[1].Id]));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.Equal(ProfileFactStatus.Archived, db.ProfileFacts.Single(fact => fact.Id == archivedFact.Id).Status);
+        Assert.Equal(ProfileFactStatus.Draft, db.ProfileFacts.Single(fact => fact.Id == import.ProfileFacts[1].Id).Status);
+        Assert.Empty(db.ProfileFacts.Where(fact => fact.Status == ProfileFactStatus.Approved));
+    }
+
+    [Fact]
     public async Task Approved_imported_fact_can_support_evidence_matching()
     {
         await using var factory = new TestApplicationFactory(services =>
@@ -725,6 +866,54 @@ public sealed class ProfileApiTests
         Assert.Single(import.ProfileFacts);
         return import;
     }
+
+    private static async Task<AssistedProfileImportResponse> ImportSingleBatchAsync(HttpClient client)
+    {
+        var importResponse = await PostPdfImportAsync(client);
+        importResponse.EnsureSuccessStatusCode();
+        var import = await importResponse.Content.ReadFromJsonAsync<AssistedProfileImportResponse>();
+        Assert.NotNull(import);
+        Assert.Equal(3, import.ProfileFacts.Count);
+        return import;
+    }
+
+    private static TestApplicationFactory MultiFactImportFactory() =>
+        new(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor("Alpha API. Beta UI. Gamma cloud."));
+            services.RemoveAll<IAiProvider>();
+            services.AddSingleton<IAiProvider>(new StubAiProvider(new AssistedProfileImportResult(
+            [
+                new AssistedProfileImportFact(
+                    "Project",
+                    "Alpha API",
+                    "Built .NET APIs for workflow automation.",
+                    ["Built APIs"],
+                    [".NET"],
+                    ["Built .NET APIs"],
+                    [],
+                    "Alpha source context."),
+                new AssistedProfileImportFact(
+                    "Project",
+                    "Beta UI",
+                    "Built React UI for workflow automation.",
+                    ["Built UI"],
+                    ["React"],
+                    ["Built React UI"],
+                    [],
+                    "Beta source context."),
+                new AssistedProfileImportFact(
+                    "Project",
+                    "Gamma cloud",
+                    "Configured Azure deployment automation.",
+                    ["Configured deployment"],
+                    ["Azure"],
+                    ["Configured Azure deployment"],
+                    [],
+                    "Gamma source context.")
+            ])));
+        });
 
     private static JsonContent OpenAiChatCompletionContent(string content) =>
         JsonContent.Create(new
