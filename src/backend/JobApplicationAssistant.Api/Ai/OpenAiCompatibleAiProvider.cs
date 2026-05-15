@@ -198,7 +198,7 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
                 new OpenAiChatMessage("system", "Return only strict JSON. Do not include markdown."),
                 new OpenAiChatMessage("user", prompt)
             ],
-            new OpenAiResponseFormat("json_object"),
+            new OpenAiResponseFormat("text"),
             Temperature: 0,
             Stream: false);
         var rawRequest = JsonSerializer.Serialize(request, JsonOptions);

@@ -7,7 +7,11 @@
       "launchBrowser": false,
       "applicationUrl": "http://localhost:5108",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "Ai__Provider": "OpenAiCompatible",
+        "Ai__Endpoint": "http://localhost:1234/v1",
+        "Ai__Model": "qwen2.5-coder-14b-instruct",
+        "Ai__StoreRawPayloads": "false"
       }
     }
   }

@@ -469,11 +469,7 @@ public static class ApplicationEndpoints
             }
             catch (AiProviderException exception)
             {
-                run.Status = "Failed";
-                run.ErrorCode = exception.ErrorCode;
-                run.ErrorMessage = exception.Message;
-                run.AttemptCount = exception.AttemptCount;
-                run.CompletedAt = DateTimeOffset.UtcNow;
+                RecordFailedRun(run, exception);
                 await db.SaveChangesAsync(ct);
 
                 return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
@@ -565,11 +561,7 @@ public static class ApplicationEndpoints
             }
             catch (AiProviderException exception)
             {
-                run.Status = "Failed";
-                run.ErrorCode = exception.ErrorCode;
-                run.ErrorMessage = exception.Message;
-                run.AttemptCount = exception.AttemptCount;
-                run.CompletedAt = DateTimeOffset.UtcNow;
+                RecordFailedRun(run, exception);
                 await db.SaveChangesAsync(ct);
 
                 return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
@@ -809,11 +801,7 @@ public static class ApplicationEndpoints
             }
             catch (AiProviderException exception)
             {
-                run.Status = "Failed";
-                run.ErrorCode = exception.ErrorCode;
-                run.ErrorMessage = exception.Message;
-                run.AttemptCount = exception.AttemptCount;
-                run.CompletedAt = DateTimeOffset.UtcNow;
+                RecordFailedRun(run, exception);
                 await db.SaveChangesAsync(ct);
 
                 return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
@@ -896,11 +884,7 @@ public static class ApplicationEndpoints
             }
             catch (AiProviderException exception)
             {
-                auditRun.Status = "Failed";
-                auditRun.ErrorCode = exception.ErrorCode;
-                auditRun.ErrorMessage = exception.Message;
-                auditRun.AttemptCount = exception.AttemptCount;
-                auditRun.CompletedAt = DateTimeOffset.UtcNow;
+                RecordFailedRun(auditRun, exception);
             }
 
             await db.SaveChangesAsync(ct);
@@ -991,11 +975,7 @@ public static class ApplicationEndpoints
             }
             catch (AiProviderException exception)
             {
-                run.Status = "Failed";
-                run.ErrorCode = exception.ErrorCode;
-                run.ErrorMessage = exception.Message;
-                run.AttemptCount = exception.AttemptCount;
-                run.CompletedAt = DateTimeOffset.UtcNow;
+                RecordFailedRun(run, exception);
                 await db.SaveChangesAsync(ct);
 
                 return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
@@ -1177,14 +1157,23 @@ public static class ApplicationEndpoints
         return "Current";
     }
 
+    private const int MaxAiRunErrorMessageLength = 4000;
+
     private static void RecordFailedRun(AiRun run, AiProviderException exception)
     {
         run.Status = "Failed";
         run.ErrorCode = exception.ErrorCode;
-        run.ErrorMessage = exception.Message;
+        run.ErrorMessage = TruncateAiRunErrorMessage(exception.Message);
         run.AttemptCount = exception.AttemptCount;
         run.CompletedAt = DateTimeOffset.UtcNow;
     }
+
+    private static string TruncateAiRunErrorMessage(string message) =>
+        message.Length <= MaxAiRunErrorMessageLength
+            ? message
+            : string.Concat(
+                message.AsSpan(0, MaxAiRunErrorMessageLength - 34),
+                " ... [truncated for AiRun limit]");
 
     private static string ToPreparationFailureStatus(AiProviderException exception) =>
         string.Equals(exception.ErrorCode, "ProviderUnavailable", StringComparison.OrdinalIgnoreCase)

@@ -315,18 +315,24 @@ V2.0 proves the core assistant-led application workflow: guided next action, rea
 
 Assisted profile fact import is valuable, but it expands V2 beyond the core assistant-led application workflow. After V2.0 is stable, V2.1 should reduce profile setup friction.
 
+V2.1 is essential to the product UX because the application workflow depends on approved profile facts. If the user only has one manually entered skill or a thin profile, job analysis and evidence matching can run, but the generated application will not have enough credible personal evidence. The app should let the user upload a CV or paste CV text, ask the configured AI provider to extract as much useful profile information as possible, and then guide the user through review.
+
 V2.1 term:
 
 **Draft Profile Fact**
 A profile fact created from imported text that cannot support matching or generation until the user reviews and approves it.
 
 - Add pasted text import for CV text, project notes, work history, achievement bullets, and raw personal notes.
+- Add CV file upload, with PDF and DOCX as the highest-value initial formats.
 - Extract draft profile facts through the AI provider.
+- Extract technical skills, tools, platforms, programming languages, projects, work history, responsibilities, achievements, education, certifications, languages, domains, and allowed claims where present.
 - Save imported facts as `Draft`.
 - Preserve an original imported snapshot when useful.
 - Add a review queue for imported draft facts.
-- Optimize the review queue for quick approve, edit, and archive decisions.
+- Optimize the review queue for quick approve, edit, merge, split, archive, and reject decisions.
+- Detect duplicate or overlapping facts against the existing profile and within the import batch.
 - Require user approval before imported facts can support matching or generation.
+- Keep CV layout editing, CV generation, and automatic approval out of scope.
 
 **Acceptance Criteria**
 

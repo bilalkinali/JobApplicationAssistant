@@ -347,7 +347,7 @@ public sealed class ApplicationWorkflowApiTests
         var requestJson = await Assert.Single(handler.Requests).Content!.ReadAsStringAsync();
         Assert.Contains("chat/completions", handler.Requests[0].RequestUri!.ToString());
         Assert.Contains("\"model\":\"local-model\"", requestJson);
-        Assert.Contains("\"response_format\":{\"type\":\"json_object\"}", requestJson);
+        Assert.Contains("\"response_format\":{\"type\":\"text\"}", requestJson);
         Assert.Contains("Return only strict JSON", requestJson);
 
         using var scope = factory.Services.CreateScope();
@@ -497,6 +497,38 @@ public sealed class ApplicationWorkflowApiTests
         Assert.Contains("We need .NET.", run.ErrorMessage);
         Assert.Contains("Raw response:", run.ErrorMessage);
         Assert.Contains("model unavailable", run.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task AnalyzeJob_with_openai_compatible_long_raw_payload_failure_fits_ai_run_error_limit()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                ReasonPhrase = "Service Unavailable",
+                Content = JsonContent.Create(new { error = new { message = "model unavailable" } })
+            }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(
+            handler,
+            model: "local-model",
+            storeRawPayloads: true);
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, string.Concat(Enumerable.Repeat("We need .NET. ", 500)));
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/analyze-job", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns);
+        Assert.Equal("Failed", run.Status);
+        Assert.Equal("ProviderUnavailable", run.ErrorCode);
+        Assert.NotNull(run.ErrorMessage);
+        Assert.True(run.ErrorMessage.Length <= 4000);
+        Assert.Contains("[truncated for AiRun limit]", run.ErrorMessage);
     }
 
     [Fact]
@@ -1100,7 +1132,7 @@ public sealed class ApplicationWorkflowApiTests
         var requestJson = await Assert.Single(handler.Requests).Content!.ReadAsStringAsync();
         Assert.Contains("chat/completions", handler.Requests[0].RequestUri!.ToString());
         Assert.Contains("\"model\":\"local-model\"", requestJson);
-        Assert.Contains("\"response_format\":{\"type\":\"json_object\"}", requestJson);
+        Assert.Contains("\"response_format\":{\"type\":\"text\"}", requestJson);
         Assert.Contains("Return only strict JSON", requestJson);
         Assert.Contains(approvedFact.Id.ToString(), requestJson);
         Assert.DoesNotContain("Draft Kubernetes work", requestJson);
@@ -2109,7 +2141,7 @@ public sealed class ApplicationWorkflowApiTests
         Assert.Equal(2, handler.Requests.Count);
         var draftRequestJson = await handler.Requests[0].Content!.ReadAsStringAsync();
         Assert.Contains("\"model\":\"local-model\"", draftRequestJson);
-        Assert.Contains("\"response_format\":{\"type\":\"json_object\"}", draftRequestJson);
+        Assert.Contains("\"response_format\":{\"type\":\"text\"}", draftRequestJson);
         Assert.Contains("Return only strict JSON", draftRequestJson);
         Assert.Contains("Approved API work", draftRequestJson);
         var auditRequestJson = await handler.Requests[1].Content!.ReadAsStringAsync();
@@ -3017,7 +3049,7 @@ public sealed class ApplicationWorkflowApiTests
 
         var requestJson = await Assert.Single(handler.Requests).Content!.ReadAsStringAsync();
         Assert.Contains("\"model\":\"local-model\"", requestJson);
-        Assert.Contains("\"response_format\":{\"type\":\"json_object\"}", requestJson);
+        Assert.Contains("\"response_format\":{\"type\":\"text\"}", requestJson);
         Assert.Contains("Return only strict JSON", requestJson);
         Assert.Contains("match-dotnet-test", requestJson);
 
