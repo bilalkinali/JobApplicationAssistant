@@ -1,6 +1,6 @@
 # Gap Decisions in Evidence Review
 
-Status: in-progress
+Status: done
 Type: AFK
 
 ## Parent
@@ -24,7 +24,7 @@ This slice should let the user review matched evidence as before while also mark
 - [x] Unresolved unmatched requirements keep evidence review as the guided next action.
 - [x] Resolved unmatched requirements allow the workflow to move toward draft generation when approved evidence exists.
 - [x] The UI distinguishes approved evidence from learning-interest gap handling.
-- [ ] Focused backend and frontend tests cover saving, updating, displaying, and using gap decisions for guided next action selection.
+- [x] Focused backend and frontend tests cover saving, updating, displaying, and using gap decisions for guided next action selection.
 - [x] No job-local custom fact creation, draft generation changes, provider UX redesign, or profile fact import is introduced.
 
 ## Blocked by
