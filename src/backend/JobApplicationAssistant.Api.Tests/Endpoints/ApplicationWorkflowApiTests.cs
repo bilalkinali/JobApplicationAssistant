@@ -492,6 +492,10 @@ public sealed class ApplicationWorkflowApiTests
         var run = Assert.Single(db.AiRuns);
         Assert.Equal("Failed", run.Status);
         Assert.Equal("ProviderUnavailable", run.ErrorCode);
+        Assert.Contains("Raw request:", run.ErrorMessage);
+        Assert.Contains("chat/completions", handler.Requests[0].RequestUri!.ToString());
+        Assert.Contains("We need .NET.", run.ErrorMessage);
+        Assert.Contains("Raw response:", run.ErrorMessage);
         Assert.Contains("model unavailable", run.ErrorMessage);
     }
 
@@ -501,7 +505,10 @@ public sealed class ApplicationWorkflowApiTests
         var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(
             new Queue<HttpResponseMessage>(),
             new TaskCanceledException("timed out"));
-        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(
+            handler,
+            model: "local-model",
+            storeRawPayloads: true);
         using var client = factory.CreateClient();
         var application = await CreateApplicationAsync(client, "We need .NET.");
 
@@ -515,6 +522,8 @@ public sealed class ApplicationWorkflowApiTests
         Assert.Equal("Failed", run.Status);
         Assert.Equal("ProviderUnavailable", run.ErrorCode);
         Assert.Equal(1, run.AttemptCount);
+        Assert.Contains("Raw request:", run.ErrorMessage);
+        Assert.Contains("Error context: Request timed out.", run.ErrorMessage);
     }
 
     [Fact]
@@ -2211,6 +2220,8 @@ public sealed class ApplicationWorkflowApiTests
         Assert.Equal("OpenAiCompatible", run.Provider);
         Assert.Equal("local-model", run.Model);
         Assert.Equal(1, run.AttemptCount);
+        Assert.DoesNotContain("Raw request:", run.ErrorMessage);
+        Assert.DoesNotContain("Raw response:", run.ErrorMessage);
     }
 
     [Fact]

@@ -1,6 +1,6 @@
 # OpenAI-Compatible Provider Failure and Raw Payload Hardening
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -23,16 +23,16 @@ The completed slice should make the local real AI path ready for V2 testing acro
 
 ## Acceptance criteria
 
-- [ ] Invalid JSON, timeout, unreachable endpoint, non-success HTTP status, model/API error responses, and empty assistant content are mapped to graceful provider failures across all OpenAI-compatible operations.
-- [ ] Failed provider calls record `AiRun` details consistently with existing workflow behavior.
-- [ ] Failed provider calls store or log raw request, response, and error context when `StoreRawPayloads` is enabled.
-- [ ] Raw payload behavior remains disabled when `StoreRawPayloads` is false.
-- [ ] Failed analysis, matching, generation, and audit calls do not corrupt prepared state, evidence review state, current draft state, or current audit state.
-- [ ] Provider diagnostics remain clear after failures and include provider, endpoint, model, endpoint reachability, and model configured or available state where possible.
-- [ ] The app never silently falls back from `OpenAiCompatible` to Fake AI after a real-provider failure.
-- [ ] Fake AI remains clearly separate as deterministic demo/test mode and still compiles.
-- [ ] Focused regression tests cover cross-workflow failure behavior and raw-payload behavior for the real provider path.
-- [ ] Existing V2 workflow, Fake AI, and Ollama tests continue to pass or are intentionally updated only where provider-neutral contracts changed.
+- [x] Invalid JSON, timeout, unreachable endpoint, non-success HTTP status, model/API error responses, and empty assistant content are mapped to graceful provider failures across all OpenAI-compatible operations.
+- [x] Failed provider calls record `AiRun` details consistently with existing workflow behavior.
+- [x] Failed provider calls store or log raw request, response, and error context when `StoreRawPayloads` is enabled.
+- [x] Raw payload behavior remains disabled when `StoreRawPayloads` is false.
+- [x] Failed analysis, matching, generation, and audit calls do not corrupt prepared state, evidence review state, current draft state, or current audit state.
+- [x] Provider diagnostics remain clear after failures and include provider, endpoint, model, endpoint reachability, and model configured or available state where possible.
+- [x] The app never silently falls back from `OpenAiCompatible` to Fake AI after a real-provider failure.
+- [x] Fake AI remains clearly separate as deterministic demo/test mode and still compiles.
+- [x] Focused regression tests cover cross-workflow failure behavior and raw-payload behavior for the real provider path.
+- [x] Existing V2 workflow, Fake AI, and Ollama tests continue to pass or are intentionally updated only where provider-neutral contracts changed.
 
 ## Blocked by
 

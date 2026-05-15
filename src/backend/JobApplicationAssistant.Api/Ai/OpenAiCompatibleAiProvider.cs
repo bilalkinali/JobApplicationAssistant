@@ -201,6 +201,7 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
             new OpenAiResponseFormat("json_object"),
             Temperature: 0,
             Stream: false);
+        var rawRequest = JsonSerializer.Serialize(request, JsonOptions);
 
         try
         {
@@ -209,8 +210,9 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
             if (!response.IsSuccessStatusCode)
             {
                 throw new AiProviderUnavailableException(
-                    AppendRawPayload(
+                    AppendRawContext(
                         $"OpenAI-compatible endpoint returned {(int)response.StatusCode} {response.ReasonPhrase}.",
+                        rawRequest,
                         rawResponse),
                     attemptCount);
             }
@@ -240,11 +242,16 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new AiProviderUnavailableException("OpenAI-compatible endpoint is unavailable.", attemptCount);
+            throw new AiProviderUnavailableException(
+                AppendRawContext("OpenAI-compatible endpoint is unavailable.", rawRequest, errorContext: "Request timed out."),
+                attemptCount);
         }
         catch (HttpRequestException exception)
         {
-            throw new AiProviderUnavailableException("OpenAI-compatible endpoint is unavailable.", attemptCount, exception);
+            throw new AiProviderUnavailableException(
+                AppendRawContext("OpenAI-compatible endpoint is unavailable.", rawRequest, errorContext: exception.Message),
+                attemptCount,
+                exception);
         }
     }
 
@@ -252,6 +259,34 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         options.StoreRawPayloads && !string.IsNullOrWhiteSpace(rawPayload)
             ? $"{message} Raw payload: {rawPayload}"
             : message;
+
+    private string AppendRawContext(string message, string rawRequest, string? rawResponse = null, string? errorContext = null)
+    {
+        if (!options.StoreRawPayloads)
+        {
+            return message;
+        }
+
+        var details = new List<string>();
+        if (!string.IsNullOrWhiteSpace(rawRequest))
+        {
+            details.Add($"Raw request: {rawRequest}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(rawResponse))
+        {
+            details.Add($"Raw response: {rawResponse}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(errorContext))
+        {
+            details.Add($"Error context: {errorContext}");
+        }
+
+        return details.Count == 0
+            ? message
+            : $"{message} {string.Join(' ', details)}";
+    }
 
     private JobAnalysisResult ParseJobAnalysis(string responseText, int attemptCount)
     {
