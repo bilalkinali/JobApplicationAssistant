@@ -71,7 +71,22 @@ public sealed record DraftGenerationInput(
     string? ApplicantName,
     string? TonePreference,
     IReadOnlyList<EvidenceMatch> ApprovedEvidence,
-    IReadOnlyList<UnmatchedRequirement> UnmatchedRequirements);
+    IReadOnlyList<UnmatchedRequirement> UnmatchedRequirements,
+    IReadOnlyList<DraftGapDecision> GapDecisions,
+    IReadOnlyList<DraftCustomFact> ApprovedCustomFacts);
+
+public sealed record DraftGapDecision(
+    string UnmatchedRequirementId,
+    string Decision,
+    Guid? CustomFactId);
+
+public sealed record DraftCustomFact(
+    Guid Id,
+    string UnmatchedRequirementId,
+    string Title,
+    string Summary,
+    IReadOnlyList<string> Technologies,
+    IReadOnlyList<string> AllowedClaims);
 
 public sealed record DraftGenerationResult(
     string CoverLetterText,

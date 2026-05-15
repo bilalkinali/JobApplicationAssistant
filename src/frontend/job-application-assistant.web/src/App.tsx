@@ -104,6 +104,7 @@ type ApplicationSession = ApplicationForm & {
   evidenceMatches: string;
   unmatchedRequirements: string;
   approvedEvidence: string;
+  gapDecisions: string;
   customFacts: string;
   lastPreparedAt: string | null;
   preparationStatus: string;
@@ -169,11 +170,21 @@ type EvidenceMatch = {
 
 type CustomFact = {
   id: string;
+  unmatchedRequirementId: string;
   title: string;
   summary: string;
   technologies?: string[];
   allowedClaims?: string[];
   status: "PendingConfirmation" | "Approved" | "Rejected" | string;
+  createdAt: string;
+  reviewedAt: string | null;
+};
+
+type CustomFactDraft = {
+  title: string;
+  summary: string;
+  technologies: string;
+  allowedClaims: string;
 };
 
 type UnmatchedRequirement = {
@@ -182,6 +193,14 @@ type UnmatchedRequirement = {
   requirement: string;
   category: string;
   recommendation: string;
+};
+
+type GapDecisionValue = "Ignore" | "MentionAsLearningInterest" | "CoveredByCustomFact";
+
+type GapDecision = {
+  unmatchedRequirementId: string;
+  decision: GapDecisionValue;
+  customFactId?: string;
 };
 
 type ClaimAudit = {
@@ -234,6 +253,8 @@ function App() {
   const [applicationReadinessFilter, setApplicationReadinessFilter] = useState("All");
   const [includeArchivedApplications, setIncludeArchivedApplications] = useState(false);
   const [approvedEvidenceDraft, setApprovedEvidenceDraft] = useState<EvidenceMatch[]>([]);
+  const [gapDecisionsDraft, setGapDecisionsDraft] = useState<GapDecision[]>([]);
+  const [customFactDrafts, setCustomFactDrafts] = useState<Record<string, CustomFactDraft>>({});
   const [generatedDraftForm, setGeneratedDraftForm] = useState<GeneratedDraftForm>({
     coverLetterText: "",
     shortMotivationText: ""
@@ -290,16 +311,32 @@ function App() {
     () => parseJsonArray<EvidenceMatch>(selectedApplication?.approvedEvidence),
     [selectedApplication?.approvedEvidence]
   );
+  const savedGapDecisions = useMemo(
+    () => parseJsonArray<GapDecision>(selectedApplication?.gapDecisions),
+    [selectedApplication?.gapDecisions]
+  );
   const customFacts = useMemo(
     () => parseJsonArray<CustomFact>(selectedApplication?.customFacts),
     [selectedApplication?.customFacts]
+  );
+  const savedApprovedCustomFactEvidenceCount = useMemo(
+    () => countApprovedCustomFactEvidence(savedGapDecisions, unmatchedRequirements, customFacts),
+    [customFacts, savedGapDecisions, unmatchedRequirements]
+  );
+  const savedApprovedCustomFactEvidence = useMemo(
+    () => approvedCustomFactEvidenceItems(savedGapDecisions, unmatchedRequirements, customFacts),
+    [customFacts, savedGapDecisions, unmatchedRequirements]
+  );
+  const currentGapDecisionCount = useMemo(
+    () => countCurrentGapDecisions(savedGapDecisions, unmatchedRequirements, customFacts),
+    [customFacts, savedGapDecisions, unmatchedRequirements]
   );
   const claimAudit = useMemo(
     () => parseClaimAudit(selectedApplication?.generatedDraft?.claimAudit),
     [selectedApplication?.generatedDraft?.claimAudit]
   );
   const hasSavedJobPosting = Boolean(selectedApplication?.jobPostingText.trim());
-  const hasSavedApprovedEvidence = savedApprovedEvidence.length > 0;
+  const hasSavedApprovedEvidence = savedApprovedEvidence.length + savedApprovedCustomFactEvidenceCount > 0;
   const hasGeneratedDraft = Boolean(selectedApplication?.generatedDraft);
   const auditSummary = useMemo(() => summarizeClaimAudit(claimAudit), [claimAudit]);
   const hasUnsavedDraftEdits =
@@ -345,9 +382,11 @@ function App() {
       getDraftGenerationState({
         selectedApplicationId,
         hasSavedJobPosting,
-        hasSavedApprovedEvidence
+        hasSavedApprovedEvidence,
+        unmatchedRequirementCount: unmatchedRequirements.length,
+        savedGapDecisionCount: currentGapDecisionCount
       }),
-    [hasSavedApprovedEvidence, hasSavedJobPosting, selectedApplicationId]
+    [currentGapDecisionCount, hasSavedApprovedEvidence, hasSavedJobPosting, selectedApplicationId, unmatchedRequirements.length]
   );
   const guidedNextAction = useMemo(
     () =>
@@ -356,16 +395,21 @@ function App() {
         hasSavedJobPosting,
         preparationStatus: selectedApplication?.preparationStatus ?? "NotStarted",
         approvedProfileFactCount: approvedProfileFacts.length,
-        savedApprovedEvidenceCount: savedApprovedEvidence.length,
+        savedApprovedEvidenceCount: savedApprovedEvidence.length + savedApprovedCustomFactEvidenceCount,
+        unmatchedRequirementCount: unmatchedRequirements.length,
+        savedGapDecisionCount: currentGapDecisionCount,
         hasGeneratedDraft
       }),
     [
       approvedProfileFacts.length,
+      currentGapDecisionCount,
       hasGeneratedDraft,
       hasSavedJobPosting,
       savedApprovedEvidence.length,
+      savedApprovedCustomFactEvidenceCount,
       selectedApplication?.preparationStatus,
-      selectedApplicationId
+      selectedApplicationId,
+      unmatchedRequirements.length
     ]
   );
   const workflowBusyReason = workflowBusy ? "Wait for the current workflow action to finish." : null;
@@ -384,6 +428,14 @@ function App() {
   useEffect(() => {
     setApprovedEvidenceDraft(savedApprovedEvidence);
   }, [selectedApplicationId, savedApprovedEvidence]);
+
+  useEffect(() => {
+    setGapDecisionsDraft(savedGapDecisions);
+  }, [selectedApplicationId, savedGapDecisions]);
+
+  useEffect(() => {
+    setCustomFactDrafts({});
+  }, [selectedApplicationId]);
 
   useEffect(() => {
     setGeneratedDraftForm({
@@ -647,13 +699,77 @@ function App() {
     setWorkflowBusy("review");
 
     try {
-      const saved = await apiSend<ApplicationSession>(
+      await apiSend<ApplicationSession>(
         `/api/applications/${selectedApplicationId}/approved-evidence`,
         "PUT",
         { approvedEvidence: JSON.stringify(approvedEvidenceDraft) }
       );
+      const reviewed = await apiSend<ApplicationSession>(
+        `/api/applications/${selectedApplicationId}/gap-decisions`,
+        "PUT",
+        { gapDecisions: JSON.stringify(gapDecisionsDraft) }
+      );
+      replaceApplication(reviewed);
+      setNotice("Evidence review saved.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    } finally {
+      setWorkflowBusy(null);
+    }
+  }
+
+  async function createCustomFact(unmatchedRequirementId: string) {
+    if (!selectedApplicationId) {
+      setError(plainError("Validation blocker", "Save the application before adding job-local facts."));
+      return;
+    }
+
+    const draft = customFactDrafts[unmatchedRequirementId] ?? emptyCustomFactDraft();
+
+    setError(null);
+    setNotice(null);
+    setWorkflowBusy(`custom-fact-${unmatchedRequirementId}`);
+
+    try {
+      const saved = await apiSend<ApplicationSession>(
+        `/api/applications/${selectedApplicationId}/custom-facts`,
+        "POST",
+        {
+          unmatchedRequirementId,
+          title: draft.title,
+          summary: draft.summary,
+          technologies: splitLines(draft.technologies),
+          allowedClaims: splitLines(draft.allowedClaims)
+        }
+      );
       replaceApplication(saved);
-      setNotice("Approved evidence saved.");
+      setCustomFactDrafts((current) => ({ ...current, [unmatchedRequirementId]: emptyCustomFactDraft() }));
+      setNotice("Job-local custom fact added for review.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    } finally {
+      setWorkflowBusy(null);
+    }
+  }
+
+  async function updateCustomFactStatus(customFactId: string, status: "Approved" | "Rejected") {
+    if (!selectedApplicationId) {
+      setError(plainError("Validation blocker", "Save the application before reviewing job-local facts."));
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setWorkflowBusy(`custom-fact-status-${customFactId}`);
+
+    try {
+      const saved = await apiSend<ApplicationSession>(
+        `/api/applications/${selectedApplicationId}/custom-facts/${customFactId}/status`,
+        "PUT",
+        { status }
+      );
+      replaceApplication(saved);
+      setNotice(status === "Approved" ? "Job-local custom fact approved." : "Job-local custom fact rejected.");
     } catch (apiError) {
       setError(formatError(apiError));
     } finally {
@@ -917,6 +1033,24 @@ function App() {
 
   function removeApprovedEvidence(matchId: string) {
     setApprovedEvidenceDraft((current) => current.filter((item) => item.id !== matchId));
+  }
+
+  function decideGap(unmatchedRequirementId: string, decision: GapDecisionValue, customFactId?: string) {
+    setGapDecisionsDraft((current) => [
+      ...current.filter((item) => item.unmatchedRequirementId !== unmatchedRequirementId),
+      { unmatchedRequirementId, decision, customFactId }
+    ]);
+  }
+
+  function updateCustomFactDraft(unmatchedRequirementId: string, changes: Partial<CustomFactDraft>) {
+    setCustomFactDrafts((current) => ({
+      ...current,
+      [unmatchedRequirementId]: {
+        ...emptyCustomFactDraft(),
+        ...current[unmatchedRequirementId],
+        ...changes
+      }
+    }));
   }
 
   function startNewApplication() {
@@ -1245,8 +1379,8 @@ function App() {
                     <StatusBadge tone={preparationStatusTone(selectedApplication.preparationStatus)}>
                       {preparationStatusLabel(selectedApplication.preparationStatus)}
                     </StatusBadge>
-                    <StatusBadge tone={savedApprovedEvidence.length > 0 ? "approved" : "pending"}>
-                      {approvedEvidenceCountLabel(savedApprovedEvidence.length)}
+                    <StatusBadge tone={hasSavedApprovedEvidence ? "approved" : "pending"}>
+                      {approvedEvidenceCountLabel(savedApprovedEvidence.length + savedApprovedCustomFactEvidenceCount)}
                     </StatusBadge>
                     <StatusBadge tone={hasGeneratedDraft ? "approved" : "draft"}>
                       {hasGeneratedDraft ? "Draft saved" : "No draft"}
@@ -1320,20 +1454,126 @@ function App() {
                   <section className="review-column">
                     <h4>Unmatched requirements</h4>
                     {unmatchedRequirements.length === 0 && <p className="empty-state compact">No unmatched requirements recorded.</p>}
-                    {unmatchedRequirements.map((requirement) => (
-                      <article className="evidence-card muted" key={requirement.id}>
-                        <strong>{requirement.requirement}</strong>
-                        <span>{requirement.category}</span>
-                        <p>{requirement.recommendation}</p>
-                      </article>
-                    ))}
+                    {unmatchedRequirements.map((requirement) => {
+                      const gapDecision = gapDecisionForRequirement(gapDecisionsDraft, requirement.id);
+                      const requirementCustomFacts = customFactsForRequirement(customFacts, requirement.id);
+                      const approvedCustomFacts = requirementCustomFacts.filter((fact) => fact.status === "Approved");
+                      const customFactDraft = customFactDrafts[requirement.id] ?? emptyCustomFactDraft();
+
+                      return (
+                        <article className="evidence-card muted" key={requirement.id}>
+                          <div className="gap-card-heading">
+                            <strong>{requirement.requirement}</strong>
+                            {gapDecision ? (
+                              <StatusBadge tone={gapDecision.decision === "Ignore" ? "neutral" : "pending"}>
+                                {gapDecisionLabel(gapDecision.decision)}
+                              </StatusBadge>
+                            ) : (
+                              <StatusBadge tone="pending">Needs decision</StatusBadge>
+                            )}
+                          </div>
+                          <span>{requirement.category}</span>
+                          <p>{requirement.recommendation}</p>
+                          <div className="gap-decision-actions" role="group" aria-label={`Gap decision for ${requirement.requirement}`}>
+                            <button
+                              type="button"
+                              className={gapDecision?.decision === "Ignore" ? "selected" : ""}
+                              onClick={() => decideGap(requirement.id, "Ignore")}
+                            >
+                              Ignore
+                            </button>
+                            <button
+                              type="button"
+                              className={gapDecision?.decision === "MentionAsLearningInterest" ? "selected" : ""}
+                              onClick={() => decideGap(requirement.id, "MentionAsLearningInterest")}
+                            >
+                              Mention as learning interest
+                            </button>
+                            {approvedCustomFacts.map((fact) => (
+                              <button
+                                type="button"
+                                className={gapDecision?.decision === "CoveredByCustomFact" && gapDecision.customFactId === fact.id ? "selected" : ""}
+                                key={fact.id}
+                                onClick={() => decideGap(requirement.id, "CoveredByCustomFact", fact.id)}
+                              >
+                                Cover with {fact.title}
+                              </button>
+                            ))}
+                          </div>
+
+                          <div className="custom-fact-editor">
+                            <Input
+                              label="Custom fact title"
+                              value={customFactDraft.title}
+                              onChange={(title) => updateCustomFactDraft(requirement.id, { title })}
+                            />
+                            <Textarea
+                              label="Custom fact summary"
+                              value={customFactDraft.summary}
+                              onChange={(summary) => updateCustomFactDraft(requirement.id, { summary })}
+                            />
+                            <Textarea
+                              label="Technologies"
+                              value={customFactDraft.technologies}
+                              onChange={(technologies) => updateCustomFactDraft(requirement.id, { technologies })}
+                            />
+                            <Textarea
+                              label="Allowed claims"
+                              value={customFactDraft.allowedClaims}
+                              onChange={(allowedClaims) => updateCustomFactDraft(requirement.id, { allowedClaims })}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => createCustomFact(requirement.id)}
+                              disabled={workflowBusy !== null}
+                              title={disabledTitle(workflowBusy !== null, workflowBusyReason)}
+                            >
+                              {workflowBusy === `custom-fact-${requirement.id}` ? "Adding..." : "Add job-local fact"}
+                            </button>
+                          </div>
+
+                          {requirementCustomFacts.length > 0 && (
+                            <div className="custom-fact-list compact">
+                              {requirementCustomFacts.map((fact) => (
+                                <article className={`custom-fact ${customFactStatusClass(fact.status)}`} key={fact.id}>
+                                  <StatusBadge tone={customFactStatusTone(fact.status)}>{customFactStatusLabel(fact.status)}</StatusBadge>
+                                  <strong>{fact.title}</strong>
+                                  <p>{fact.summary}</p>
+                                  {fact.technologies && fact.technologies.length > 0 && <small>{fact.technologies.join(", ")}</small>}
+                                  {fact.status === "PendingConfirmation" && (
+                                    <div className="custom-fact-actions">
+                                      <button
+                                        type="button"
+                                        onClick={() => updateCustomFactStatus(fact.id, "Approved")}
+                                        disabled={workflowBusy !== null}
+                                        title={disabledTitle(workflowBusy !== null, workflowBusyReason)}
+                                      >
+                                        Approve
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => updateCustomFactStatus(fact.id, "Rejected")}
+                                        disabled={workflowBusy !== null}
+                                        title={disabledTitle(workflowBusy !== null, workflowBusyReason)}
+                                      >
+                                        Reject
+                                      </button>
+                                    </div>
+                                  )}
+                                </article>
+                              ))}
+                            </div>
+                          )}
+                        </article>
+                      );
+                    })}
                   </section>
                 </div>
 
                 <div className="workflow-step">
                   <div>
-                    <h4>3. Approved evidence</h4>
-                    <p>Save only evidence you approve as support for generated claims. Draft, archived, and removed evidence is not sent to draft generation.</p>
+                    <h4>3. Evidence review decisions</h4>
+                    <p>Save approved evidence as support for generated claims. Gap decisions are review guidance, not approved evidence.</p>
                   </div>
                   <button
                     className="secondary-workflow-action"
@@ -1345,22 +1585,52 @@ function App() {
                       workflowBusyReason ?? "Save the application before reviewing evidence."
                     )}
                   >
-                    {workflowBusy === "review" ? "Saving..." : "Save approved evidence"}
+                    {workflowBusy === "review" ? "Saving..." : "Save evidence review"}
                   </button>
                 </div>
 
                 <div className="approved-list">
-                  {approvedEvidenceDraft.length === 0 && <p className="empty-state compact">No approved evidence selected.</p>}
+                  {approvedEvidenceDraft.length === 0 && savedApprovedCustomFactEvidence.length === 0 && (
+                    <p className="empty-state compact">No approved evidence selected.</p>
+                  )}
                   {approvedEvidenceDraft.map((match) => (
                     <article className="approved-item" key={match.id}>
                       <div>
-                        <StatusBadge tone="approved">Approved evidence</StatusBadge>
+                        <StatusBadge tone="approved">Approved profile evidence</StatusBadge>
                         <strong>{match.signal}</strong>
                         <span>{match.profileFactTitle}</span>
                       </div>
                       <button type="button" onClick={() => removeApprovedEvidence(match.id)}>Remove</button>
                     </article>
                   ))}
+                  {savedApprovedCustomFactEvidence.map((item) => (
+                    <article className="approved-item custom-proof" key={item.fact.id}>
+                      <div>
+                        <StatusBadge tone="approved">Approved job-local fact</StatusBadge>
+                        <strong>{item.requirement.requirement}</strong>
+                        <span>{item.fact.title}</span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+
+                <div className="gap-decision-list">
+                  {gapDecisionsDraft.length === 0 && <p className="empty-state compact">No gap decisions selected.</p>}
+                  {gapDecisionsDraft.map((decision) => {
+                    const requirement = unmatchedRequirements.find((item) => item.id === decision.unmatchedRequirementId);
+
+                    return (
+                      <article className={`gap-decision-item ${gapDecisionClass(decision)}`} key={decision.unmatchedRequirementId}>
+                        <div>
+                          <StatusBadge tone={gapDecisionTone(decision)}>
+                            {gapDecisionLabel(decision.decision)}
+                          </StatusBadge>
+                          <strong>{requirement?.requirement ?? decision.unmatchedRequirementId}</strong>
+                          <span>{gapDecisionSummary(decision, customFacts)}</span>
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
 
                 <section className="custom-facts-panel">
@@ -1793,6 +2063,7 @@ function toApplicationSession(application: ApplicationSession): ApplicationSessi
     evidenceMatches: application.evidenceMatches || "[]",
     unmatchedRequirements: application.unmatchedRequirements || "[]",
     approvedEvidence: application.approvedEvidence || "[]",
+    gapDecisions: application.gapDecisions || "[]",
     customFacts: application.customFacts || "[]",
     lastPreparedAt: application.lastPreparedAt ?? null,
     preparationStatus: application.preparationStatus ?? "NotStarted",
@@ -1950,14 +2221,171 @@ function applicationStatusLabel(status: string): string {
 }
 
 function applicationNextActionLabel(application: ApplicationSession, approvedProfileFactCount: number): string {
+  const unmatchedRequirements = parseJsonArray<UnmatchedRequirement>(application.unmatchedRequirements);
+  const gapDecisions = parseJsonArray<GapDecision>(application.gapDecisions);
+  const customFacts = parseJsonArray<CustomFact>(application.customFacts);
+
   return getGuidedNextAction({
     selectedApplicationId: application.id,
     hasSavedJobPosting: Boolean(application.jobPostingText.trim()),
     preparationStatus: application.preparationStatus,
     approvedProfileFactCount,
-    savedApprovedEvidenceCount: parseJsonArray<EvidenceMatch>(application.approvedEvidence).length,
+    savedApprovedEvidenceCount:
+      parseJsonArray<EvidenceMatch>(application.approvedEvidence).length +
+      countApprovedCustomFactEvidence(gapDecisions, unmatchedRequirements, customFacts),
+    unmatchedRequirementCount: unmatchedRequirements.length,
+    savedGapDecisionCount: countCurrentGapDecisions(gapDecisions, unmatchedRequirements, customFacts),
     hasGeneratedDraft: application.hasGeneratedDraft
   }).title;
+}
+
+function countCurrentGapDecisions(
+  decisions: GapDecision[],
+  requirements: UnmatchedRequirement[],
+  customFacts: CustomFact[] = []
+): number {
+  const requirementIds = new Set(requirements.map((requirement) => requirement.id));
+  const approvedCustomFactsById = new Map(
+    customFacts
+      .filter((fact) => fact.status === "Approved")
+      .map((fact) => [fact.id, fact])
+  );
+  const decidedRequirementIds = new Set(
+    decisions
+      .filter((decision) => {
+        if (!requirementIds.has(decision.unmatchedRequirementId)) {
+          return false;
+        }
+
+        if (decision.decision !== "CoveredByCustomFact") {
+          return true;
+        }
+
+        const customFact = decision.customFactId ? approvedCustomFactsById.get(decision.customFactId) : null;
+        return customFact?.unmatchedRequirementId === decision.unmatchedRequirementId;
+      })
+      .map((decision) => decision.unmatchedRequirementId)
+  );
+
+  return decidedRequirementIds.size;
+}
+
+function countApprovedCustomFactEvidence(
+  decisions: GapDecision[],
+  requirements: UnmatchedRequirement[],
+  customFacts: CustomFact[]
+): number {
+  const requirementIds = new Set(requirements.map((requirement) => requirement.id));
+  const approvedCustomFactsById = new Map(
+    customFacts
+      .filter((fact) => fact.status === "Approved")
+      .map((fact) => [fact.id, fact])
+  );
+
+  return new Set(
+    decisions
+      .filter((decision) => {
+        if (decision.decision !== "CoveredByCustomFact" || !requirementIds.has(decision.unmatchedRequirementId)) {
+          return false;
+        }
+
+        const customFact = decision.customFactId ? approvedCustomFactsById.get(decision.customFactId) : null;
+        return customFact?.unmatchedRequirementId === decision.unmatchedRequirementId;
+      })
+      .map((decision) => decision.unmatchedRequirementId)
+  ).size;
+}
+
+function approvedCustomFactEvidenceItems(
+  decisions: GapDecision[],
+  requirements: UnmatchedRequirement[],
+  customFacts: CustomFact[]
+): Array<{ requirement: UnmatchedRequirement; fact: CustomFact }> {
+  const requirementsById = new Map(requirements.map((requirement) => [requirement.id, requirement]));
+  const approvedCustomFactsById = new Map(
+    customFacts
+      .filter((fact) => fact.status === "Approved")
+      .map((fact) => [fact.id, fact])
+  );
+
+  return decisions
+    .filter((decision) => decision.decision === "CoveredByCustomFact" && decision.customFactId)
+    .map((decision) => {
+      const requirement = requirementsById.get(decision.unmatchedRequirementId);
+      const fact = approvedCustomFactsById.get(decision.customFactId ?? "");
+
+      return requirement && fact?.unmatchedRequirementId === requirement.id ? { requirement, fact } : null;
+    })
+    .filter((item): item is { requirement: UnmatchedRequirement; fact: CustomFact } => item !== null);
+}
+
+function customFactsForRequirement(facts: CustomFact[], unmatchedRequirementId: string): CustomFact[] {
+  return facts.filter((fact) => fact.unmatchedRequirementId === unmatchedRequirementId);
+}
+
+function gapDecisionForRequirement(decisions: GapDecision[], unmatchedRequirementId: string): GapDecision | undefined {
+  return decisions.find((decision) => decision.unmatchedRequirementId === unmatchedRequirementId);
+}
+
+function gapDecisionLabel(decision: GapDecisionValue): string {
+  switch (decision) {
+    case "Ignore":
+      return "Ignored gap";
+    case "MentionAsLearningInterest":
+      return "Learning-interest gap";
+    case "CoveredByCustomFact":
+      return "Covered by custom fact";
+    default:
+      return decision;
+  }
+}
+
+function gapDecisionTone(decision: GapDecision): string {
+  if (decision.decision === "Ignore") {
+    return "neutral";
+  }
+
+  return decision.decision === "CoveredByCustomFact" ? "approved" : "pending";
+}
+
+function gapDecisionClass(decision: GapDecision): string {
+  switch (decision.decision) {
+    case "Ignore":
+      return "ignored";
+    case "CoveredByCustomFact":
+      return "covered";
+    default:
+      return "learning";
+  }
+}
+
+function gapDecisionSummary(decision: GapDecision, customFacts: CustomFact[]): string {
+  switch (decision.decision) {
+    case "Ignore":
+      return "Will not be called out in the review guidance.";
+    case "CoveredByCustomFact": {
+      const customFact = customFacts.find((fact) => fact.id === decision.customFactId);
+      return customFact ? `Supported by approved job-local fact: ${customFact.title}.` : "Requires an approved job-local custom fact.";
+    }
+    default:
+      return "May be framed cautiously as interest, not proof.";
+  }
+}
+
+function emptyCustomFactDraft(): CustomFactDraft {
+  return {
+    title: "",
+    summary: "",
+    technologies: "",
+    allowedClaims: ""
+  };
+}
+
+function splitLines(value: string): string[] {
+  return value
+    .split(/\r?\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function guidedActionButtonLabel(label: string, kind: string, workflowBusy: string | null): string {

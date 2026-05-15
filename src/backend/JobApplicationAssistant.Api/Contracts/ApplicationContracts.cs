@@ -24,6 +24,7 @@ public sealed record ApplicationResponse(
     string EvidenceMatches,
     string UnmatchedRequirements,
     string ApprovedEvidence,
+    string GapDecisions,
     string CustomFacts,
     DateTimeOffset? LastPreparedAt,
     string PreparationStatus,
@@ -39,6 +40,17 @@ public sealed record PrepareApplicationResponse(
     string Message);
 
 public sealed record ApprovedEvidenceRequest(string? ApprovedEvidence);
+
+public sealed record GapDecisionsRequest(string? GapDecisions);
+
+public sealed record CustomFactRequest(
+    string? UnmatchedRequirementId,
+    string? Title,
+    string? Summary,
+    string[]? Technologies,
+    string[]? AllowedClaims);
+
+public sealed record CustomFactStatusRequest(string? Status);
 
 public sealed record ApplicationStatusRequest(string Status);
 

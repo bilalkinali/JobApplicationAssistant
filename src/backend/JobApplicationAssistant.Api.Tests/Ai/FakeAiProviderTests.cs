@@ -171,7 +171,9 @@ public sealed class FakeAiProviderTests
             "Bilal Kinali",
             "direct and specific",
             approvedEvidence,
-            unmatchedRequirements);
+            unmatchedRequirements,
+            [],
+            []);
 
         var first = await provider.GenerateDraftAsync(input, CancellationToken.None);
         var second = await provider.GenerateDraftAsync(input, CancellationToken.None);
@@ -187,6 +189,65 @@ public sealed class FakeAiProviderTests
         Assert.Contains("Kubernetes", first.CoverLetterText);
         Assert.Contains("area to learn", first.CoverLetterText);
         Assert.Contains("Approved API work", first.ShortMotivationText);
+    }
+
+    [Fact]
+    public async Task GenerateDraftAsync_respects_saved_gap_decisions_deterministically()
+    {
+        var provider = new FakeAiProvider();
+        var customFactId = Guid.NewGuid();
+        var approvedEvidence = new[]
+        {
+            new EvidenceMatch(
+                $"custom-fact-{customFactId:N}",
+                "docker",
+                "Docker",
+                "PreferredSkill",
+                customFactId,
+                "Client deployment work",
+                "Shipped a Docker-based deployment for a client.",
+                ["Docker"])
+        };
+        var unmatchedRequirements = new[]
+        {
+            new UnmatchedRequirement("unmatched-kubernetes", "kubernetes", "Kubernetes", "PreferredSkill", "Ignore if unsupported."),
+            new UnmatchedRequirement("unmatched-azure", "azure", "Azure", "PreferredSkill", "Mention as learning interest."),
+            new UnmatchedRequirement("unmatched-docker", "docker", "Docker", "PreferredSkill", "Covered by custom fact.")
+        };
+        var input = new DraftGenerationInput(
+            "Northwind",
+            "Platform Developer",
+            "English",
+            "Bilal Kinali",
+            null,
+            approvedEvidence,
+            unmatchedRequirements,
+            [
+                new DraftGapDecision("unmatched-kubernetes", "Ignore", null),
+                new DraftGapDecision("unmatched-azure", "MentionAsLearningInterest", null),
+                new DraftGapDecision("unmatched-docker", "CoveredByCustomFact", customFactId)
+            ],
+            [
+                new DraftCustomFact(
+                    customFactId,
+                    "unmatched-docker",
+                    "Client deployment work",
+                    "Shipped a Docker-based deployment for a client.",
+                    ["Docker"],
+                    ["Shipped Docker deployment"])
+            ]);
+
+        var first = await provider.GenerateDraftAsync(input, CancellationToken.None);
+        var second = await provider.GenerateDraftAsync(input, CancellationToken.None);
+
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(first),
+            System.Text.Json.JsonSerializer.Serialize(second));
+        Assert.DoesNotContain("Kubernetes", first.CoverLetterText);
+        Assert.Contains("Azure", first.CoverLetterText);
+        Assert.Contains("area to learn", first.CoverLetterText);
+        Assert.Contains("Client deployment work", first.CoverLetterText);
+        Assert.Contains("Shipped a Docker-based deployment for a client.", first.CoverLetterText);
     }
 
     [Fact]
@@ -240,5 +301,44 @@ public sealed class FakeAiProviderTests
                 Assert.Equal("I may be a fit for the team.", claim.Text);
                 Assert.Empty(claim.EvidenceIds);
             });
+    }
+
+    [Fact]
+    public async Task AuditClaimsAsync_preserves_gap_and_custom_fact_trust_boundary()
+    {
+        var provider = new FakeAiProvider();
+        var approvedCustomFactId = Guid.NewGuid();
+        var approvedEvidence = new[]
+        {
+            new EvidenceMatch(
+                $"custom-fact-{approvedCustomFactId:N}",
+                "docker",
+                "Docker",
+                "PreferredSkill",
+                approvedCustomFactId,
+                "Approved Docker deployment",
+                "Shipped Docker deployment for a client.",
+                ["Docker"])
+        };
+        var input = new ClaimAuditInput(
+            """
+            I am interested in learning Azure.
+            I have Azure platform experience.
+            Built React UI.
+            Shipped Docker deployment for a client.
+            """,
+            "",
+            approvedEvidence);
+
+        var result = await provider.AuditClaimsAsync(input, CancellationToken.None);
+
+        Assert.Contains(result.Claims, claim => claim.Text == "I am interested in learning Azure." && claim.Status == "NeedsReview");
+        Assert.Contains(result.Claims, claim => claim.Text == "I have Azure platform experience." && claim.Status == "Unsupported");
+        Assert.Contains(result.Claims, claim => claim.Text == "Built React UI." && claim.Status == "Unsupported");
+        Assert.Contains(
+            result.Claims,
+            claim => claim.Text == "Shipped Docker deployment for a client." &&
+                claim.Status == "Supported" &&
+                claim.EvidenceIds.Contains($"custom-fact-{approvedCustomFactId:N}"));
     }
 }

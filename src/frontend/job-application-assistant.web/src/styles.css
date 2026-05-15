@@ -836,12 +836,33 @@ button:disabled {
   justify-self: start;
 }
 
-.approved-list {
+.gap-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.gap-decision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gap-decision-actions button.selected {
+  border-color: #5b6b7a;
+  background: #2f3b46;
+  color: #ffffff;
+}
+
+.approved-list,
+.gap-decision-list {
   display: grid;
   gap: 10px;
 }
 
-.approved-item {
+.approved-item,
+.gap-decision-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -852,14 +873,41 @@ button:disabled {
   background: #edf5f2;
 }
 
-.approved-item div {
+.gap-decision-item {
+  border-color: #d9d7d0;
+  background: #ffffff;
+}
+
+.gap-decision-item.ignored {
+  background: #f7f7f3;
+}
+
+.gap-decision-item.learning {
+  border-color: #e2d2a9;
+  background: #fff8e8;
+}
+
+.gap-decision-item.covered {
+  border-color: #c7ded4;
+  background: #edf5f2;
+}
+
+.approved-item.custom-proof {
+  border-color: #b9d8cd;
+  background: #f3faf7;
+}
+
+.approved-item div,
+.gap-decision-item div {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
 .approved-item strong,
-.approved-item span {
+.approved-item span,
+.gap-decision-item strong,
+.gap-decision-item span {
   overflow-wrap: anywhere;
 }
 
@@ -884,10 +932,32 @@ button:disabled {
   background: #ffffff;
 }
 
+.custom-fact-editor {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #d7dde2;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.custom-fact-editor .field {
+  display: grid;
+  gap: 4px;
+}
+
+.custom-fact-editor textarea {
+  min-height: 76px;
+}
+
 .custom-fact-list {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+
+.custom-fact-list.compact {
+  grid-template-columns: 1fr;
 }
 
 .custom-fact {
@@ -922,6 +992,12 @@ button:disabled {
 
 .custom-fact small {
   color: #64717c;
+}
+
+.custom-fact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .draft-editor {

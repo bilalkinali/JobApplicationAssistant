@@ -16,6 +16,8 @@ export type DraftGenerationInput = {
   selectedApplicationId: string | null;
   hasSavedJobPosting: boolean;
   hasSavedApprovedEvidence: boolean;
+  unmatchedRequirementCount: number;
+  savedGapDecisionCount: number;
 };
 
 export type ActionState = {
@@ -153,6 +155,13 @@ export function getDraftGenerationState(input: DraftGenerationInput): ActionStat
     };
   }
 
+  if (input.savedGapDecisionCount < input.unmatchedRequirementCount) {
+    return {
+      canRun: false,
+      message: "Decide how to handle each unmatched requirement before generating a draft."
+    };
+  }
+
   return {
     canRun: true,
     message: "Generate or edit the current cover letter and short motivation."
@@ -165,6 +174,8 @@ export function getGuidedNextAction(input: {
   preparationStatus: string;
   approvedProfileFactCount: number;
   savedApprovedEvidenceCount: number;
+  unmatchedRequirementCount: number;
+  savedGapDecisionCount: number;
   hasGeneratedDraft: boolean;
 }): GuidedNextAction {
   if (!input.selectedApplicationId || !input.hasSavedJobPosting) {
@@ -236,6 +247,17 @@ export function getGuidedNextAction(input: {
       canRun: true,
       tone: "info",
       message: "Preparation is complete. Approve the matches that may support generated application text."
+    };
+  }
+
+  if (input.savedGapDecisionCount < input.unmatchedRequirementCount) {
+    return {
+      kind: "review-evidence",
+      title: "Resolve evidence gaps",
+      buttonLabel: "Review gaps",
+      canRun: true,
+      tone: "info",
+      message: "Approved evidence is saved. Decide how to handle each unmatched requirement before moving on."
     };
   }
 
