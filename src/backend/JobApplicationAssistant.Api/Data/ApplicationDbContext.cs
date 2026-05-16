@@ -101,8 +101,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             entity.Property(run => run.Status).HasMaxLength(80);
             entity.Property(run => run.ErrorCode).HasMaxLength(120);
             entity.Property(run => run.ErrorMessage).HasMaxLength(4000);
-            entity.Property(run => run.InputSummary).HasColumnType("jsonb");
-            entity.Property(run => run.OutputSummary).HasColumnType("jsonb");
+            entity.Property(run => run.InputSummary).HasColumnType("text");
+            entity.Property(run => run.OutputSummary).HasColumnType("text");
 
             entity.HasOne(run => run.JobApplication)
                 .WithMany(application => application.AiRuns)

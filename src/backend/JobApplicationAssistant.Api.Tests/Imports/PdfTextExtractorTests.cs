@@ -19,6 +19,23 @@ public sealed class PdfTextExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_returns_text_from_compressed_tounicode_pdf_fixture()
+    {
+        var extractor = new PdfTextExtractor();
+        await using var stream = File.OpenRead(FindRepoFile("docs", "testing", "fake CV.pdf"));
+
+        var result = await extractor.ExtractAsync(stream, CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.NotNull(result.Text);
+        var text = result.Text;
+        Assert.Contains("Phone:", text);
+        Assert.Contains("mail", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain('\0', text);
+        Assert.DoesNotContain("endstream", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ExtractAsync_reports_unreadable_pdf()
     {
         var extractor = new PdfTextExtractor();
@@ -97,6 +114,23 @@ public sealed class PdfTextExtractorTests
         {trailer}
         %%EOF
         """);
+
+    private static string FindRepoFile(params string[] relativePathParts)
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var path = Path.Combine([directory.FullName, .. relativePathParts]);
+            if (File.Exists(path))
+            {
+                return path;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new FileNotFoundException("Could not locate repository fixture.", Path.Combine(relativePathParts));
+    }
 
     private sealed class ThrowingReadStream : Stream
     {
