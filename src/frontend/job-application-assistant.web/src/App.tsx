@@ -167,6 +167,7 @@ type ApplicationSession = ApplicationForm & {
   jobSignals: string;
   evidenceMatches: string;
   unmatchedRequirements: string;
+  candidateFitBrief: string;
   approvedEvidence: string;
   gapDecisions: string;
   customFacts: string;
@@ -2658,6 +2659,7 @@ function toApplicationSession(application: ApplicationSession): ApplicationSessi
     jobSignals: application.jobSignals || "{}",
     evidenceMatches: application.evidenceMatches || "[]",
     unmatchedRequirements: application.unmatchedRequirements || "[]",
+    candidateFitBrief: application.candidateFitBrief || "{}",
     approvedEvidence: application.approvedEvidence || "[]",
     gapDecisions: application.gapDecisions || "[]",
     customFacts: application.customFacts || "[]",

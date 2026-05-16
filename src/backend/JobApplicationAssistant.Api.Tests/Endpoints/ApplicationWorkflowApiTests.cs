@@ -7,6 +7,7 @@ using JobApplicationAssistant.Api.Ai;
 using JobApplicationAssistant.Api.Contracts;
 using JobApplicationAssistant.Api.Data;
 using JobApplicationAssistant.Api.Domain;
+using JobApplicationAssistant.Api.Imports;
 using JobApplicationAssistant.Api.Tests.Support;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -662,12 +663,15 @@ public sealed class ApplicationWorkflowApiTests
         Assert.Equal("[]", prepared.Application.ApprovedEvidence);
 
         var signals = JsonSerializer.Deserialize<JobSignalsDocument>(prepared.Application.JobSignals, JsonOptions);
+        var candidateFitBrief = JsonSerializer.Deserialize<CandidateFitBriefResult>(prepared.Application.CandidateFitBrief, JsonOptions);
         var evidenceMatches = JsonSerializer.Deserialize<List<EvidenceMatch>>(prepared.Application.EvidenceMatches, JsonOptions);
         var unmatchedRequirements = JsonSerializer.Deserialize<List<UnmatchedRequirement>>(prepared.Application.UnmatchedRequirements, JsonOptions);
         Assert.NotNull(signals);
+        Assert.NotNull(candidateFitBrief);
         Assert.NotNull(evidenceMatches);
         Assert.NotNull(unmatchedRequirements);
         Assert.Contains(".NET", signals.RequiredSkills);
+        Assert.Contains("Approved API work", prepared.Application.CandidateFitBrief);
         Assert.Single(evidenceMatches);
         Assert.Contains(unmatchedRequirements, requirement => requirement.Requirement == "Kubernetes");
 
@@ -675,7 +679,69 @@ public sealed class ApplicationWorkflowApiTests
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var runSteps = db.AiRuns.Select(run => run.Step).ToList();
         Assert.Contains("JobAnalysis", runSteps);
+        Assert.Contains("CandidateFitBrief", runSteps);
         Assert.Contains("EvidenceMatching", runSteps);
+    }
+
+    [Fact]
+    public async Task PrepareApplication_uses_approved_imported_facts_in_candidate_fit_brief()
+    {
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor("Built .NET APIs for internal workflow automation."));
+        });
+        using var client = factory.CreateClient();
+        using var form = new MultipartFormDataContent();
+        using var file = new ByteArrayContent([1, 2, 3]);
+        file.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
+        form.Add(file, "file", "cv.pdf");
+        var importResponse = await client.PostAsync("/api/profile/imports/pdf-cv", form);
+        importResponse.EnsureSuccessStatusCode();
+        var import = await importResponse.Content.ReadFromJsonAsync<AssistedProfileImportResponse>();
+        Assert.NotNull(import);
+        var importedFact = import.ProfileFacts.First();
+        var approveResponse = await client.PostAsJsonAsync(
+            $"/api/profile/imports/{import.ImportSessionId:N}/draft-facts/{importedFact.Id:N}/decision",
+            new ImportedDraftFactDecisionRequest("approve"));
+        approveResponse.EnsureSuccessStatusCode();
+        var application = await CreateApplicationAsync(client, "We need .NET delivery.");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/prepare", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var prepared = await response.Content.ReadFromJsonAsync<PrepareApplicationResponse>();
+        Assert.NotNull(prepared);
+        var candidateFitBrief = JsonSerializer.Deserialize<CandidateFitBriefResult>(prepared.Application.CandidateFitBrief, JsonOptions);
+        Assert.NotNull(candidateFitBrief);
+        Assert.Contains(importedFact.Title, prepared.Application.CandidateFitBrief);
+        Assert.Contains(importedFact.Id.ToString(), prepared.Application.CandidateFitBrief);
+    }
+
+    [Fact]
+    public async Task PrepareApplication_candidate_fit_brief_receives_all_approved_profile_facts()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var nonMatchingApprovedFact = await CreateProfileFactAsync(client, "Approved COBOL migration", "Approved", """["COBOL"]""");
+        await CreateProfileFactAsync(client, "Draft Kubernetes work", "Draft", """["Kubernetes"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET delivery.");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/prepare", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var prepared = await response.Content.ReadFromJsonAsync<PrepareApplicationResponse>();
+        Assert.NotNull(prepared);
+        Assert.Contains(nonMatchingApprovedFact.Title, prepared.Application.CandidateFitBrief);
+        Assert.Contains(nonMatchingApprovedFact.Id.ToString(), prepared.Application.CandidateFitBrief);
+        Assert.DoesNotContain("Draft Kubernetes work", prepared.Application.CandidateFitBrief);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns.Where(run => run.Step == "CandidateFitBrief"));
+        Assert.Equal("Succeeded", run.Status);
+        Assert.Contains("\"approvedFactCount\":2", run.InputSummary);
     }
 
     [Fact]
@@ -770,13 +836,14 @@ public sealed class ApplicationWorkflowApiTests
     {
         var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
         [
-            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaAnalysisJson("Contoso", "Platform Engineer")) },
-            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { ReasonPhrase = "Service Unavailable" }
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaAnalysisJson("Contoso", "Platform Engineer")) }
         ]));
         await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
         using var client = factory.CreateClient();
-        await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var approvedFact = await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
         var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidCandidateFitBriefJson(approvedFact.Id)) });
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { ReasonPhrase = "Service Unavailable" });
         await SetEvidenceReviewStateAsync(
             factory,
             application.Id,
@@ -816,15 +883,18 @@ public sealed class ApplicationWorkflowApiTests
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var runs = db.AiRuns.OrderBy(run => run.StartedAt).ToList();
-        Assert.Equal(2, runs.Count);
+        Assert.Equal(3, runs.Count);
         Assert.Equal("JobAnalysis", runs[0].Step);
         Assert.Equal("Succeeded", runs[0].Status);
         Assert.Null(runs[0].ErrorCode);
         Assert.NotNull(runs[0].CompletedAt);
-        Assert.Equal("EvidenceMatching", runs[1].Step);
-        Assert.Equal("Failed", runs[1].Status);
-        Assert.Equal("ProviderUnavailable", runs[1].ErrorCode);
+        Assert.Equal("CandidateFitBrief", runs[1].Step);
+        Assert.Equal("Succeeded", runs[1].Status);
         Assert.NotNull(runs[1].CompletedAt);
+        Assert.Equal("EvidenceMatching", runs[2].Step);
+        Assert.Equal("Failed", runs[2].Status);
+        Assert.Equal("ProviderUnavailable", runs[2].ErrorCode);
+        Assert.NotNull(runs[2].CompletedAt);
     }
 
     [Fact]
@@ -1409,6 +1479,10 @@ public sealed class ApplicationWorkflowApiTests
         var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
         handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK)
         {
+            Content = OpenAiChatCompletionContent(ValidCandidateFitBriefJson(approvedFact.Id))
+        });
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK)
+        {
             Content = OpenAiChatCompletionContent(ValidOpenAiPrepareEvidenceMatchingJson(approvedFact.Id))
         });
 
@@ -1435,10 +1509,11 @@ public sealed class ApplicationWorkflowApiTests
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var runs = db.AiRuns.OrderBy(run => run.StartedAt).ToList();
-        Assert.Equal(2, runs.Count);
+        Assert.Equal(3, runs.Count);
         Assert.All(runs, run => Assert.Equal("OpenAiCompatible", run.Provider));
         Assert.Equal("JobAnalysis", runs[0].Step);
-        Assert.Equal("EvidenceMatching", runs[1].Step);
+        Assert.Equal("CandidateFitBrief", runs[1].Step);
+        Assert.Equal("EvidenceMatching", runs[2].Step);
         Assert.All(runs, run => Assert.Equal("Succeeded", run.Status));
     }
 
@@ -1450,11 +1525,6 @@ public sealed class ApplicationWorkflowApiTests
             new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = OpenAiChatCompletionContent(ValidOllamaAnalysisJson("Contoso", "Platform Engineer"))
-            },
-            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
-            {
-                ReasonPhrase = "Service Unavailable",
-                Content = JsonContent.Create(new { error = new { message = "matching unavailable" } })
             }
         ]));
         await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(
@@ -1462,8 +1532,17 @@ public sealed class ApplicationWorkflowApiTests
             model: "local-model",
             storeRawPayloads: true);
         using var client = factory.CreateClient();
-        await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var approvedFact = await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
         var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = OpenAiChatCompletionContent(ValidCandidateFitBriefJson(approvedFact.Id))
+        });
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+        {
+            ReasonPhrase = "Service Unavailable",
+            Content = JsonContent.Create(new { error = new { message = "matching unavailable" } })
+        });
         await SetEvidenceReviewStateAsync(
             factory,
             application.Id,
@@ -1490,12 +1569,14 @@ public sealed class ApplicationWorkflowApiTests
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var runs = db.AiRuns.OrderBy(run => run.StartedAt).ToList();
-        Assert.Equal(2, runs.Count);
+        Assert.Equal(3, runs.Count);
         Assert.Equal("Succeeded", runs[0].Status);
-        Assert.Equal("Failed", runs[1].Status);
-        Assert.Equal("EvidenceMatching", runs[1].Step);
-        Assert.Equal("ProviderUnavailable", runs[1].ErrorCode);
-        Assert.Contains("matching unavailable", runs[1].ErrorMessage);
+        Assert.Equal("Succeeded", runs[1].Status);
+        Assert.Equal("CandidateFitBrief", runs[1].Step);
+        Assert.Equal("Failed", runs[2].Status);
+        Assert.Equal("EvidenceMatching", runs[2].Step);
+        Assert.Equal("ProviderUnavailable", runs[2].ErrorCode);
+        Assert.Contains("matching unavailable", runs[2].ErrorMessage);
     }
 
     [Fact]
@@ -3489,6 +3570,12 @@ public sealed class ApplicationWorkflowApiTests
     private static JsonContent OllamaGenerateContent(string response) =>
         JsonContent.Create(new { response });
 
+    private sealed class StubPdfTextExtractor(string text) : IPdfTextExtractor
+    {
+        public Task<PdfTextExtractionResult> ExtractAsync(Stream pdfStream, CancellationToken ct) =>
+            Task.FromResult(PdfTextExtractionResult.Success(text));
+    }
+
     private static JsonContent OpenAiChatCompletionContent(string content) =>
         JsonContent.Create(new
         {
@@ -3569,6 +3656,53 @@ public sealed class ApplicationWorkflowApiTests
             {
               "signalId": "rest-api",
               "recommendation": "Treat REST API ownership as an honest learning area."
+            }
+          ]
+        }
+        """;
+
+    private static string ValidCandidateFitBriefJson(Guid profileFactId) =>
+        $$"""
+        {
+          "candidateSummary": "Strong evidence-led fit for the role.",
+          "skillGroups": [
+            {
+              "name": "Supported skills",
+              "items": [
+                {
+                  "title": ".NET",
+                  "summary": "Approved API work supports .NET delivery.",
+                  "supportingProfileFactIds": ["{{profileFactId}}"]
+                }
+              ]
+            }
+          ],
+          "competencies": [
+            {
+              "title": "Delivery ownership",
+              "summary": "The candidate has concrete delivery evidence.",
+              "supportingProfileFactIds": ["{{profileFactId}}"]
+            }
+          ],
+          "relevantProjects": [
+            {
+              "title": "Approved API work",
+              "summary": "Relevant project evidence for this application.",
+              "supportingProfileFactIds": ["{{profileFactId}}"]
+            }
+          ],
+          "transferableStrengths": [
+            {
+              "title": "Traceable evidence",
+              "summary": "Claims map back to approved profile facts.",
+              "supportingProfileFactIds": ["{{profileFactId}}"]
+            }
+          ],
+          "riskNotes": [
+            {
+              "title": "Unsupported requirements",
+              "summary": "Unsupported requirements should remain honest gaps.",
+              "supportingProfileFactIds": []
             }
           ]
         }

@@ -38,6 +38,9 @@ public sealed class UnavailableAiProvider : IAiProvider
     public Task<ClaimAuditResult> AuditClaimsAsync(ClaimAuditInput input, CancellationToken ct) =>
         throw ProviderUnavailable();
 
+    public Task<CandidateFitBriefResult> GenerateCandidateFitBriefAsync(CandidateFitBriefInput input, CancellationToken ct) =>
+        throw ProviderUnavailable();
+
     public Task<AssistedProfileImportResult> ImportProfileFactsAsync(AssistedProfileImportInput input, CancellationToken ct) =>
         throw ProviderUnavailable();
 

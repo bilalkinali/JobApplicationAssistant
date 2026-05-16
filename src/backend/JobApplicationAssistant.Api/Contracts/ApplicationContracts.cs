@@ -23,6 +23,7 @@ public sealed record ApplicationResponse(
     string JobSignals,
     string EvidenceMatches,
     string UnmatchedRequirements,
+    string CandidateFitBrief,
     string ApprovedEvidence,
     string GapDecisions,
     string CustomFacts,

@@ -213,6 +213,90 @@ public sealed class ProfileApiTests
     }
 
     [Fact]
+    public async Task PostPdfCvImport_creates_expanded_draft_fact_coverage_from_rich_cv()
+    {
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor(
+                "Built .NET React APIs for customer operations. " +
+                "Work history: developer role on business process tools. " +
+                "Led stakeholder communication, requirements analysis, and process improvement. " +
+                "Education: Bachelor degree. Languages: fluent English and Danish."));
+        });
+        using var client = factory.CreateClient();
+
+        var importResponse = await PostPdfImportAsync(client);
+
+        Assert.Equal(HttpStatusCode.Created, importResponse.StatusCode);
+        var import = await importResponse.Content.ReadFromJsonAsync<AssistedProfileImportResponse>();
+        Assert.NotNull(import);
+        Assert.True(import.ProfileFacts.Count >= 6);
+        Assert.All(import.ProfileFacts, fact => Assert.Equal("Draft", fact.Status));
+        Assert.Contains(import.ProfileFacts, fact => fact.Type == "Skill" && fact.Technologies.Contains(".NET"));
+        Assert.Contains(import.ProfileFacts, fact => fact.Type == "Tool");
+        Assert.Contains(import.ProfileFacts, fact => fact.Type == "Project");
+        Assert.Contains(import.ProfileFacts, fact => fact.Type == "WorkHistory");
+        Assert.Contains(import.ProfileFacts, fact => fact.Type == "BusinessExperience");
+        Assert.Contains(import.ProfileFacts, fact => fact.Type == "Competency");
+        Assert.Contains(import.ProfileFacts, fact => fact.Type == "TransferableStrength");
+        Assert.Contains(import.ProfileFacts, fact => fact.Type == "Education");
+        Assert.Contains(import.ProfileFacts, fact => fact.Type == "Language");
+        Assert.Contains(import.ProfileFacts, fact => fact.Type == "AllowedClaim" && fact.AllowedClaims.Contains(".NET"));
+        Assert.Contains(import.ProfileFacts, fact => fact.Type == "ForbiddenClaim" && fact.ForbiddenClaims.Length > 0);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.Equal(import.ProfileFacts.Count, db.ProfileFacts.Count());
+        Assert.All(db.ProfileFacts, fact => Assert.Equal(ProfileFactStatus.Draft, fact.Status));
+    }
+
+    [Fact]
+    public async Task Draft_imported_competencies_and_transferable_strengths_do_not_support_matching_until_approved()
+    {
+        await using var factory = new TestApplicationFactory(services =>
+        {
+            services.RemoveAll<IPdfTextExtractor>();
+            services.AddSingleton<IPdfTextExtractor>(new StubPdfTextExtractor(
+                "Built .NET APIs for customer operations. " +
+                "Stakeholder communication, requirements analysis, and transferable business process experience."));
+        });
+        using var client = factory.CreateClient();
+
+        var import = await PostPdfImportAsync(client);
+        import.EnsureSuccessStatusCode();
+        var imported = await import.Content.ReadFromJsonAsync<AssistedProfileImportResponse>();
+        Assert.NotNull(imported);
+        Assert.Contains(imported.ProfileFacts, fact => fact.Type == "Competency" && fact.Status == "Draft");
+        Assert.Contains(imported.ProfileFacts, fact => fact.Type == "TransferableStrength" && fact.Status == "Draft");
+
+        var applicationResponse = await client.PostAsJsonAsync(
+            "/api/applications",
+            new ApplicationRequest(
+                "ExampleCo",
+                "Business Analyst Developer",
+                null,
+                null,
+                "Draft",
+                "Role requires .NET APIs, stakeholder communication, requirements analysis, and customer operations experience.",
+                null,
+                null));
+        applicationResponse.EnsureSuccessStatusCode();
+        var application = await applicationResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(application);
+
+        var analysisResponse = await client.PostAsync($"/api/applications/{application.Id}/analyze-job", null);
+        analysisResponse.EnsureSuccessStatusCode();
+
+        var matchResponse = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, matchResponse.StatusCode);
+        var error = await matchResponse.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains("approved profile fact", Assert.Single(error.Details!["ProfileFacts"]));
+    }
+
+    [Fact]
     public async Task FirstRunImportApproval_makes_imported_facts_available_for_application_evidence_matching()
     {
         await using var factory = new TestApplicationFactory(services =>
@@ -1133,6 +1217,9 @@ public sealed class ProfileApiTests
             throw new NotSupportedException();
 
         public Task<ClaimAuditResult> AuditClaimsAsync(ClaimAuditInput input, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<CandidateFitBriefResult> GenerateCandidateFitBriefAsync(CandidateFitBriefInput input, CancellationToken ct) =>
             throw new NotSupportedException();
 
         public Task<AssistedProfileImportResult> ImportProfileFactsAsync(AssistedProfileImportInput input, CancellationToken ct) =>

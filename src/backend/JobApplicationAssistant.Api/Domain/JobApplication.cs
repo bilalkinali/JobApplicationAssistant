@@ -26,6 +26,8 @@ public sealed class JobApplication
 
     public string UnmatchedRequirements { get; set; } = "[]";
 
+    public string CandidateFitBrief { get; set; } = "{}";
+
     public string ApprovedEvidence { get; set; } = "[]";
 
     public string GapDecisions { get; set; } = "[]";

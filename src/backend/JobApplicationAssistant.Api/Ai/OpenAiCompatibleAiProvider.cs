@@ -11,6 +11,7 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
     private static readonly string EvidenceMatchingPrompt = LoadPrompt("evidence-matching.md");
     private static readonly string DraftGenerationPrompt = LoadPrompt("draft-generation.md");
     private static readonly string ClaimAuditPrompt = LoadPrompt("claim-audit.md");
+    private static readonly string CandidateFitBriefPrompt = LoadPrompt("candidate-fit-brief.md");
     private static readonly string AssistedProfileImportPrompt = LoadPrompt("assisted-profile-import.md");
 
     private readonly HttpClient httpClient;
@@ -198,6 +199,20 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         {
             var repairedText = await ChatAsync(BuildClaimAuditRepairPrompt(responseText, firstFailure.Message), attemptCount: 2, ct);
             return ParseClaimAudit(repairedText, input, attemptCount: 2);
+        }
+    }
+
+    public async Task<CandidateFitBriefResult> GenerateCandidateFitBriefAsync(CandidateFitBriefInput input, CancellationToken ct)
+    {
+        var responseText = await ChatAsync(BuildCandidateFitBriefPrompt(input), attemptCount: 1, ct);
+        try
+        {
+            return CandidateFitBriefJsonParser.Parse(responseText, input, "OpenAI-compatible endpoint", attemptCount: 1);
+        }
+        catch (AiInvalidOutputException firstFailure)
+        {
+            var repairedText = await ChatAsync(BuildCandidateFitBriefRepairPrompt(responseText, firstFailure.Message), attemptCount: 2, ct);
+            return CandidateFitBriefJsonParser.Parse(repairedText, input, "OpenAI-compatible endpoint", attemptCount: 2);
         }
     }
 
@@ -798,6 +813,44 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         {input.ExtractedText}
         """;
 
+    private static string BuildCandidateFitBriefPrompt(CandidateFitBriefInput input)
+    {
+        var approvedFacts = input.ApprovedProfileFacts.Select(fact => new
+        {
+            fact.Id,
+            fact.Type,
+            fact.Title,
+            fact.Summary,
+            fact.FactItems,
+            fact.Technologies,
+            fact.AllowedClaims
+        });
+
+        return $"""
+        {CandidateFitBriefPrompt}
+
+        Application metadata:
+        {JsonSerializer.Serialize(new
+        {
+            input.CompanyName,
+            input.RoleTitle,
+            input.ApplicationUrl,
+            input.Deadline,
+            input.SelectedLanguage,
+            input.TonePreference
+        }, JsonOptions)}
+
+        Job posting text:
+        {input.JobPostingText ?? "(none supplied)"}
+
+        Job signals:
+        {JsonSerializer.Serialize(input.JobSignals, JsonOptions)}
+
+        Approved profile facts:
+        {JsonSerializer.Serialize(approvedFacts, JsonOptions)}
+        """;
+    }
+
     private static string BuildRepairPrompt(string invalidJson, string validationError) =>
         $"""
         Repair this job analysis JSON so it matches the required contract exactly.
@@ -837,6 +890,18 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
     private static string BuildClaimAuditRepairPrompt(string invalidJson, string validationError) =>
         $"""
         Repair this claim audit JSON so it matches the required contract exactly.
+        Return only strict JSON. Do not include markdown.
+
+        Validation error:
+        {validationError}
+
+        Invalid JSON:
+        {invalidJson}
+        """;
+
+    private static string BuildCandidateFitBriefRepairPrompt(string invalidJson, string validationError) =>
+        $"""
+        Repair this candidate fit brief JSON so it matches the required contract exactly.
         Return only strict JSON. Do not include markdown.
 
         Validation error:
