@@ -243,6 +243,35 @@ public sealed partial class FakeAiProvider : IAiProvider
         return Task.FromResult(new ClaimAuditResult(claims));
     }
 
+    public Task<AssistedProfileImportResult> ImportProfileFactsAsync(AssistedProfileImportInput input, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var technologies = KeywordDefinitions
+            .Where(definition => ContainsAny(input.ExtractedText, definition.Keywords))
+            .Select(definition => definition.Label)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (technologies.Count == 0)
+        {
+            technologies.Add("Imported CV review");
+        }
+
+        var sourceContext = FirstUsefulSentence(input.ExtractedText);
+        var titleTechnology = technologies.First();
+        var fact = new AssistedProfileImportFact(
+            "ImportedCv",
+            $"Demo CV import: {titleTechnology}",
+            $"Fake assisted import from {input.FileName}: review this draft before using it as evidence.",
+            [sourceContext],
+            technologies,
+            technologies.Select(technology => $"Reviewed CV evidence may mention {technology}.").ToList(),
+            ["Do not claim this imported CV evidence until the draft fact is approved."],
+            sourceContext);
+
+        return Task.FromResult(new AssistedProfileImportResult([fact]));
+    }
+
     private static bool ContainsAny(string text, IReadOnlyList<string> keywords) =>
         keywords.Any(keyword => ContainsTerm(text, keyword));
 
@@ -339,6 +368,19 @@ public sealed partial class FakeAiProvider : IAiProvider
         {
             return json;
         }
+    }
+
+    private static string FirstUsefulSentence(string text)
+    {
+        var normalized = Regex.Replace(text, @"\s+", " ").Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return "Imported PDF CV text was empty after extraction.";
+        }
+
+        var sentence = Regex.Split(normalized, @"(?<=[.!?])\s+")
+            .FirstOrDefault(value => value.Length >= 12) ?? normalized;
+        return sentence.Length <= 240 ? sentence : $"{sentence[..237]}...";
     }
 
     private static void AddJsonText(JsonElement element, List<string> values)

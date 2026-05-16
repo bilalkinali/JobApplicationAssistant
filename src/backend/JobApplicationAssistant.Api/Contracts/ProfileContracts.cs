@@ -48,4 +48,70 @@ public sealed record ProfileFactResponse(
     string AllowedClaims,
     string ForbiddenClaims,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string SourceDocumentIds = "[]",
+    string? OriginalImportedSnapshot = null,
+    bool ManuallyEdited = false);
+
+public sealed record AssistedProfileImportResponse(
+    Guid ImportSessionId,
+    string FileName,
+    int ImportedFactCount,
+    IReadOnlyList<ProfileFactResponse> ProfileFacts,
+    ImportedDraftFactReviewQueueResponse ReviewQueue,
+    string ReviewUrl);
+
+public sealed record ImportedDraftFactReviewQueueResponse(
+    Guid ImportSessionId,
+    string FileName,
+    int DraftFactCount,
+    IReadOnlyList<ImportedDraftFactReviewGroupResponse> Groups);
+
+public sealed record ImportedDraftFactReviewGroupResponse(
+    string Key,
+    string Label,
+    int DraftFactCount,
+    IReadOnlyList<ImportedDraftFactReviewItemResponse> Facts);
+
+public sealed record ImportedDraftFactReviewItemResponse(
+    ProfileFactResponse ProfileFact,
+    string SourceContext,
+    bool HasDuplicateIndicators,
+    IReadOnlyList<ImportedDraftFactDuplicateIndicatorResponse> DuplicateIndicators);
+
+public sealed record ImportedDraftFactDuplicateIndicatorResponse(
+    string Scope,
+    Guid ProfileFactId,
+    string ProfileFactTitle,
+    string Reason);
+
+public sealed record ImportedDraftFactDecisionRequest(
+    string Decision,
+    ProfileFactRequest? ProfileFact = null);
+
+public sealed record ImportedDraftFactDecisionResponse(
+    ProfileFactResponse ProfileFact,
+    ImportedDraftFactReviewQueueResponse ReviewQueue);
+
+public sealed record ImportedDraftFactBulkDecisionRequest(
+    string Decision,
+    IReadOnlyList<Guid> ProfileFactIds);
+
+public sealed record ImportedDraftFactBulkDecisionResponse(
+    IReadOnlyList<ProfileFactResponse> ProfileFacts,
+    ImportedDraftFactReviewQueueResponse ReviewQueue);
+
+public sealed record ImportedDraftFactMergeRequest(
+    IReadOnlyList<Guid> ProfileFactIds,
+    ProfileFactRequest? ProfileFact = null);
+
+public sealed record ImportedDraftFactMergeResponse(
+    ProfileFactResponse ProfileFact,
+    ImportedDraftFactReviewQueueResponse ReviewQueue);
+
+public sealed record ImportedDraftFactSplitRequest(
+    IReadOnlyList<ProfileFactRequest> ProfileFacts);
+
+public sealed record ImportedDraftFactSplitResponse(
+    IReadOnlyList<ProfileFactResponse> ProfileFacts,
+    ImportedDraftFactReviewQueueResponse ReviewQueue);

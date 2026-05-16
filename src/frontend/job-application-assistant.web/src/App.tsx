@@ -62,7 +62,7 @@ const emptyProfileFact: ProfileFactForm = {
 };
 const applicationStatuses = ["Draft", "PostingCaptured", "ReadyForReview", "PreparedForEvidenceReview", "Applied", "Archived"];
 const auditReadinessOptions = ["All", "Current", "Stale", "Missing", "NotApplicable"];
-const profileFactStatuses = ["Draft", "Approved", "Archived"];
+const profileFactStatuses = ["Draft", "Approved", "Archived", "Rejected"];
 
 type ProfileForm = {
   fullName: string;
@@ -92,6 +92,63 @@ type ProfileFact = ProfileFactForm & {
   id: string;
   createdAt: string;
   updatedAt: string;
+  sourceDocumentIds: string;
+  originalImportedSnapshot: string | null;
+  manuallyEdited: boolean;
+};
+
+type ImportedDraftFactReviewQueue = {
+  importSessionId: string;
+  fileName: string;
+  draftFactCount: number;
+  groups: ImportedDraftFactReviewGroup[];
+};
+
+type ImportedDraftFactReviewGroup = {
+  key: string;
+  label: string;
+  draftFactCount: number;
+  facts: ImportedDraftFactReviewItem[];
+};
+
+type ImportedDraftFactReviewItem = {
+  profileFact: ProfileFact;
+  sourceContext: string;
+  hasDuplicateIndicators: boolean;
+  duplicateIndicators: ImportedDraftFactDuplicateIndicator[];
+};
+
+type ImportedDraftFactDuplicateIndicator = {
+  scope: "ImportBatch" | "ExistingProfileFact" | string;
+  profileFactId: string;
+  profileFactTitle: string;
+  reason: string;
+};
+
+type AssistedProfileImportResponse = {
+  importSessionId: string;
+  fileName: string;
+  importedFactCount: number;
+  profileFacts: ProfileFact[];
+  reviewQueue: ImportedDraftFactReviewQueue;
+  reviewUrl: string;
+};
+
+type ImportedDraftFactDecisionResponse = {
+  profileFact: ProfileFact;
+  reviewQueue: ImportedDraftFactReviewQueue;
+};
+
+type ImportedDraftFactBulkDecisionResponse = {
+  profileFacts: ProfileFact[];
+  reviewQueue: ImportedDraftFactReviewQueue;
+};
+
+type ImportedDraftFactMergeResponse = ImportedDraftFactDecisionResponse;
+
+type ImportedDraftFactSplitResponse = {
+  profileFacts: ProfileFact[];
+  reviewQueue: ImportedDraftFactReviewQueue;
 };
 
 type ApplicationForm = {
@@ -250,6 +307,12 @@ function App() {
   const [view, setView] = useState<View>("home");
   const [profile, setProfile] = useState<ProfileForm>(emptyProfile);
   const [profileFacts, setProfileFacts] = useState<ProfileFact[]>([]);
+  const [importReviewQueues, setImportReviewQueues] = useState<ImportedDraftFactReviewQueue[]>([]);
+  const [selectedImportedDraftFactIds, setSelectedImportedDraftFactIds] = useState<string[]>([]);
+  const [splitImportedDraftFacts, setSplitImportedDraftFacts] = useState("");
+  const [profileImportFile, setProfileImportFile] = useState<File | null>(null);
+  const [profileImportBusy, setProfileImportBusy] = useState(false);
+  const [pendingImportReviewFocusId, setPendingImportReviewFocusId] = useState<string | null>(null);
   const [profileFactForm, setProfileFactForm] = useState<ProfileFactForm>(emptyProfileFact);
   const [selectedProfileFactId, setSelectedProfileFactId] = useState<string | null>(null);
   const [applications, setApplications] = useState<ApplicationSession[]>([]);
@@ -269,6 +332,7 @@ function App() {
   const [workflowBusy, setWorkflowBusy] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState<"txt" | "docx" | null>(null);
   const [exportFeedback, setExportFeedback] = useState<InlineFeedback | null>(null);
+  const [profileImportFeedback, setProfileImportFeedback] = useState<InlineFeedback | null>(null);
   const [isClipboardAvailable, setIsClipboardAvailable] = useState(false);
   const [aiStatus, setAiStatus] = useState<AiProviderStatus | null>(null);
   const [aiDiagnostics, setAiDiagnostics] = useState<AiDiagnostics | null>(null);
@@ -278,6 +342,8 @@ function App() {
   const [error, setError] = useState<ErrorPresentation | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const evidenceReviewRef = useRef<HTMLDivElement | null>(null);
+  const importReviewRef = useRef<HTMLDivElement | null>(null);
+  const profileImportFileRef = useRef<HTMLInputElement | null>(null);
   const draftReviewRef = useRef<HTMLElement | null>(null);
   const exportPanelRef = useRef<HTMLElement | null>(null);
 
@@ -288,6 +354,23 @@ function App() {
   const approvedProfileFacts = useMemo(
     () => profileFacts.filter((fact) => fact.status === "Approved"),
     [profileFacts]
+  );
+  const selectedImportedDraftFact = useMemo(
+    () =>
+      profileFacts.find(
+        (fact) =>
+          fact.id === selectedProfileFactId &&
+          fact.status === "Draft" &&
+          Boolean(importSessionIdFromProfileFact(fact))
+      ),
+    [profileFacts, selectedProfileFactId]
+  );
+  const selectedImportReviewQueue = useMemo(
+    () =>
+      selectedImportedDraftFact
+        ? importReviewQueues.find((queue) => queue.importSessionId === importSessionIdFromProfileFact(selectedImportedDraftFact))
+        : null,
+    [importReviewQueues, selectedImportedDraftFact]
   );
   const filteredApplications = useMemo(() => {
     const search = applicationSearch.trim().toLowerCase();
@@ -503,10 +586,40 @@ function App() {
     void loadApplications();
   }, [includeArchivedApplications]);
 
+  useEffect(() => {
+    void loadImportedDraftFactReviewQueues();
+  }, [profileFacts]);
+
+  useEffect(() => {
+    if (!pendingImportReviewFocusId || !importReviewQueues.some((queue) => queue.importSessionId === pendingImportReviewFocusId)) {
+      return;
+    }
+
+    importReviewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setPendingImportReviewFocusId(null);
+  }, [importReviewQueues, pendingImportReviewFocusId]);
+
   async function loadProfileFacts() {
     try {
       const response = await apiGet<ProfileFact[]>("/api/profile/facts");
       setProfileFacts(response.map(toProfileFact));
+    } catch (apiError) {
+      setError(formatError(apiError));
+    }
+  }
+
+  async function loadImportedDraftFactReviewQueues() {
+    const importSessionIds = Array.from(new Set(profileFacts.map(importSessionIdFromProfileFact).filter((id): id is string => Boolean(id))));
+    if (importSessionIds.length === 0) {
+      setImportReviewQueues([]);
+      return;
+    }
+
+    try {
+      const queues = await Promise.all(
+        importSessionIds.map((importSessionId) => apiGet<ImportedDraftFactReviewQueue>(`/api/profile/imports/${importSessionId}/draft-facts`))
+      );
+      setImportReviewQueues(queues.filter((queue) => queue.draftFactCount > 0));
     } catch (apiError) {
       setError(formatError(apiError));
     }
@@ -598,6 +711,209 @@ function App() {
     } catch (apiError) {
       setError(formatError(apiError));
     }
+  }
+
+  async function importProfilePdfCv(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!profileImportFile) {
+      setError(plainError("Validation blocker", "Choose a PDF CV before starting assisted import."));
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setProfileImportFeedback(null);
+    setProfileImportBusy(true);
+
+    try {
+      const form = new FormData();
+      form.append("file", profileImportFile);
+      const response = await apiSendForm<AssistedProfileImportResponse>("/api/profile/imports/pdf-cv", form);
+      setImportReviewQueues((queues) => [
+        response.reviewQueue,
+        ...queues.filter((queue) => queue.importSessionId !== response.importSessionId)
+      ]);
+      setPendingImportReviewFocusId(response.importSessionId);
+      setSelectedImportedDraftFactIds([]);
+      if (response.profileFacts[0]) {
+        setSelectedProfileFactId(response.profileFacts[0].id);
+        setProfileFactForm(toProfileFactForm(response.profileFacts[0]));
+        setSplitImportedDraftFacts(splitDraftTemplate(response.profileFacts[0]));
+      }
+      await loadProfileFacts();
+      setProfileImportFile(null);
+      if (profileImportFileRef.current) {
+        profileImportFileRef.current.value = "";
+      }
+      setProfileImportFeedback({
+        tone: "success",
+        title: "Imported facts ready for review",
+        message: `${response.importedFactCount} draft profile fact${response.importedFactCount === 1 ? "" : "s"} from ${response.fileName} are grouped below. Approve the strong ones to make them available for application evidence matching.`
+      });
+    } catch (apiError) {
+      setError(formatError(apiError));
+      setProfileImportFeedback({
+        tone: "error",
+        title: "Assisted import did not change your profile",
+        message: "Review the diagnostics above, then retry the PDF import when the provider is ready."
+      });
+    } finally {
+      setProfileImportBusy(false);
+    }
+  }
+
+  async function reviewImportedDraftFact(
+    fact: ProfileFact,
+    decision: "approve" | "archive" | "reject",
+    importSessionId = importSessionIdFromProfileFact(fact),
+    profileFact?: ProfileFactForm
+  ) {
+    if (!importSessionId) {
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+
+    try {
+      const response = await apiSend<ImportedDraftFactDecisionResponse>(
+        `/api/profile/imports/${importSessionId}/draft-facts/${fact.id}/decision`,
+        "POST",
+        {
+          decision,
+          profileFact
+        }
+      );
+      setImportReviewQueues((queues) =>
+        response.reviewQueue.draftFactCount > 0
+          ? queues.map((queue) => (queue.importSessionId === response.reviewQueue.importSessionId ? response.reviewQueue : queue))
+          : queues.filter((queue) => queue.importSessionId !== response.reviewQueue.importSessionId)
+      );
+      setProfileFactForm(toProfileFactForm(response.profileFact));
+      setSelectedProfileFactId(response.profileFact.id);
+      await loadProfileFacts();
+      setNotice(
+        decision === "approve"
+          ? "Imported fact approved and available for application evidence matching."
+          : `Imported fact ${importDecisionPastTense(decision)}.`
+      );
+    } catch (apiError) {
+      setError(formatError(apiError));
+    }
+  }
+
+  async function bulkReviewImportedDraftFacts(queue: ImportedDraftFactReviewQueue, decision: "approve" | "archive") {
+    const profileFactIds = selectedIdsForQueue(queue);
+    if (profileFactIds.length === 0) {
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+
+    try {
+      const response = await apiSend<ImportedDraftFactBulkDecisionResponse>(
+        `/api/profile/imports/${queue.importSessionId}/draft-facts/bulk-decision`,
+        "POST",
+        { decision, profileFactIds }
+      );
+      updateImportReviewQueue(response.reviewQueue);
+      setSelectedImportedDraftFactIds((ids) => ids.filter((id) => !profileFactIds.includes(id)));
+      await loadProfileFacts();
+      setNotice(
+        decision === "approve"
+          ? `${profileFactIds.length} imported facts approved and available for application evidence matching.`
+          : `${profileFactIds.length} imported facts ${importDecisionPastTense(decision)}.`
+      );
+    } catch (apiError) {
+      setError(formatError(apiError));
+    }
+  }
+
+  async function mergeImportedDraftFacts(queue: ImportedDraftFactReviewQueue) {
+    const profileFactIds = selectedIdsForQueue(queue);
+    if (profileFactIds.length < 2) {
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+
+    try {
+      const response = await apiSend<ImportedDraftFactMergeResponse>(
+        `/api/profile/imports/${queue.importSessionId}/draft-facts/merge`,
+        "POST",
+        { profileFactIds }
+      );
+      updateImportReviewQueue(response.reviewQueue);
+      setSelectedImportedDraftFactIds((ids) => ids.filter((id) => !profileFactIds.includes(id)));
+      setSelectedProfileFactId(response.profileFact.id);
+      setProfileFactForm(toProfileFactForm(response.profileFact));
+      await loadProfileFacts();
+      setNotice("Imported facts merged.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    }
+  }
+
+  async function splitImportedDraftFact() {
+    if (!selectedImportedDraftFact) {
+      return;
+    }
+
+    const importSessionId = importSessionIdFromProfileFact(selectedImportedDraftFact);
+    if (!importSessionId) {
+      return;
+    }
+
+    let profileFacts: ProfileFactForm[];
+    try {
+      profileFacts = JSON.parse(splitImportedDraftFacts) as ProfileFactForm[];
+    } catch {
+      setError(plainError("Validation blocker", "Split facts must be a JSON array of profile fact drafts."));
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+
+    try {
+      const response = await apiSend<ImportedDraftFactSplitResponse>(
+        `/api/profile/imports/${importSessionId}/draft-facts/${selectedImportedDraftFact.id}/split`,
+        "POST",
+        { profileFacts }
+      );
+      updateImportReviewQueue(response.reviewQueue);
+      setSelectedImportedDraftFactIds((ids) => ids.filter((id) => id !== selectedImportedDraftFact.id));
+      if (response.profileFacts[0]) {
+        setSelectedProfileFactId(response.profileFacts[0].id);
+        setProfileFactForm(toProfileFactForm(response.profileFacts[0]));
+      }
+      setSplitImportedDraftFacts("");
+      await loadProfileFacts();
+      setNotice("Imported fact split.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    }
+  }
+
+  function updateImportReviewQueue(reviewQueue: ImportedDraftFactReviewQueue) {
+    setImportReviewQueues((queues) =>
+      reviewQueue.draftFactCount > 0
+        ? queues.map((queue) => (queue.importSessionId === reviewQueue.importSessionId ? reviewQueue : queue))
+        : queues.filter((queue) => queue.importSessionId !== reviewQueue.importSessionId)
+    );
+  }
+
+  function toggleImportedDraftFactSelection(factId: string) {
+    setSelectedImportedDraftFactIds((ids) =>
+      ids.includes(factId) ? ids.filter((id) => id !== factId) : [...ids, factId]
+    );
+  }
+
+  function selectedIdsForQueue(queue: ImportedDraftFactReviewQueue) {
+    const queueIds = new Set(queue.groups.flatMap((group) => group.facts.map((item) => item.profileFact.id)));
+    return selectedImportedDraftFactIds.filter((id) => queueIds.has(id));
   }
 
   async function deleteApplication() {
@@ -1127,6 +1443,7 @@ function App() {
   function openProfileFact(fact: ProfileFact) {
     setSelectedProfileFactId(fact.id);
     setProfileFactForm(toProfileFactForm(fact));
+    setSplitImportedDraftFacts(importSessionIdFromProfileFact(fact) ? splitDraftTemplate(fact) : "");
     setError(null);
     setNotice(null);
   }
@@ -1134,6 +1451,7 @@ function App() {
   function startNewProfileFact() {
     setSelectedProfileFactId(null);
     setProfileFactForm(emptyProfileFact);
+    setSplitImportedDraftFacts("");
     setError(null);
     setNotice(null);
   }
@@ -1265,8 +1583,110 @@ function App() {
                 <h3>Profile facts</h3>
                 <p>{profileReadiness.evidenceMessage}</p>
               </div>
+              <form className="profile-import-panel" onSubmit={importProfilePdfCv}>
+                <div className="section-heading">
+                  <h4>Assisted CV import</h4>
+                  <p>Upload a PDF CV to draft profile facts, review the grouped queue, and approve evidence for saved applications.</p>
+                </div>
+                {aiStatus && isFakeProvider(aiStatus) && (
+                  <p className="workflow-note warning">Fake AI mode is active. Import will use deterministic demo/test extraction behavior.</p>
+                )}
+                <label className="file-field">
+                  <span>PDF CV</span>
+                  <input
+                    accept="application/pdf,.pdf"
+                    ref={profileImportFileRef}
+                    type="file"
+                    onChange={(event) => setProfileImportFile(event.target.files?.[0] ?? null)}
+                  />
+                </label>
+                <div className="form-actions">
+                  <button className="primary-action" type="submit" disabled={profileImportBusy}>
+                    {profileImportBusy ? "Importing..." : "Import PDF CV"}
+                  </button>
+                </div>
+                {profileImportFeedback && (
+                  <div className={`message compact ${profileImportFeedback.tone}`} role="status">
+                    <strong>{profileImportFeedback.title}</strong>
+                    <p>{profileImportFeedback.message}</p>
+                  </div>
+                )}
+              </form>
               {!profileReadiness.hasApprovedEvidence && (
                 <p className="workflow-note warning">Approved evidence is required before evidence matching and draft generation. Draft or archived facts will not be used as proof.</p>
+              )}
+              {importReviewQueues.length > 0 && (
+                <div className="import-review-queues" ref={importReviewRef}>
+                  {importReviewQueues.map((queue) => (
+                    <section className="import-review-queue" key={queue.importSessionId}>
+                      <div className="section-heading">
+                        <h4>{queue.fileName}</h4>
+                        <p>{queue.draftFactCount} imported draft facts grouped for review.</p>
+                      </div>
+                      <div className="import-review-actions">
+                        <button
+                          type="button"
+                          disabled={selectedIdsForQueue(queue).length < 2}
+                          onClick={() => void mergeImportedDraftFacts(queue)}
+                        >
+                          Merge selected
+                        </button>
+                        <button
+                          type="button"
+                          disabled={selectedIdsForQueue(queue).length === 0}
+                          onClick={() => void bulkReviewImportedDraftFacts(queue, "approve")}
+                        >
+                          Approve selected
+                        </button>
+                        <button
+                          type="button"
+                          disabled={selectedIdsForQueue(queue).length === 0}
+                          onClick={() => void bulkReviewImportedDraftFacts(queue, "archive")}
+                        >
+                          Archive selected
+                        </button>
+                      </div>
+                      {queue.groups.map((group) => (
+                        <div className="import-review-group" key={group.key}>
+                          <div className="import-review-group-header">
+                            <strong>{group.label}</strong>
+                            <span>{group.draftFactCount}</span>
+                          </div>
+                          <div className="import-review-items">
+                            {group.facts.map((item) => (
+                              <article
+                                className={`import-review-item${item.hasDuplicateIndicators ? " duplicate" : ""}`}
+                                key={item.profileFact.id}
+                              >
+                                <label className="import-review-select">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedImportedDraftFactIds.includes(item.profileFact.id)}
+                                    onChange={() => toggleImportedDraftFactSelection(item.profileFact.id)}
+                                  />
+                                  <span>Select</span>
+                                </label>
+                                <button type="button" onClick={() => openProfileFact(item.profileFact)}>
+                                  <span className="import-review-title">{item.profileFact.title}</span>
+                                  <span className="import-review-context">{item.sourceContext}</span>
+                                  {item.hasDuplicateIndicators && (
+                                    <span className="duplicate-indicators">
+                                      {item.duplicateIndicators.map((indicator) => (
+                                        <small key={`${indicator.scope}-${indicator.profileFactId}`}>
+                                          {duplicateScopeLabel(indicator.scope)}: {indicator.profileFactTitle} - {indicator.reason}
+                                        </small>
+                                      ))}
+                                    </span>
+                                  )}
+                                </button>
+                              </article>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </section>
+                  ))}
+                </div>
               )}
               {profileFacts.length === 0 && <p className="empty-state">No profile facts yet.</p>}
               <div className="fact-list">
@@ -1293,7 +1713,41 @@ function App() {
                 <Textarea label="Technologies JSON" value={profileFactForm.technologies} onChange={(technologies) => setProfileFactForm({ ...profileFactForm, technologies })} />
                 <Textarea label="Allowed claims JSON" value={profileFactForm.allowedClaims} onChange={(allowedClaims) => setProfileFactForm({ ...profileFactForm, allowedClaims })} />
                 <Textarea label="Forbidden claims JSON" value={profileFactForm.forbiddenClaims} onChange={(forbiddenClaims) => setProfileFactForm({ ...profileFactForm, forbiddenClaims })} />
+                {selectedImportedDraftFact && selectedImportReviewQueue && (
+                  <Textarea
+                    label="Split into imported draft facts JSON"
+                    value={splitImportedDraftFacts}
+                    onChange={setSplitImportedDraftFacts}
+                  />
+                )}
                 <div className="form-actions">
+                  {selectedImportedDraftFact && (
+                    <>
+                      <button
+                        className="primary-action"
+                        type="button"
+                        onClick={() =>
+                          void reviewImportedDraftFact(
+                            selectedImportedDraftFact,
+                            "approve",
+                            undefined,
+                            profileFactFormChanged(selectedImportedDraftFact, profileFactForm) ? profileFactForm : undefined
+                          )
+                        }
+                      >
+                        Approve import
+                      </button>
+                      <button type="button" onClick={() => void reviewImportedDraftFact(selectedImportedDraftFact, "archive")}>
+                        Archive import
+                      </button>
+                      <button type="button" disabled={!splitImportedDraftFacts.trim()} onClick={() => void splitImportedDraftFact()}>
+                        Split import
+                      </button>
+                      <button className="danger-action" type="button" onClick={() => void reviewImportedDraftFact(selectedImportedDraftFact, "reject")}>
+                        Reject import
+                      </button>
+                    </>
+                  )}
                   <button className="primary-action" type="submit">{selectedProfileFactId ? "Save fact" : "Create fact"}</button>
                   <button type="button" onClick={startNewProfileFact}>Clear</button>
                   {selectedProfileFactId && (
@@ -2066,6 +2520,14 @@ async function apiSend<T>(path: string, method: "POST" | "PUT", body: unknown): 
   return readResponse<T>(response);
 }
 
+async function apiSendForm<T>(path: string, body: FormData): Promise<T> {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    method: "POST",
+    body
+  });
+  return readResponse<T>(response);
+}
+
 async function apiDelete(path: string): Promise<void> {
   const response = await fetch(`${apiBaseUrl}${path}`, { method: "DELETE" });
   if (!response.ok) {
@@ -2111,8 +2573,71 @@ function toProfileFact(fact: ProfileFact): ProfileFact {
     ...toProfileFactForm(fact),
     id: fact.id,
     createdAt: fact.createdAt,
-    updatedAt: fact.updatedAt
+    updatedAt: fact.updatedAt,
+    sourceDocumentIds: fact.sourceDocumentIds ?? "[]",
+    originalImportedSnapshot: fact.originalImportedSnapshot ?? null,
+    manuallyEdited: Boolean(fact.manuallyEdited)
   };
+}
+
+function importSessionIdFromProfileFact(fact: ProfileFact): string | null {
+  if (!fact.originalImportedSnapshot || fact.status !== "Draft") {
+    return null;
+  }
+
+  try {
+    const snapshot = JSON.parse(fact.originalImportedSnapshot) as { importSessionId?: string };
+    return snapshot.importSessionId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function duplicateScopeLabel(scope: string): string {
+  if (scope === "ImportBatch") {
+    return "Same import";
+  }
+
+  if (scope === "ExistingProfileFact") {
+    return "Existing fact";
+  }
+
+  return "Overlap";
+}
+
+function importDecisionPastTense(decision: "approve" | "archive" | "reject"): string {
+  switch (decision) {
+    case "approve":
+      return "approved";
+    case "archive":
+      return "archived";
+    case "reject":
+      return "rejected";
+  }
+}
+
+function profileFactFormChanged(fact: ProfileFact, form: ProfileFactForm): boolean {
+  return (
+    fact.type !== form.type ||
+    fact.title !== form.title ||
+    fact.summary !== form.summary ||
+    fact.status !== form.status ||
+    fact.factItems !== form.factItems ||
+    fact.technologies !== form.technologies ||
+    fact.allowedClaims !== form.allowedClaims ||
+    fact.forbiddenClaims !== form.forbiddenClaims
+  );
+}
+
+function splitDraftTemplate(fact: ProfileFact): string {
+  const first = toProfileFactForm(fact);
+  const second = toProfileFactForm(fact);
+  first.title = `${fact.title} - part 1`;
+  second.title = `${fact.title} - part 2`;
+  first.summary = "";
+  second.summary = "";
+
+  return JSON.stringify([first, second], null, 2);
 }
 
 function toApplicationForm(application: ApplicationForm) {
@@ -2556,6 +3081,8 @@ function profileFactStatusLabel(status: string): string {
       return "Approved evidence";
     case "Archived":
       return "Archived evidence";
+    case "Rejected":
+      return "Rejected evidence";
     default:
       return status;
   }
@@ -2608,6 +3135,8 @@ function statusTone(status: string): string {
       return "approved";
     case "Archived":
       return "archived";
+    case "Rejected":
+      return "rejected";
     default:
       return "neutral";
   }

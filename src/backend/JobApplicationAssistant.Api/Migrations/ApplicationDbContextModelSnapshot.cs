@@ -24,10 +24,10 @@ namespace JobApplicationAssistant.Api.Migrations
                 b.Property<DateTimeOffset?>("CompletedAt").HasColumnType("timestamp with time zone");
                 b.Property<string>("ErrorCode").HasMaxLength(120).HasColumnType("character varying(120)");
                 b.Property<string>("ErrorMessage").HasMaxLength(4000).HasColumnType("character varying(4000)");
-                b.Property<string>("InputSummary").HasColumnType("jsonb");
+                b.Property<string>("InputSummary").HasColumnType("text");
                 b.Property<Guid?>("JobApplicationId").HasColumnType("uuid");
                 b.Property<string>("Model").IsRequired().HasMaxLength(120).HasColumnType("character varying(120)");
-                b.Property<string>("OutputSummary").HasColumnType("jsonb");
+                b.Property<string>("OutputSummary").HasColumnType("text");
                 b.Property<string>("Provider").IsRequired().HasMaxLength(80).HasColumnType("character varying(80)");
                 b.Property<DateTimeOffset>("StartedAt").HasColumnType("timestamp with time zone");
                 b.Property<string>("Status").IsRequired().HasMaxLength(80).HasColumnType("character varying(80)");

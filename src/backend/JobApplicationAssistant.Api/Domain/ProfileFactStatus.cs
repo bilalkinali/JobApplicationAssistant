@@ -4,5 +4,6 @@ public enum ProfileFactStatus
 {
     Draft,
     Approved,
-    Archived
+    Archived,
+    Rejected
 }

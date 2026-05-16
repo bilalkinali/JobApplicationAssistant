@@ -835,7 +835,8 @@ public sealed class ApplicationWorkflowApiTests
         await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
         await CreateProfileFactAsync(client, "Draft Kubernetes work", "Draft", """["Kubernetes"]""");
         await CreateProfileFactAsync(client, "Archived React work", "Archived", """["React"]""");
-        var application = await CreateApplicationAsync(client, "We need .NET, React, and Kubernetes.");
+        await CreateProfileFactAsync(client, "Rejected Azure work", "Rejected", """["Azure"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET, React, Kubernetes, and Azure.");
         await client.PostAsync($"/api/applications/{application.Id}/analyze-job", null);
 
         var response = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
@@ -855,6 +856,7 @@ public sealed class ApplicationWorkflowApiTests
         Assert.Equal("Approved API work", match.ProfileFactTitle);
         Assert.Contains(unmatchedRequirements, requirement => requirement.Requirement == "React");
         Assert.Contains(unmatchedRequirements, requirement => requirement.Requirement == "Kubernetes");
+        Assert.Contains(unmatchedRequirements, requirement => requirement.Requirement == "Azure");
     }
 
     [Fact]

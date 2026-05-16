@@ -155,6 +155,29 @@ public sealed class AiStatusApiTests
     }
 
     [Fact]
+    public async Task PostAiDiagnostics_normalizes_openai_compatible_root_endpoint_to_v1()
+    {
+        var handler = new QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            JsonResponse("""{"data":[{"id":"local-model"}]}""")
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(
+            handler,
+            model: "local-model",
+            endpoint: "http://lm-studio.test");
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsync("/api/ai/diagnostics", null);
+
+        response.EnsureSuccessStatusCode();
+        var diagnostics = await response.Content.ReadFromJsonAsync<AiDiagnosticsResponse>();
+        Assert.NotNull(diagnostics);
+        Assert.Equal("http://lm-studio.test/v1", diagnostics.Endpoint);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal("http://lm-studio.test/v1/models", request.RequestUri?.ToString());
+    }
+
+    [Fact]
     public async Task PostAiDiagnostics_reports_openai_compatible_unavailable_model()
     {
         var handler = new QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
@@ -335,7 +358,8 @@ internal static class TestApplicationFactoryAiExtensions
         this TestApplicationFactory factory,
         AiStatusApiTests.QueuedOpenAiCompatibleHandler handler,
         string model,
-        bool storeRawPayloads = false) =>
+        bool storeRawPayloads = false,
+        string endpoint = "http://lm-studio.test/v1") =>
         factory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureTestServices(services =>
@@ -345,7 +369,7 @@ internal static class TestApplicationFactoryAiExtensions
                 services.AddSingleton(new AiOptions
                 {
                     Provider = "OpenAiCompatible",
-                    Endpoint = "http://lm-studio.test/v1",
+                    Endpoint = OpenAiCompatibleAiProvider.NormalizeEndpoint(endpoint),
                     Model = model,
                     TimeoutSeconds = 1,
                     StoreRawPayloads = storeRawPayloads
