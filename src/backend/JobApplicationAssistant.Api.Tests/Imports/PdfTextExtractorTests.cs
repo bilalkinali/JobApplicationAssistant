@@ -36,6 +36,24 @@ public sealed class PdfTextExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_returns_page_text_from_cv_with_object_streams()
+    {
+        var extractor = new PdfTextExtractor();
+        await using var stream = File.OpenRead(FindRepoFile("docs", "testing", "CV-en.pdf"));
+
+        var result = await extractor.ExtractAsync(stream, CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.NotNull(result.Text);
+        var text = result.Text;
+        Assert.Contains("Bilal Kinali", text);
+        Assert.Contains("Software Developer", text);
+        Assert.Contains("C#", text);
+        Assert.DoesNotContain("endstream", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("/Type /Catalog", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ExtractAsync_reports_unreadable_pdf()
     {
         var extractor = new PdfTextExtractor();

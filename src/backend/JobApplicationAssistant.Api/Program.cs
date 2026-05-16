@@ -12,6 +12,11 @@ builder.Services.AddSingleton(_ =>
 {
     var options = new AiOptions();
     builder.Configuration.GetSection("Ai").Bind(options);
+    if (string.Equals(options.Provider, "OpenAiCompatible", StringComparison.OrdinalIgnoreCase))
+    {
+        options.Endpoint = OpenAiCompatibleAiProvider.NormalizeEndpoint(options.Endpoint);
+    }
+
     return options;
 });
 builder.Services.AddHttpClient<OllamaAiProvider>((serviceProvider, client) =>

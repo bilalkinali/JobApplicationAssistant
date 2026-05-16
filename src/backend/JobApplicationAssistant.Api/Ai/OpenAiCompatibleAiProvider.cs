@@ -22,6 +22,19 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         this.options = options;
     }
 
+    public static string NormalizeEndpoint(string endpoint)
+    {
+        var trimmed = endpoint.Trim().TrimEnd('/');
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        {
+            return trimmed;
+        }
+
+        return string.Equals(uri.AbsolutePath, "/", StringComparison.Ordinal)
+            ? new Uri(uri, "/v1").ToString().TrimEnd('/')
+            : trimmed;
+    }
+
     public async Task<AiProviderStatus> GetStatusAsync(CancellationToken ct)
     {
         var diagnostics = await RunDiagnosticsAsync(ct);

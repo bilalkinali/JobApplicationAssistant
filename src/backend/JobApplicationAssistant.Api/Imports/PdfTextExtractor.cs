@@ -71,8 +71,12 @@ public sealed class PdfTextExtractor : IPdfTextExtractor
         return Regex.Replace(string.Join(' ', values), @"\s+", " ").Trim();
     }
 
-    private static string DecodePdfLiteralString(string value) =>
-        Regex.Replace(value, @"\\([nrtbf\\()])", match => match.Groups[1].Value switch
+    private static string DecodePdfLiteralString(string value)
+    {
+        var decoded = Regex.Replace(value, @"\\(?<octal>[0-7]{1,3})", match =>
+            char.ConvertFromUtf32(Convert.ToInt32(match.Groups["octal"].Value, 8)));
+
+        return Regex.Replace(decoded, @"\\([nrtbf\\()])", match => match.Groups[1].Value switch
         {
             "n" => "\n",
             "r" => "\r",
@@ -84,32 +88,34 @@ public sealed class PdfTextExtractor : IPdfTextExtractor
             ")" => ")",
             _ => match.Value
         });
+    }
 
     private static string ExtractDecodedStreamText(string pdf, byte[] bytes)
     {
         var streams = ExtractStreams(pdf, bytes);
+        var literalStreamText = ExtractPageContentLiteralText(streams);
         var cmapByObjectId = streams
             .Where(stream => stream.Text.Contains("beginbfchar", StringComparison.Ordinal) ||
                 stream.Text.Contains("beginbfrange", StringComparison.Ordinal))
             .ToDictionary(stream => stream.ObjectId, stream => ParseCMap(stream.Text));
         if (cmapByObjectId.Count == 0)
         {
-            return string.Empty;
+            return literalStreamText;
         }
 
-        var toUnicodeByFontObjectId = Regex.Matches(pdf, @"(?<font>\d+)\s+0\s+obj(?<body>.*?)endobj", RegexOptions.Singleline)
-            .Cast<Match>()
-            .Select(match => new
+        var pdfObjects = ExtractPdfObjects(pdf, streams);
+        var toUnicodeByFontObjectId = pdfObjects
+            .Select(pdfObject => new
             {
-                FontObjectId = int.Parse(match.Groups["font"].Value),
-                ToUnicodeObjectId = Regex.Match(match.Groups["body"].Value, @"/ToUnicode\s+(?<cmap>\d+)\s+0\s+R")
+                FontObjectId = pdfObject.ObjectId,
+                ToUnicodeObjectId = Regex.Match(pdfObject.Body, @"/ToUnicode\s+(?<cmap>\d+)\s+0\s+R")
             })
             .Where(match => match.ToUnicodeObjectId.Success)
             .ToDictionary(
                 match => match.FontObjectId,
                 match => int.Parse(match.ToUnicodeObjectId.Groups["cmap"].Value));
 
-        var fontResourceMap = Regex.Matches(pdf, @"/(?<name>F\d+)\s+(?<font>\d+)\s+0\s+R")
+        var fontResourceMap = Regex.Matches(string.Join('\n', pdfObjects.Select(pdfObject => pdfObject.Body)), @"/(?<name>F\d+)\s+(?<font>\d+)\s+0\s+R")
             .Cast<Match>()
             .Where(match => toUnicodeByFontObjectId.ContainsKey(int.Parse(match.Groups["font"].Value)))
             .GroupBy(match => match.Groups["name"].Value)
@@ -119,7 +125,7 @@ public sealed class PdfTextExtractor : IPdfTextExtractor
 
         if (fontResourceMap.Count == 0)
         {
-            return string.Empty;
+            return literalStreamText;
         }
 
         var values = streams
@@ -130,8 +136,29 @@ public sealed class PdfTextExtractor : IPdfTextExtractor
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .ToList();
 
+        if (values.Count == 0)
+        {
+            return literalStreamText;
+        }
+
         return Regex.Replace(string.Join(' ', values), @"\s+", " ").Trim();
     }
+
+    private static string ExtractPageContentLiteralText(IReadOnlyList<PdfStream> streams)
+    {
+        var values = streams
+            .Where(IsLikelyPageContentStream)
+            .SelectMany(stream => ExtractLiteralTextFromContentStream(stream.Text))
+            .Select(SanitizeExtractedText)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToList();
+
+        return Regex.Replace(string.Join(' ', values), @"\s+", " ").Trim();
+    }
+
+    private static bool IsLikelyPageContentStream(PdfStream stream) =>
+        !Regex.IsMatch(stream.Header, @"/(?:Subtype\s*/Image|Type\s*/(?:XObject|ObjStm|XRef)|Length1\b)", RegexOptions.IgnoreCase) &&
+        Regex.IsMatch(stream.Text, @"\bBT\b.*?\bET\b", RegexOptions.Singleline);
 
     private static IReadOnlyList<PdfStream> ExtractStreams(string pdf, byte[] bytes)
     {
@@ -160,10 +187,75 @@ public sealed class PdfTextExtractor : IPdfTextExtractor
                 continue;
             }
 
-            streams.Add(new PdfStream(int.Parse(match.Groups["objectId"].Value), text));
+            streams.Add(new PdfStream(int.Parse(match.Groups["objectId"].Value), match.Groups["header"].Value, text));
         }
 
         return streams;
+    }
+
+    private static IEnumerable<string> ExtractLiteralTextFromContentStream(string stream)
+    {
+        foreach (Match textBlock in Regex.Matches(stream, @"\bBT\b(?<body>.*?)\bET\b", RegexOptions.Singleline))
+        {
+            var values = Regex.Matches(textBlock.Groups["body"].Value, @"\((?<text>(?:\\.|[^\\)])*)\)")
+                .Select(match => DecodePdfLiteralString(match.Groups["text"].Value))
+                .Where(value => !string.IsNullOrWhiteSpace(value));
+
+            var text = string.Join(' ', values);
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                yield return text;
+            }
+        }
+    }
+
+    private static IReadOnlyList<PdfObject> ExtractPdfObjects(string pdf, IReadOnlyList<PdfStream> streams)
+    {
+        var objects = Regex.Matches(pdf, @"(?<objectId>\d+)\s+0\s+obj(?<body>.*?)endobj", RegexOptions.Singleline)
+            .Cast<Match>()
+            .Select(match => new PdfObject(int.Parse(match.Groups["objectId"].Value), match.Groups["body"].Value))
+            .ToList();
+
+        foreach (var objectStream in streams.Where(stream => Regex.IsMatch(stream.Header, @"/Type\s*/ObjStm\b", RegexOptions.IgnoreCase)))
+        {
+            var countMatch = Regex.Match(objectStream.Header, @"/N\s+(?<count>\d+)");
+            var firstMatch = Regex.Match(objectStream.Header, @"/First\s+(?<first>\d+)");
+            if (!countMatch.Success || !firstMatch.Success)
+            {
+                continue;
+            }
+
+            var count = int.Parse(countMatch.Groups["count"].Value);
+            var first = int.Parse(firstMatch.Groups["first"].Value);
+            if (first <= 0 || first >= objectStream.Text.Length)
+            {
+                continue;
+            }
+
+            var tokens = Regex.Matches(objectStream.Text[..first], @"\d+")
+                .Cast<Match>()
+                .Select(match => int.Parse(match.Value))
+                .ToList();
+            if (tokens.Count < count * 2)
+            {
+                continue;
+            }
+
+            for (var index = 0; index < count; index++)
+            {
+                var objectId = tokens[index * 2];
+                var start = first + tokens[(index * 2) + 1];
+                var end = index == count - 1 ? objectStream.Text.Length : first + tokens[(index * 2) + 3];
+                if (start < first || end <= start || end > objectStream.Text.Length)
+                {
+                    continue;
+                }
+
+                objects.Add(new PdfObject(objectId, objectStream.Text[start..end]));
+            }
+        }
+
+        return objects;
     }
 
     private static string? TryInflate(byte[] data)
@@ -239,7 +331,7 @@ public sealed class PdfTextExtractor : IPdfTextExtractor
     {
         Dictionary<string, string>? currentCMap = null;
         var output = new StringBuilder();
-        foreach (Match match in Regex.Matches(stream, @"/(?<font>F\d+)\s+[\d.]+\s+Tf|<(?<hex>[0-9A-Fa-f]+)>|(?<operator>TJ|Tj)"))
+        foreach (Match match in Regex.Matches(stream, @"/(?<font>F\d+)\s+[\d.]+\s+Tf|<(?<hex>[0-9A-Fa-f]+)>|\((?<literal>(?:\\.|[^\\)])*)\)|(?<spacing>-?\d+(?:\.\d+)?)|(?<operator>TJ|Tj)"))
         {
             if (match.Groups["font"].Success)
             {
@@ -256,13 +348,25 @@ public sealed class PdfTextExtractor : IPdfTextExtractor
                 continue;
             }
 
+            if (match.Groups["spacing"].Success)
+            {
+                if (decimal.TryParse(match.Groups["spacing"].Value, out var spacing) && spacing <= -100)
+                {
+                    output.Append(' ');
+                }
+
+                continue;
+            }
+
             if (match.Groups["operator"].Success)
             {
                 output.Append(' ');
                 continue;
             }
 
-            var decoded = DecodePdfHexString(match.Groups["hex"].Value, currentCMap);
+            var decoded = match.Groups["hex"].Success
+                ? DecodePdfHexString(match.Groups["hex"].Value, currentCMap)
+                : DecodePdfLiteralString(match.Groups["literal"].Value, currentCMap);
             if (!string.IsNullOrWhiteSpace(decoded))
             {
                 output.Append(decoded);
@@ -288,6 +392,53 @@ public sealed class PdfTextExtractor : IPdfTextExtractor
         return output.ToString();
     }
 
+    private static string DecodePdfLiteralString(string value, IReadOnlyDictionary<string, string> cmap)
+    {
+        var output = new StringBuilder();
+        foreach (var code in DecodePdfLiteralBytes(value))
+        {
+            output.Append(cmap.TryGetValue(code.ToString("X2"), out var mapped) ? mapped : " ");
+        }
+
+        return output.ToString();
+    }
+
+    private static IEnumerable<byte> DecodePdfLiteralBytes(string value)
+    {
+        for (var index = 0; index < value.Length; index++)
+        {
+            var character = value[index];
+            if (character != '\\' || index == value.Length - 1)
+            {
+                yield return (byte)character;
+                continue;
+            }
+
+            var next = value[++index];
+            if (next is >= '0' and <= '7')
+            {
+                var octal = next.ToString();
+                for (var count = 0; count < 2 && index + 1 < value.Length && value[index + 1] is >= '0' and <= '7'; count++)
+                {
+                    octal += value[++index];
+                }
+
+                yield return (byte)Convert.ToInt32(octal, 8);
+                continue;
+            }
+
+            yield return next switch
+            {
+                'n' => (byte)'\n',
+                'r' => (byte)'\r',
+                't' => (byte)'\t',
+                'b' => (byte)'\b',
+                'f' => (byte)'\f',
+                _ => (byte)next
+            };
+        }
+    }
+
     private static string DecodeUnicodeHex(string hex)
     {
         var output = new StringBuilder();
@@ -304,5 +455,6 @@ public sealed class PdfTextExtractor : IPdfTextExtractor
             character is '\r' or '\n' or '\t' ||
             (!char.IsControl(character) && character != '\0')).ToArray());
 
-    private sealed record PdfStream(int ObjectId, string Text);
+    private sealed record PdfStream(int ObjectId, string Header, string Text);
+    private sealed record PdfObject(int ObjectId, string Body);
 }
