@@ -1,6 +1,6 @@
 # Candidate Fit Brief Traceability Boundary
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,13 +15,13 @@ This slice should make the boundary explicit in contracts and tests so later cre
 
 ## Acceptance criteria
 
-- [ ] Candidate fit brief contracts describe profile fact ids as traceability-only references.
-- [ ] Evidence review does not treat candidate fit brief profile fact ids as approved evidence.
-- [ ] Draft generation does not treat candidate fit brief profile fact ids as approved evidence.
-- [ ] Claim audit does not treat candidate fit brief profile fact ids as approved evidence.
-- [ ] Final-draft claims still require per-application approved evidence or approved job-local custom facts.
-- [ ] Tests cover candidate fit brief profile fact ids remaining traceability-only and not becoming approved evidence.
-- [ ] No automatic profile fact approval is introduced.
+- [x] Candidate fit brief contracts describe profile fact ids as traceability-only references.
+- [x] Evidence review does not treat candidate fit brief profile fact ids as approved evidence.
+- [x] Draft generation does not treat candidate fit brief profile fact ids as approved evidence.
+- [x] Claim audit does not treat candidate fit brief profile fact ids as approved evidence.
+- [x] Final-draft claims still require per-application approved evidence or approved job-local custom facts.
+- [x] Tests cover candidate fit brief profile fact ids remaining traceability-only and not becoming approved evidence.
+- [x] No automatic profile fact approval is introduced.
 
 ## Blocked by
 

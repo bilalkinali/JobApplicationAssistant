@@ -52,6 +52,7 @@ Rules:
 - Use the job posting and/or job signals to make the fit brief specific to the current application.
 - Use only supplied approved profile facts as concrete evidence.
 - Every concrete fit item must include supportingProfileFactIds containing only ids from the supplied approved profile facts.
+- supportingProfileFactIds are traceability-only references; they are not approved evidence for final claims, evidence review, draft generation, or claim audit.
 - Risk notes may have an empty supportingProfileFactIds array when they describe missing or unsupported evidence.
 - Do not invent profile facts, employers, projects, metrics, or skill depth.
 - All arrays are required, even when empty.

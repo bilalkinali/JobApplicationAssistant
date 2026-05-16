@@ -832,6 +832,88 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task PrepareApplication_with_unavailable_candidate_fit_brief_provider_returns_error_and_preserves_stable_state()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaAnalysisJson("Contoso", "Platform Engineer")) },
+            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { ReasonPhrase = "Service Unavailable" }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        var stablePreparedAt = await SetPreparedApplicationStateAsync(factory, application.Id);
+        var existingDraft = await AddGeneratedDraftAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/prepare", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains("AiProvider", error.Details!.Keys);
+        Assert.Contains("unavailable", error.Details["AiProvider"][0], StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Preparation", error.Details.Keys);
+        Assert.Contains("candidate fit brief generation failed", error.Details["Preparation"][0]);
+
+        var reopened = await GetApplicationAsync(client, application.Id);
+        AssertStablePreparedState(reopened, stablePreparedAt, existingDraft.Id);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var runs = db.AiRuns.OrderBy(run => run.StartedAt).ToList();
+        Assert.Equal(2, runs.Count);
+        Assert.Equal("JobAnalysis", runs[0].Step);
+        Assert.Equal("Succeeded", runs[0].Status);
+        Assert.Equal("CandidateFitBrief", runs[1].Step);
+        Assert.Equal("Failed", runs[1].Status);
+        Assert.Equal("ProviderUnavailable", runs[1].ErrorCode);
+        Assert.NotNull(runs[1].CompletedAt);
+    }
+
+    [Fact]
+    public async Task PrepareApplication_with_invalid_candidate_fit_brief_output_returns_validation_error_and_preserves_stable_state()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaAnalysisJson("Contoso", "Platform Engineer")) },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent("{ malformed") },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent("""{"candidateSummary":""}""") }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
+        var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.");
+        var stablePreparedAt = await SetPreparedApplicationStateAsync(factory, application.Id);
+        var existingDraft = await AddGeneratedDraftAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/prepare", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains("AiProvider", error.Details!.Keys);
+        Assert.Contains("invalid", error.Details["AiProvider"][0], StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Preparation", error.Details.Keys);
+        Assert.Contains("candidate fit brief generation failed", error.Details["Preparation"][0]);
+
+        var reopened = await GetApplicationAsync(client, application.Id);
+        AssertStablePreparedState(reopened, stablePreparedAt, existingDraft.Id);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var runs = db.AiRuns.OrderBy(run => run.StartedAt).ToList();
+        Assert.Equal(2, runs.Count);
+        Assert.Equal("JobAnalysis", runs[0].Step);
+        Assert.Equal("Succeeded", runs[0].Status);
+        Assert.Equal("CandidateFitBrief", runs[1].Step);
+        Assert.Equal("Failed", runs[1].Status);
+        Assert.Equal("InvalidOutput", runs[1].ErrorCode);
+        Assert.Equal(2, runs[1].AttemptCount);
+        Assert.NotNull(runs[1].CompletedAt);
+    }
+
+    [Fact]
     public async Task PrepareApplication_with_matching_failure_preserves_analysis_and_marks_partial_state()
     {
         var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
@@ -1611,6 +1693,27 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task PutApprovedEvidence_rejects_candidate_fit_brief_profile_fact_ids()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var traceOnlyProfileFactId = Guid.NewGuid();
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+        await SetCandidateFitBriefAsync(factory, application.Id, traceOnlyProfileFactId);
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/applications/{application.Id}/approved-evidence",
+            new ApprovedEvidenceRequest(JsonSerializer.Serialize(
+                new[] { new { id = traceOnlyProfileFactId.ToString() } },
+                JsonOptions)));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains(nameof(ApprovedEvidenceRequest.ApprovedEvidence), error.Details!.Keys);
+    }
+
+    [Fact]
     public async Task PutApprovedEvidence_rejects_unknown_or_malformed_review_state()
     {
         await using var factory = new TestApplicationFactory();
@@ -1794,6 +1897,23 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task GenerateDraft_rejects_candidate_fit_brief_profile_fact_ids_without_approved_evidence()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var traceOnlyProfileFactId = Guid.NewGuid();
+        var application = await CreateApplicationAsync(client, "We need .NET.");
+        await SetCandidateFitBriefAsync(factory, application.Id, traceOnlyProfileFactId);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains(nameof(ApplicationResponse.ApprovedEvidence), error.Details!.Keys);
+    }
+
+    [Fact]
     public async Task GenerateDraft_rejects_application_with_unhandled_unmatched_requirements()
     {
         await using var factory = new TestApplicationFactory();
@@ -1914,6 +2034,33 @@ public sealed class ApplicationWorkflowApiTests
         var auditRun = Assert.Single(runs, run => run.Step == "ClaimAudit");
         Assert.Equal("Succeeded", auditRun.Status);
         Assert.Equal(1, auditRun.AttemptCount);
+    }
+
+    [Fact]
+    public async Task GenerateDraft_with_ollama_does_not_send_candidate_fit_brief_profile_fact_ids_to_draft_or_audit()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaDraftGenerationJson()) },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaClaimAuditJson("match-dotnet-test")) }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.", "English");
+        var traceOnlyProfileFactId = Guid.NewGuid();
+        await SetCandidateFitBriefAsync(factory, application.Id, traceOnlyProfileFactId);
+        await MarkApplicationReadyForDraftAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        Assert.Equal(2, handler.Requests.Count);
+        var draftRequestJson = await handler.Requests[0].Content!.ReadAsStringAsync();
+        var auditRequestJson = await handler.Requests[1].Content!.ReadAsStringAsync();
+        Assert.Contains("match-dotnet-test", draftRequestJson);
+        Assert.Contains("match-dotnet-test", auditRequestJson);
+        Assert.DoesNotContain(traceOnlyProfileFactId.ToString(), draftRequestJson);
+        Assert.DoesNotContain(traceOnlyProfileFactId.ToString(), auditRequestJson);
     }
 
     [Fact]
@@ -3002,6 +3149,27 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task AuditClaims_with_ollama_does_not_send_candidate_fit_brief_profile_fact_ids()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaClaimAuditJson("match-dotnet-test")) }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var draft = await CreateGeneratedDraftForOllamaAuditAsync(factory, client, "match-dotnet-test");
+        var traceOnlyProfileFactId = Guid.NewGuid();
+        await SetCandidateFitBriefAsync(factory, draft.JobApplicationId, traceOnlyProfileFactId);
+
+        var response = await client.PostAsync($"/api/applications/{draft.JobApplicationId}/audit-claims", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var ollamaRequestJson = await Assert.Single(handler.Requests).Content!.ReadAsStringAsync();
+        Assert.Contains("match-dotnet-test", ollamaRequestJson);
+        Assert.DoesNotContain(traceOnlyProfileFactId.ToString(), ollamaRequestJson);
+    }
+
+    [Fact]
     public async Task AuditClaims_with_ollama_repairs_unknown_evidence_reference_once()
     {
         var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
@@ -3300,6 +3468,36 @@ public sealed class ApplicationWorkflowApiTests
         return application;
     }
 
+    private static async Task<ApplicationResponse> GetApplicationAsync(HttpClient client, Guid applicationId)
+    {
+        var response = await client.GetAsync($"/api/applications/{applicationId}");
+        response.EnsureSuccessStatusCode();
+        var application = await response.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(application);
+        return application;
+    }
+
+    private static void AssertStablePreparedState(
+        ApplicationResponse application,
+        DateTimeOffset stablePreparedAt,
+        Guid existingDraftId)
+    {
+        Assert.Equal("Stable Company", application.CompanyName);
+        Assert.Equal("Stable Role", application.RoleTitle);
+        Assert.Equal("PreparedForEvidenceReview", application.Status);
+        Assert.Equal("PreparedForEvidenceReview", application.PreparationStatus);
+        Assert.Equal(stablePreparedAt, application.LastPreparedAt);
+        Assert.Contains("stable-signal", application.JobSignals);
+        Assert.Contains("existing-match", application.EvidenceMatches);
+        Assert.Contains("existing-unmatched", application.UnmatchedRequirements);
+        Assert.Contains("existing-fit", application.CandidateFitBrief);
+        Assert.Contains("existing-approved", application.ApprovedEvidence);
+        Assert.Contains("existing-gap", application.GapDecisions);
+        Assert.Contains("existing-custom", application.CustomFacts);
+        Assert.NotNull(application.GeneratedDraft);
+        Assert.Equal(existingDraftId, application.GeneratedDraft.Id);
+    }
+
     private static async Task<GeneratedDraftResponse> CreateGeneratedDraftAsync(HttpClient client)
     {
         await CreateProfileFactAsync(client, "Approved API work", "Approved", """[".NET"]""");
@@ -3356,6 +3554,19 @@ public sealed class ApplicationWorkflowApiTests
                 new GapDecisionTestItem("unmatched-kubernetes", "MentionAsLearningInterest", null)
             },
             JsonOptions);
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SetCandidateFitBriefAsync(
+        WebApplicationFactory<Program> factory,
+        Guid applicationId,
+        Guid traceOnlyProfileFactId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var application = await db.JobApplications.FindAsync(applicationId);
+        Assert.NotNull(application);
+        application.CandidateFitBrief = CandidateFitBriefTraceabilityJson(traceOnlyProfileFactId);
         await db.SaveChangesAsync();
     }
 
@@ -3514,6 +3725,32 @@ public sealed class ApplicationWorkflowApiTests
         application.UnmatchedRequirements = unmatchedRequirements;
         application.ApprovedEvidence = approvedEvidence;
         await db.SaveChangesAsync();
+    }
+
+    private static async Task<DateTimeOffset> SetPreparedApplicationStateAsync(
+        WebApplicationFactory<Program> factory,
+        Guid applicationId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var application = await db.JobApplications.FindAsync(applicationId);
+        Assert.NotNull(application);
+        var now = DateTimeOffset.UtcNow;
+        application.CompanyName = "Stable Company";
+        application.RoleTitle = "Stable Role";
+        application.Status = "PreparedForEvidenceReview";
+        application.JobSignals = """{"signals":[{"id":"stable-signal","label":".NET"}]}""";
+        application.EvidenceMatches = """[{"id":"existing-match","signalId":"stable-signal","profileFactId":"00000000-0000-0000-0000-000000000001","summary":"Existing match","matchedTerms":[".NET"]}]""";
+        application.UnmatchedRequirements = """[{"id":"existing-unmatched","signalId":"stable-gap","requirement":"Existing gap","recommendation":"Existing recommendation"}]""";
+        application.CandidateFitBrief = """{"candidateSummary":"existing-fit"}""";
+        application.ApprovedEvidence = """[{"id":"existing-approved"}]""";
+        application.GapDecisions = """[{"unmatchedRequirementId":"existing-gap","decision":"AcceptedGap"}]""";
+        application.CustomFacts = """[{"id":"existing-custom","title":"Existing custom fact"}]""";
+        application.LastPreparedAt = now;
+        application.PreparationStatus = "PreparedForEvidenceReview";
+        application.UpdatedAt = now;
+        await db.SaveChangesAsync();
+        return now;
     }
 
     private sealed record GapDecisionTestItem(
@@ -3713,6 +3950,29 @@ public sealed class ApplicationWorkflowApiTests
         {
           "coverLetterText": "Ollama cover letter from approved API evidence.",
           "shortMotivationText": "Ollama short motivation."
+        }
+        """;
+
+    private static string CandidateFitBriefTraceabilityJson(Guid profileFactId) =>
+        $$"""
+        {
+          "candidateSummary": "Traceability-only fit context.",
+          "skillGroups": [
+            {
+              "name": "Traceability-only",
+              "items": [
+                {
+                  "title": "Traceability-only profile fact",
+                  "summary": "This profile fact id explains where the fit context came from.",
+                  "supportingProfileFactIds": ["{{profileFactId}}"]
+                }
+              ]
+            }
+          ],
+          "competencies": [],
+          "relevantProjects": [],
+          "transferableStrengths": [],
+          "riskNotes": []
         }
         """;
 

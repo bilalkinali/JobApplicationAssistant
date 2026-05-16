@@ -145,6 +145,8 @@ public sealed record CandidateFitSkillGroup(
 public sealed record CandidateFitBriefItem(
     string Title,
     string Summary,
+    // Traceability only. These ids must never be treated as approved evidence for final claims,
+    // evidence review, draft generation, or claim audit.
     IReadOnlyList<Guid> SupportingProfileFactIds);
 
 public sealed record AssistedProfileImportInput(

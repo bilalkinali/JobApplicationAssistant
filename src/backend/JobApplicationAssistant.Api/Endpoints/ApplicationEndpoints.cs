@@ -291,6 +291,7 @@ public static class ApplicationEndpoints
                 }));
             }
 
+            var stableState = ApplicationStableState.Capture(application);
             var analysisRun = new AiRun
             {
                 Id = Guid.NewGuid(),
@@ -399,8 +400,7 @@ public static class ApplicationEndpoints
             catch (AiProviderException exception)
             {
                 RecordFailedRun(fitBriefRun, exception);
-                application.PreparationStatus = "PartiallyPreparedAnalysisOnly";
-                application.UpdatedAt = DateTimeOffset.UtcNow;
+                stableState.Restore(application);
                 await db.SaveChangesAsync(ct);
 
                 return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
@@ -1100,6 +1100,61 @@ public static class ApplicationEndpoints
             application.GeneratedDraft is null ? null : ToResponse(application.GeneratedDraft),
             application.GeneratedDraft is not null,
             GetAuditReadiness(application.GeneratedDraft));
+
+    private sealed record ApplicationStableState(
+        string CompanyName,
+        string RoleTitle,
+        string? DetectedLanguage,
+        string? SelectedLanguage,
+        string JobSignals,
+        string EvidenceMatches,
+        string UnmatchedRequirements,
+        string CandidateFitBrief,
+        string ApprovedEvidence,
+        string GapDecisions,
+        string CustomFacts,
+        string Status,
+        DateTimeOffset? LastPreparedAt,
+        string PreparationStatus,
+        DateTimeOffset UpdatedAt)
+    {
+        public static ApplicationStableState Capture(JobApplication application) =>
+            new(
+                application.CompanyName,
+                application.RoleTitle,
+                application.DetectedLanguage,
+                application.SelectedLanguage,
+                application.JobSignals,
+                application.EvidenceMatches,
+                application.UnmatchedRequirements,
+                application.CandidateFitBrief,
+                application.ApprovedEvidence,
+                application.GapDecisions,
+                application.CustomFacts,
+                application.Status,
+                application.LastPreparedAt,
+                application.PreparationStatus,
+                application.UpdatedAt);
+
+        public void Restore(JobApplication application)
+        {
+            application.CompanyName = CompanyName;
+            application.RoleTitle = RoleTitle;
+            application.DetectedLanguage = DetectedLanguage;
+            application.SelectedLanguage = SelectedLanguage;
+            application.JobSignals = JobSignals;
+            application.EvidenceMatches = EvidenceMatches;
+            application.UnmatchedRequirements = UnmatchedRequirements;
+            application.CandidateFitBrief = CandidateFitBrief;
+            application.ApprovedEvidence = ApprovedEvidence;
+            application.GapDecisions = GapDecisions;
+            application.CustomFacts = CustomFacts;
+            application.Status = Status;
+            application.LastPreparedAt = LastPreparedAt;
+            application.PreparationStatus = PreparationStatus;
+            application.UpdatedAt = UpdatedAt;
+        }
+    }
 
     private static GeneratedDraftResponse ToResponse(GeneratedDraft draft) =>
         new(

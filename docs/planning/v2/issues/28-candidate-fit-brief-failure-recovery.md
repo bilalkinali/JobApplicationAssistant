@@ -1,6 +1,6 @@
 # Candidate Fit Brief Failure Recovery
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,12 +15,12 @@ The slice should prove that preparation can fail during the new fit brief step w
 
 ## Acceptance criteria
 
-- [ ] Provider unavailable during candidate fit brief generation returns a plain provider error.
-- [ ] Malformed or invalid candidate fit brief output returns a plain validation error.
-- [ ] Failed candidate fit brief generation preserves the prior stable application workflow state.
-- [ ] Failed candidate fit brief generation does not clear existing approved evidence, job signals, or previously stored stable artifacts.
-- [ ] Failure paths record enough diagnostic information for the existing preparation failure surface to remain useful.
-- [ ] Workflow tests cover provider unavailable and malformed JSON preserving prior stable state.
+- [x] Provider unavailable during candidate fit brief generation returns a plain provider error.
+- [x] Malformed or invalid candidate fit brief output returns a plain validation error.
+- [x] Failed candidate fit brief generation preserves the prior stable application workflow state.
+- [x] Failed candidate fit brief generation does not clear existing approved evidence, job signals, or previously stored stable artifacts.
+- [x] Failure paths record enough diagnostic information for the existing preparation failure surface to remain useful.
+- [x] Workflow tests cover provider unavailable and malformed JSON preserving prior stable state.
 
 ## Blocked by
 
