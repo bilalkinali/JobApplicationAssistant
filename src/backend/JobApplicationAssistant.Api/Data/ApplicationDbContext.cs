@@ -72,6 +72,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             entity.Property(application => application.ApprovedEvidence).HasColumnType("jsonb");
             entity.Property(application => application.GapDecisions).HasColumnType("jsonb");
             entity.Property(application => application.CustomFacts).HasColumnType("jsonb");
+            entity.Property(application => application.ApplicationStrategy).HasColumnType("jsonb");
             entity.Property(application => application.PreparationStatus).HasMaxLength(80);
         });
 

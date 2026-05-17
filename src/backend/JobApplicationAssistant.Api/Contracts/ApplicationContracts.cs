@@ -28,6 +28,7 @@ public sealed record ApplicationResponse(
     string ApprovedEvidence,
     string GapDecisions,
     string CustomFacts,
+    string ApplicationStrategy,
     DateTimeOffset? LastPreparedAt,
     string PreparationStatus,
     DateTimeOffset CreatedAt,

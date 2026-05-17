@@ -34,6 +34,8 @@ public sealed class JobApplication
 
     public string CustomFacts { get; set; } = "[]";
 
+    public string ApplicationStrategy { get; set; } = "{}";
+
     public DateTimeOffset? LastPreparedAt { get; set; }
 
     public string PreparationStatus { get; set; } = "NotStarted";

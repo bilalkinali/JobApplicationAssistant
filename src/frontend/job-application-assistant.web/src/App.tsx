@@ -183,6 +183,7 @@ type ApplicationSession = ApplicationForm & {
   approvedEvidence: string;
   gapDecisions: string;
   customFacts: string;
+  applicationStrategy: string;
   lastPreparedAt: string | null;
   preparationStatus: string;
   generatedDraft: GeneratedDraft | null;
@@ -2785,6 +2786,7 @@ function toApplicationSession(application: ApplicationSession): ApplicationSessi
     approvedEvidence: application.approvedEvidence || "[]",
     gapDecisions: application.gapDecisions || "[]",
     customFacts: application.customFacts || "[]",
+    applicationStrategy: application.applicationStrategy || "{}",
     lastPreparedAt: application.lastPreparedAt ?? null,
     preparationStatus: application.preparationStatus ?? "NotStarted",
     generatedDraft: application.generatedDraft ?? null,
