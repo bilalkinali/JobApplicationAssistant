@@ -311,14 +311,14 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         }
 
         var details = new List<string>();
-        if (!string.IsNullOrWhiteSpace(rawRequest))
-        {
-            details.Add($"Raw request: {rawRequest}");
-        }
-
         if (!string.IsNullOrWhiteSpace(rawResponse))
         {
             details.Add($"Raw response: {rawResponse}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(rawRequest))
+        {
+            details.Add($"Raw request: {rawRequest}");
         }
 
         if (!string.IsNullOrWhiteSpace(errorContext))

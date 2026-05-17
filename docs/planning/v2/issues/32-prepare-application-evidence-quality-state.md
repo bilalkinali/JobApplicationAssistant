@@ -1,6 +1,6 @@
 # Prepare Application Evidence Quality State
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,15 +15,14 @@ The slice should make quality part of the backend workflow state before the fron
 
 ## Acceptance criteria
 
-- [ ] Prepared application state persists evidence match quality and reason.
-- [ ] Unmatched requirements remain available as unsupported job signals after preparation.
-- [ ] Weak evidence is not preselected or auto-approved during preparation.
-- [ ] Strong and partial evidence preserve the existing manual approve/remove review behavior.
-- [ ] Evidence matching continues to avoid duplicate or conflicting signal handling covered by the existing workflow.
-- [ ] API responses expose quality, reason, and unmatched requirements to the application detail experience.
-- [ ] Backend tests cover weak evidence not being auto-approved and quality surviving preparation state round trips.
+- [x] Prepared application state persists evidence match quality and reason.
+- [x] Unmatched requirements remain available as unsupported job signals after preparation.
+- [x] Weak evidence is not preselected or auto-approved during preparation.
+- [x] Strong and partial evidence preserve the existing manual approve/remove review behavior.
+- [x] Evidence matching continues to avoid duplicate or conflicting signal handling covered by the existing workflow.
+- [x] API responses expose quality, reason, and unmatched requirements to the application detail experience.
+- [x] Backend tests cover weak evidence not being auto-approved and quality surviving preparation state round trips.
 
 ## Blocked by
 
 - docs/planning/v2/issues/31-evidence-quality-provider-contract.md
-

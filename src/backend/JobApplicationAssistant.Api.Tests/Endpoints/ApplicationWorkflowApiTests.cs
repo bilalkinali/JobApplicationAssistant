@@ -673,6 +673,11 @@ public sealed class ApplicationWorkflowApiTests
         Assert.Contains(".NET", signals.RequiredSkills);
         Assert.Contains("Approved API work", prepared.Application.CandidateFitBrief);
         Assert.Single(evidenceMatches);
+        Assert.All(evidenceMatches, match =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(match.Quality));
+            Assert.False(string.IsNullOrWhiteSpace(match.Reason));
+        });
         Assert.Contains(unmatchedRequirements, requirement => requirement.Requirement == "Kubernetes");
 
         using var scope = factory.Services.CreateScope();
@@ -681,6 +686,68 @@ public sealed class ApplicationWorkflowApiTests
         Assert.Contains("JobAnalysis", runSteps);
         Assert.Contains("CandidateFitBrief", runSteps);
         Assert.Contains("EvidenceMatching", runSteps);
+    }
+
+    [Fact]
+    public async Task PrepareApplication_persists_evidence_quality_and_keeps_weak_evidence_unapproved()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        await CreateProfileFactAsync(client, "Approved .NET API work", "Approved", """[]""");
+        await CreateProfileFactAsync(client, "Frontend delivery", "Approved", """["React"]""", "Structured frontend delivery evidence.");
+        await CreateProfileFactAsync(client, "SQL metadata only", "Approved", """[]""", "Broad metadata-only evidence.");
+        var application = await CreateApplicationAsync(client, "We need .NET, React, SQL, and Kubernetes.");
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/prepare", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var prepared = await response.Content.ReadFromJsonAsync<PrepareApplicationResponse>();
+        Assert.NotNull(prepared);
+        Assert.Equal("[]", prepared.Application.ApprovedEvidence);
+
+        var evidenceMatches = JsonSerializer.Deserialize<List<EvidenceMatch>>(prepared.Application.EvidenceMatches, JsonOptions);
+        var unmatchedRequirements = JsonSerializer.Deserialize<List<UnmatchedRequirement>>(prepared.Application.UnmatchedRequirements, JsonOptions);
+        Assert.NotNull(evidenceMatches);
+        Assert.NotNull(unmatchedRequirements);
+        var strong = Assert.Single(evidenceMatches, match => match.Signal == ".NET");
+        var partial = Assert.Single(evidenceMatches, match => match.Signal == "React");
+        var weak = Assert.Single(evidenceMatches, match => match.Signal == "SQL");
+        Assert.Equal(EvidenceQuality.Strong, strong.Quality);
+        Assert.Equal(EvidenceQuality.Partial, partial.Quality);
+        Assert.Equal(EvidenceQuality.Weak, weak.Quality);
+        Assert.False(string.IsNullOrWhiteSpace(strong.Reason));
+        Assert.False(string.IsNullOrWhiteSpace(partial.Reason));
+        Assert.False(string.IsNullOrWhiteSpace(weak.Reason));
+        Assert.Contains(unmatchedRequirements, requirement => requirement.Requirement == "Kubernetes");
+
+        var reopenedResponse = await client.GetAsync($"/api/applications/{application.Id}");
+        reopenedResponse.EnsureSuccessStatusCode();
+        var reopened = await reopenedResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(reopened);
+        var reopenedMatches = JsonSerializer.Deserialize<List<EvidenceMatch>>(reopened.EvidenceMatches, JsonOptions);
+        Assert.NotNull(reopenedMatches);
+        Assert.Contains(reopenedMatches, match =>
+            match.Id == weak.Id &&
+            match.Quality == EvidenceQuality.Weak &&
+            !string.IsNullOrWhiteSpace(match.Reason));
+
+        var weakApprovalResponse = await client.PutAsJsonAsync(
+            $"/api/applications/{application.Id}/approved-evidence",
+            new ApprovedEvidenceRequest(JsonSerializer.Serialize(new[] { new { weak.Id } }, JsonOptions)));
+        Assert.Equal(HttpStatusCode.BadRequest, weakApprovalResponse.StatusCode);
+
+        var reviewedResponse = await client.PutAsJsonAsync(
+            $"/api/applications/{application.Id}/approved-evidence",
+            new ApprovedEvidenceRequest(JsonSerializer.Serialize(new[] { new { strong.Id }, new { partial.Id } }, JsonOptions)));
+        reviewedResponse.EnsureSuccessStatusCode();
+        var reviewed = await reviewedResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(reviewed);
+        var approvedEvidence = JsonSerializer.Deserialize<List<EvidenceMatch>>(reviewed.ApprovedEvidence, JsonOptions);
+        Assert.NotNull(approvedEvidence);
+        Assert.Equal(2, approvedEvidence.Count);
+        Assert.DoesNotContain(approvedEvidence, match => match.Quality == EvidenceQuality.Weak);
+        Assert.Contains(approvedEvidence, match => match.Id == strong.Id && match.Quality == EvidenceQuality.Strong);
+        Assert.Contains(approvedEvidence, match => match.Id == partial.Id && match.Quality == EvidenceQuality.Partial);
     }
 
     [Fact]
@@ -3799,14 +3866,15 @@ public sealed class ApplicationWorkflowApiTests
         HttpClient client,
         string title,
         string status,
-        string technologies)
+        string technologies,
+        string? summary = null)
     {
         var response = await client.PostAsJsonAsync(
             "/api/profile/facts",
             new ProfileFactRequest(
                 "Project",
                 title,
-                $"Evidence for {title}.",
+                summary ?? $"Evidence for {title}.",
                 status,
                 null,
                 technologies,
