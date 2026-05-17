@@ -11,6 +11,12 @@ import {
   technicalDetails
 } from "./errorPresentation";
 import {
+  candidateFitBriefSections,
+  hasCandidateFitBriefContent,
+  parseCandidateFitBrief
+} from "./candidateFitBrief";
+import type { CandidateFitBrief } from "./candidateFitBrief";
+import {
   getAvailabilityLabel,
   getDraftReadinessLabel,
   getDraftGenerationState,
@@ -167,6 +173,7 @@ type ApplicationSession = ApplicationForm & {
   jobSignals: string;
   evidenceMatches: string;
   unmatchedRequirements: string;
+  candidateFitBrief: string;
   approvedEvidence: string;
   gapDecisions: string;
   customFacts: string;
@@ -410,6 +417,10 @@ function App() {
   const customFacts = useMemo(
     () => parseJsonArray<CustomFact>(selectedApplication?.customFacts),
     [selectedApplication?.customFacts]
+  );
+  const candidateFitBrief = useMemo(
+    () => parseCandidateFitBrief(selectedApplication?.candidateFitBrief),
+    [selectedApplication?.candidateFitBrief]
   );
   const savedApprovedCustomFactEvidenceCount = useMemo(
     () => countApprovedCustomFactEvidence(savedGapDecisions, unmatchedRequirements, customFacts),
@@ -1928,6 +1939,10 @@ function App() {
                   <p className="empty-state compact">No analysis results yet.</p>
                 )}
 
+                {hasCandidateFitBriefContent(candidateFitBrief) && (
+                  <CandidateFitBriefSummary brief={candidateFitBrief} />
+                )}
+
                 <div className="workflow-step">
                   <div>
                     <h4>2. Evidence matching</h4>
@@ -2504,6 +2519,65 @@ function SignalColumn(props: { title: string; values: string[] }) {
   );
 }
 
+function CandidateFitBriefSummary(props: { brief: CandidateFitBrief }) {
+  const sections = candidateFitBriefSections(props.brief);
+
+  return (
+    <section className="fit-brief-summary" aria-label="Candidate fit brief summary">
+      <div className="section-heading">
+        <div>
+          <h4>Candidate fit brief</h4>
+          <p>Read-only preparation context. Supporting fact references are traceability only, not approved evidence.</p>
+        </div>
+        <StatusBadge tone="neutral">Read-only</StatusBadge>
+      </div>
+      {props.brief.candidateSummary.trim() && (
+        <p className="fit-brief-candidate-summary">{props.brief.candidateSummary}</p>
+      )}
+      {props.brief.skillGroups.length > 0 && (
+        <div className="fit-brief-skill-groups">
+          {props.brief.skillGroups.map((group, groupIndex) => (
+            <article className="fit-brief-card" key={`${group.name}-${groupIndex}`}>
+              <strong>{group.name}</strong>
+              {group.items.length === 0 ? (
+                <p className="empty-state compact">No skills listed.</p>
+              ) : (
+                <ul>
+                  {group.items.map((item, itemIndex) => (
+                    <li key={`${group.name}-${item.title}-${itemIndex}`}>
+                      <span>{item.title}</span>
+                      {item.summary && <small>{item.summary}</small>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+      <div className="fit-brief-section-grid">
+        {sections.map((section) => (
+          <article className={`fit-brief-card ${section.tone}`} key={section.key}>
+            <h5>{section.title}</h5>
+            {section.items.length === 0 ? (
+              <p className="empty-state compact">None recorded.</p>
+            ) : (
+              <ul>
+                {section.items.map((item, itemIndex) => (
+                  <li key={`${section.key}-${item.title}-${itemIndex}`}>
+                    <span>{item.title}</span>
+                    {item.summary && <small>{item.summary}</small>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 async function apiGet<T>(path: string): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`);
   return readResponse<T>(response);
@@ -2658,6 +2732,7 @@ function toApplicationSession(application: ApplicationSession): ApplicationSessi
     jobSignals: application.jobSignals || "{}",
     evidenceMatches: application.evidenceMatches || "[]",
     unmatchedRequirements: application.unmatchedRequirements || "[]",
+    candidateFitBrief: application.candidateFitBrief || "{}",
     approvedEvidence: application.approvedEvidence || "[]",
     gapDecisions: application.gapDecisions || "[]",
     customFacts: application.customFacts || "[]",

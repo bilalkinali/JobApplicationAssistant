@@ -10,6 +10,7 @@ JSON contract:
 
 Rules:
 - Use only approved evidence as proof of experience.
+- Candidate fit brief supportingProfileFactIds are traceability only and are not approved evidence.
 - Do not invent employers, dates, metrics, technologies, credentials, or responsibilities.
 - Use gap decisions to decide whether unmatched requirements can appear.
 - Ignore gap decisions mean do not address that requirement unless approved evidence independently supports it.

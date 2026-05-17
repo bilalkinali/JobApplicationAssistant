@@ -291,6 +291,7 @@ public static class ApplicationEndpoints
                 }));
             }
 
+            var stableState = ApplicationStableState.Capture(application);
             var analysisRun = new AiRun
             {
                 Id = Guid.NewGuid(),
@@ -356,6 +357,71 @@ public static class ApplicationEndpoints
             }, JsonOptions);
 
             var signals = analysisResult.JobSignals.Signals;
+            var profile = await db.Profiles
+                .OrderBy(profile => profile.CreatedAt)
+                .FirstOrDefaultAsync(ct);
+            var tonePreference = string.Equals(application.SelectedLanguage, "Danish", StringComparison.OrdinalIgnoreCase)
+                ? profile?.DanishTone
+                : profile?.EnglishTone;
+            var fitBriefRun = new AiRun
+            {
+                Id = Guid.NewGuid(),
+                JobApplicationId = application.Id,
+                Step = "CandidateFitBrief",
+                Provider = aiOptions.Provider,
+                Model = aiOptions.Model,
+                Status = "Running",
+                AttemptCount = 1,
+                StartedAt = DateTimeOffset.UtcNow,
+                InputSummary = JsonSerializer.Serialize(new
+                {
+                    SignalCount = signals.Count,
+                    ApprovedFactCount = approvedFacts.Count
+                }, JsonOptions)
+            };
+            db.AiRuns.Add(fitBriefRun);
+
+            CandidateFitBriefResult fitBriefResult;
+            try
+            {
+                fitBriefResult = await aiProvider.GenerateCandidateFitBriefAsync(
+                    new CandidateFitBriefInput(
+                        application.CompanyName,
+                        application.RoleTitle,
+                        application.ApplicationUrl,
+                        application.Deadline,
+                        application.SelectedLanguage,
+                        tonePreference,
+                        application.JobPostingText,
+                        analysisResult.JobSignals,
+                        approvedFacts),
+                    ct);
+            }
+            catch (AiProviderException exception)
+            {
+                RecordFailedRun(fitBriefRun, exception);
+                stableState.Restore(application);
+                await db.SaveChangesAsync(ct);
+
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    ["AiProvider"] = [exception.Message],
+                    ["Preparation"] = ["Job analysis completed, but candidate fit brief generation failed. Retry preparation before reviewing evidence."]
+                }));
+            }
+
+            fitBriefRun.Status = fitBriefResult.AttemptCount > 1 ? "RepairedSucceeded" : "Succeeded";
+            fitBriefRun.AttemptCount = fitBriefResult.AttemptCount;
+            fitBriefRun.CompletedAt = DateTimeOffset.UtcNow;
+            fitBriefRun.OutputSummary = JsonSerializer.Serialize(new
+            {
+                SkillGroupCount = fitBriefResult.SkillGroups.Count,
+                CompetencyCount = fitBriefResult.Competencies.Count,
+                ProjectCount = fitBriefResult.RelevantProjects.Count,
+                StrengthCount = fitBriefResult.TransferableStrengths.Count,
+                RiskCount = fitBriefResult.RiskNotes.Count
+            }, JsonOptions);
+
             var matchingRun = new AiRun
             {
                 Id = Guid.NewGuid(),
@@ -394,6 +460,7 @@ public static class ApplicationEndpoints
             }
 
             var now = DateTimeOffset.UtcNow;
+            application.CandidateFitBrief = JsonSerializer.Serialize(fitBriefResult, JsonOptions);
             application.EvidenceMatches = JsonSerializer.Serialize(matchingResult.EvidenceMatches, JsonOptions);
             application.UnmatchedRequirements = JsonSerializer.Serialize(matchingResult.UnmatchedRequirements, JsonOptions);
             application.ApprovedEvidence = "[]";
@@ -483,6 +550,7 @@ public static class ApplicationEndpoints
             application.DetectedLanguage = result.DetectedLanguage;
             application.SelectedLanguage = result.SelectedLanguage;
             application.JobSignals = JsonSerializer.Serialize(result.JobSignals, JsonOptions);
+            application.CandidateFitBrief = "{}";
             application.EvidenceMatches = "[]";
             application.UnmatchedRequirements = "[]";
             application.ApprovedEvidence = "[]";
@@ -1021,6 +1089,7 @@ public static class ApplicationEndpoints
             application.JobSignals,
             application.EvidenceMatches,
             application.UnmatchedRequirements,
+            application.CandidateFitBrief,
             application.ApprovedEvidence,
             application.GapDecisions,
             application.CustomFacts,
@@ -1031,6 +1100,61 @@ public static class ApplicationEndpoints
             application.GeneratedDraft is null ? null : ToResponse(application.GeneratedDraft),
             application.GeneratedDraft is not null,
             GetAuditReadiness(application.GeneratedDraft));
+
+    private sealed record ApplicationStableState(
+        string CompanyName,
+        string RoleTitle,
+        string? DetectedLanguage,
+        string? SelectedLanguage,
+        string JobSignals,
+        string EvidenceMatches,
+        string UnmatchedRequirements,
+        string CandidateFitBrief,
+        string ApprovedEvidence,
+        string GapDecisions,
+        string CustomFacts,
+        string Status,
+        DateTimeOffset? LastPreparedAt,
+        string PreparationStatus,
+        DateTimeOffset UpdatedAt)
+    {
+        public static ApplicationStableState Capture(JobApplication application) =>
+            new(
+                application.CompanyName,
+                application.RoleTitle,
+                application.DetectedLanguage,
+                application.SelectedLanguage,
+                application.JobSignals,
+                application.EvidenceMatches,
+                application.UnmatchedRequirements,
+                application.CandidateFitBrief,
+                application.ApprovedEvidence,
+                application.GapDecisions,
+                application.CustomFacts,
+                application.Status,
+                application.LastPreparedAt,
+                application.PreparationStatus,
+                application.UpdatedAt);
+
+        public void Restore(JobApplication application)
+        {
+            application.CompanyName = CompanyName;
+            application.RoleTitle = RoleTitle;
+            application.DetectedLanguage = DetectedLanguage;
+            application.SelectedLanguage = SelectedLanguage;
+            application.JobSignals = JobSignals;
+            application.EvidenceMatches = EvidenceMatches;
+            application.UnmatchedRequirements = UnmatchedRequirements;
+            application.CandidateFitBrief = CandidateFitBrief;
+            application.ApprovedEvidence = ApprovedEvidence;
+            application.GapDecisions = GapDecisions;
+            application.CustomFacts = CustomFacts;
+            application.Status = Status;
+            application.LastPreparedAt = LastPreparedAt;
+            application.PreparationStatus = PreparationStatus;
+            application.UpdatedAt = UpdatedAt;
+        }
+    }
 
     private static GeneratedDraftResponse ToResponse(GeneratedDraft draft) =>
         new(

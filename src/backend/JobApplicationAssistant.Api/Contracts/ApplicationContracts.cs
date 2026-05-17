@@ -23,6 +23,8 @@ public sealed record ApplicationResponse(
     string JobSignals,
     string EvidenceMatches,
     string UnmatchedRequirements,
+    // Candidate fit brief supportingProfileFactIds are traceability-only references, not approved evidence.
+    string CandidateFitBrief,
     string ApprovedEvidence,
     string GapDecisions,
     string CustomFacts,

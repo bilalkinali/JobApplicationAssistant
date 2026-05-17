@@ -16,6 +16,8 @@ public interface IAiProvider
 
     Task<ClaimAuditResult> AuditClaimsAsync(ClaimAuditInput input, CancellationToken ct);
 
+    Task<CandidateFitBriefResult> GenerateCandidateFitBriefAsync(CandidateFitBriefInput input, CancellationToken ct);
+
     Task<AssistedProfileImportResult> ImportProfileFactsAsync(AssistedProfileImportInput input, CancellationToken ct);
 }
 
@@ -113,6 +115,39 @@ public sealed record ClaimAuditClaim(
     string Text,
     string Status,
     IReadOnlyList<string> EvidenceIds);
+
+public sealed record CandidateFitBriefInput(
+    string CompanyName,
+    string RoleTitle,
+    string? ApplicationUrl,
+    DateOnly? Deadline,
+    string? SelectedLanguage,
+    string? TonePreference,
+    string? JobPostingText,
+    JobSignalsDocument? JobSignals,
+    IReadOnlyList<ProfileFact> ApprovedProfileFacts);
+
+public sealed record CandidateFitBriefResult(
+    string CandidateSummary,
+    IReadOnlyList<CandidateFitSkillGroup> SkillGroups,
+    IReadOnlyList<CandidateFitBriefItem> Competencies,
+    IReadOnlyList<CandidateFitBriefItem> RelevantProjects,
+    IReadOnlyList<CandidateFitBriefItem> TransferableStrengths,
+    IReadOnlyList<CandidateFitBriefItem> RiskNotes)
+{
+    public int AttemptCount { get; init; } = 1;
+}
+
+public sealed record CandidateFitSkillGroup(
+    string Name,
+    IReadOnlyList<CandidateFitBriefItem> Items);
+
+public sealed record CandidateFitBriefItem(
+    string Title,
+    string Summary,
+    // Traceability only. These ids must never be treated as approved evidence for final claims,
+    // evidence review, draft generation, or claim audit.
+    IReadOnlyList<Guid> SupportingProfileFactIds);
 
 public sealed record AssistedProfileImportInput(
     string FileName,

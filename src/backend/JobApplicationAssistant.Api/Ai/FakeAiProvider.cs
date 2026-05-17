@@ -243,33 +243,259 @@ public sealed partial class FakeAiProvider : IAiProvider
         return Task.FromResult(new ClaimAuditResult(claims));
     }
 
+    public Task<CandidateFitBriefResult> GenerateCandidateFitBriefAsync(CandidateFitBriefInput input, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var facts = input.ApprovedProfileFacts
+            .OrderBy(fact => fact.Title, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(fact => fact.Id)
+            .ToList();
+        var primaryFact = facts.FirstOrDefault();
+        IReadOnlyList<Guid> primaryIds = primaryFact is null ? [] : [primaryFact.Id];
+        var technologyItems = facts
+            .SelectMany(fact => ExtractJsonValues(fact.Technologies)
+                .Select(technology => new CandidateFitBriefItem(
+                    technology,
+                    $"{technology} is supported by {fact.Title}.",
+                    [fact.Id])))
+            .DistinctBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (technologyItems.Count == 0 && primaryFact is not null)
+        {
+            technologyItems.Add(new CandidateFitBriefItem(
+                primaryFact.Title,
+                primaryFact.Summary,
+                [primaryFact.Id]));
+        }
+
+        var projectItems = facts
+            .Take(3)
+            .Select(fact => new CandidateFitBriefItem(fact.Title, fact.Summary, [fact.Id]))
+            .ToList();
+        var language = string.IsNullOrWhiteSpace(input.SelectedLanguage) ? "English" : input.SelectedLanguage.Trim();
+        var tone = string.IsNullOrWhiteSpace(input.TonePreference) ? "evidence-led" : input.TonePreference.Trim();
+        var signalSummary = input.JobSignals?.Signals.Count > 0
+            ? string.Join(", ", input.JobSignals.Signals.Select(signal => signal.Label).Take(5))
+            : string.IsNullOrWhiteSpace(input.JobPostingText) ? "the supplied role context" : "the supplied job posting";
+
+        IReadOnlyList<CandidateFitBriefItem> competencies = primaryFact is null
+            ? []
+            : new[]
+            {
+                new CandidateFitBriefItem(
+                    "Evidence-led delivery",
+                    $"The strongest concrete evidence is {primaryFact.Title}.",
+                    primaryIds)
+            };
+        IReadOnlyList<CandidateFitBriefItem> transferableStrengths = facts.Count == 0
+            ? []
+            : new[]
+            {
+                new CandidateFitBriefItem(
+                    "Traceable profile evidence",
+                    "The brief only uses approved profile facts as concrete support.",
+                    facts.Select(fact => fact.Id).ToList())
+            };
+
+        var result = new CandidateFitBriefResult(
+            $"Language: {language}. {input.RoleTitle} at {input.CompanyName} fit brief in a {tone} tone, based on {facts.Count} approved profile facts and {signalSummary}.",
+            [
+                new CandidateFitSkillGroup("Supported skills", technologyItems)
+            ],
+            competencies,
+            projectItems,
+            transferableStrengths,
+            [
+                new CandidateFitBriefItem(
+                    "Unsupported requirements need review",
+                    "Do not turn job requirements into candidate claims unless an approved fact supports them.",
+                    [])
+            ]);
+
+        return Task.FromResult(result);
+    }
+
     public Task<AssistedProfileImportResult> ImportProfileFactsAsync(AssistedProfileImportInput input, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
-        var technologies = KeywordDefinitions
+        var detectedTechnologies = KeywordDefinitions
             .Where(definition => ContainsAny(input.ExtractedText, definition.Keywords))
             .Select(definition => definition.Label)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+        var technologies = detectedTechnologies.ToList();
         if (technologies.Count == 0)
         {
             technologies.Add("Imported CV review");
         }
 
         var sourceContext = FirstUsefulSentence(input.ExtractedText);
-        var titleTechnology = technologies.First();
-        var fact = new AssistedProfileImportFact(
-            "ImportedCv",
-            $"Demo CV import: {titleTechnology}",
-            $"Fake assisted import from {input.FileName}: review this draft before using it as evidence.",
-            [sourceContext],
-            technologies,
-            technologies.Select(technology => $"Reviewed CV evidence may mention {technology}.").ToList(),
-            ["Do not claim this imported CV evidence until the draft fact is approved."],
-            sourceContext);
+        var hasExpandedCvCoverage =
+            ContainsAny(input.ExtractedText, ["collaboration", "communication", "stakeholder", "requirements", "analysis"]) ||
+            ContainsAny(input.ExtractedText, ["transferable", "business", "domain", "customer", "operations", "process"]) ||
+            ContainsAny(input.ExtractedText, ["education", "degree", "university", "bachelor", "master", "certification"]) ||
+            ContainsAny(input.ExtractedText, ["english", "danish", "language", "fluent"]);
 
-        return Task.FromResult(new AssistedProfileImportResult([fact]));
+        if (!hasExpandedCvCoverage)
+        {
+            var fact = new AssistedProfileImportFact(
+                "ImportedCv",
+                $"Demo CV import: {technologies.First()}",
+                $"Fake assisted import from {input.FileName}: review this draft before using it as evidence.",
+                [sourceContext],
+                technologies,
+                technologies.Select(technology => $"Reviewed CV evidence may mention {technology}.").ToList(),
+                ["Do not claim this imported CV evidence until the draft fact is approved."],
+                sourceContext);
+
+            return Task.FromResult(new AssistedProfileImportResult([fact]));
+        }
+
+        var facts = new List<AssistedProfileImportFact>();
+
+        if (detectedTechnologies.Count > 0)
+        {
+            facts.Add(new AssistedProfileImportFact(
+                "Skill",
+                $"Imported technical skills: {technologies.First()}",
+                $"Fake assisted import from {input.FileName}: review these draft technical skills before using them as evidence.",
+                [sourceContext],
+                technologies,
+                technologies.Select(technology => $"Reviewed CV evidence may mention {technology}.").ToList(),
+                ["Do not claim these imported CV skills until the draft fact is approved."],
+                sourceContext));
+        }
+
+        if (detectedTechnologies.Count > 0)
+        {
+            facts.Add(new AssistedProfileImportFact(
+                "Tool",
+                $"Imported tools: {technologies.First()}",
+                "The CV names tools or technologies that should be reviewed separately from broader competencies.",
+                [sourceContext],
+                technologies,
+                technologies.Select(technology => $"Reviewed CV evidence may mention hands-on use of {technology} after approval.").ToList(),
+                ["Do not claim depth, recency, or production ownership unless explicitly present in the CV."],
+                sourceContext));
+        }
+
+        if (ContainsAny(input.ExtractedText, ["project", "built", "delivered", "implemented", "developed"]))
+        {
+            facts.Add(new AssistedProfileImportFact(
+                "Project",
+                "Imported project delivery",
+                "The CV describes project work that should be reviewed as a separate draft fact.",
+                [sourceContext],
+                technologies,
+                ["Reviewed CV evidence may mention project delivery after approval."],
+                ["Do not claim project ownership, production impact, or seniority unless explicitly approved."],
+                sourceContext));
+        }
+
+        if (ContainsAny(input.ExtractedText, ["work history", "role", "employer", "experience"]))
+        {
+            facts.Add(new AssistedProfileImportFact(
+                "WorkHistory",
+                "Imported work history",
+                "The CV includes role, employer, or work experience background for review.",
+                [sourceContext],
+                [],
+                ["Reviewed CV evidence may mention work history after approval."],
+                ["Do not claim role scope or dates not explicitly present in the CV."],
+                sourceContext));
+        }
+
+        if (ContainsAny(input.ExtractedText, ["collaboration", "communication", "stakeholder", "requirements", "analysis"]))
+        {
+            facts.Add(new AssistedProfileImportFact(
+                "Competency",
+                "Imported collaboration and analysis competency",
+                "The CV describes collaboration, communication, requirements, or analysis competency for review.",
+                [sourceContext],
+                [],
+                ["Reviewed CV evidence may mention collaboration or analysis competency after approval."],
+                ["Do not claim leadership or ownership beyond the imported CV evidence."],
+                sourceContext));
+        }
+
+        if (ContainsAny(input.ExtractedText, ["business", "domain", "customer", "operations", "process"]))
+        {
+            facts.Add(new AssistedProfileImportFact(
+                "BusinessExperience",
+                "Imported business experience",
+                "The CV describes business, domain, customer, operations, or process experience for review.",
+                [sourceContext],
+                [],
+                ["Reviewed CV evidence may mention business context after approval."],
+                ["Do not claim direct industry expertise unless explicitly present in the CV."],
+                sourceContext));
+        }
+
+        if (ContainsAny(input.ExtractedText, ["transferable", "business", "domain", "customer", "operations", "process"]))
+        {
+            facts.Add(new AssistedProfileImportFact(
+                "TransferableStrength",
+                "Imported transferable business strength",
+                "The CV describes business, domain, customer, operations, or process experience for review.",
+                [sourceContext],
+                [],
+                ["Reviewed CV evidence may mention transferable business strengths after approval."],
+                ["Do not claim direct industry expertise unless explicitly present in the CV."],
+                sourceContext));
+        }
+
+        if (ContainsAny(input.ExtractedText, ["education", "degree", "university", "bachelor", "master", "certification"]))
+        {
+            facts.Add(new AssistedProfileImportFact(
+                "Education",
+                "Imported education background",
+                "The CV includes education or certification background for review.",
+                [sourceContext],
+                [],
+                ["Reviewed CV evidence may mention education or certification after approval."],
+                ["Do not claim credentials not explicitly present in the CV."],
+                sourceContext));
+        }
+
+        if (ContainsAny(input.ExtractedText, ["english", "danish", "language", "fluent"]))
+        {
+            facts.Add(new AssistedProfileImportFact(
+                "Language",
+                "Imported language background",
+                "The CV includes language background for review.",
+                [sourceContext],
+                [],
+                ["Reviewed CV evidence may mention language background after approval."],
+                ["Do not claim fluency unless explicitly present in the CV."],
+                sourceContext));
+        }
+
+        facts.Add(new AssistedProfileImportFact(
+            "AllowedClaim",
+            "Imported claims to review",
+            "The imported CV evidence contains possible claims that require user approval before use.",
+            [sourceContext],
+            detectedTechnologies,
+            detectedTechnologies.Count > 0
+                ? detectedTechnologies.Select(technology => $"Reviewed CV evidence may mention {technology} after approval.").ToList()
+                : ["Reviewed CV evidence may be used only after approval."],
+            ["Do not use these imported claims until the draft fact is approved."],
+            sourceContext));
+
+        facts.Add(new AssistedProfileImportFact(
+            "ForbiddenClaim",
+            "Imported risky claims to avoid",
+            "The imported CV evidence remains unapproved and should not support claims until reviewed.",
+            [sourceContext],
+            [],
+            [],
+            ["Do not claim this imported CV evidence until the draft fact is approved."],
+            sourceContext));
+
+        return Task.FromResult(new AssistedProfileImportResult(facts));
     }
 
     private static bool ContainsAny(string text, IReadOnlyList<string> keywords) =>
@@ -367,6 +593,21 @@ public sealed partial class FakeAiProvider : IAiProvider
         catch (JsonException)
         {
             return json;
+        }
+    }
+
+    private static IReadOnlyList<string> ExtractJsonValues(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var values = new List<string>();
+            AddJsonText(document.RootElement, values);
+            return values.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim()).ToList();
+        }
+        catch (JsonException)
+        {
+            return string.IsNullOrWhiteSpace(json) ? [] : [json.Trim()];
         }
     }
 
