@@ -59,7 +59,8 @@ public sealed record JobAnalysisResult(
 
 public sealed record EvidenceMatchInput(
     IReadOnlyList<JobSignal> Signals,
-    IReadOnlyList<ProfileFact> ApprovedFacts);
+    IReadOnlyList<ProfileFact> ApprovedFacts,
+    CandidateFitBriefResult? CandidateFitBrief = null);
 
 public sealed record EvidenceMatchResult(
     IReadOnlyList<EvidenceMatch> EvidenceMatches,
@@ -191,7 +192,21 @@ public sealed record EvidenceMatch(
     Guid ProfileFactId,
     string ProfileFactTitle,
     string Summary,
-    IReadOnlyList<string> MatchedTerms);
+    IReadOnlyList<string> MatchedTerms,
+    string Quality = EvidenceQuality.Strong,
+    string Reason = "Direct match against approved profile evidence.");
+
+public static class EvidenceQuality
+{
+    public const string Strong = "Strong";
+    public const string Partial = "Partial";
+    public const string Weak = "Weak";
+
+    public static bool IsValid(string? quality) =>
+        string.Equals(quality, Strong, StringComparison.Ordinal) ||
+        string.Equals(quality, Partial, StringComparison.Ordinal) ||
+        string.Equals(quality, Weak, StringComparison.Ordinal);
+}
 
 public sealed record UnmatchedRequirement(
     string Id,

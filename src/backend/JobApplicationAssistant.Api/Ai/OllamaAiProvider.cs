@@ -325,9 +325,12 @@ public sealed class OllamaAiProvider : IAiProvider
                 string.IsNullOrWhiteSpace(match.SignalId) ||
                 string.IsNullOrWhiteSpace(match.ProfileFactId) ||
                 string.IsNullOrWhiteSpace(match.Summary) ||
+                string.IsNullOrWhiteSpace(match.Quality) ||
+                string.IsNullOrWhiteSpace(match.Reason) ||
                 match.MatchedTerms is null ||
                 match.MatchedTerms.Count == 0 ||
                 match.MatchedTerms.All(string.IsNullOrWhiteSpace) ||
+                !EvidenceQuality.IsValid(match.Quality.Trim()) ||
                 !signalsById.TryGetValue(match.SignalId.Trim(), out var signal) ||
                 !Guid.TryParse(match.ProfileFactId, out var profileFactId) ||
                 !approvedFactsById.TryGetValue(profileFactId, out var fact))
@@ -349,7 +352,9 @@ public sealed class OllamaAiProvider : IAiProvider
                 fact.Id,
                 fact.Title,
                 match.Summary.Trim(),
-                match.MatchedTerms.Where(term => !string.IsNullOrWhiteSpace(term)).Select(term => term.Trim()).ToList()));
+                match.MatchedTerms.Where(term => !string.IsNullOrWhiteSpace(term)).Select(term => term.Trim()).ToList(),
+                match.Quality.Trim(),
+                match.Reason.Trim()));
         }
 
         foreach (var requirement in payload.UnmatchedRequirements)
@@ -544,6 +549,17 @@ public sealed class OllamaAiProvider : IAiProvider
             fact.Technologies,
             fact.AllowedClaims
         });
+        var candidateFitBrief = input.CandidateFitBrief is null
+            ? null
+            : new
+            {
+                input.CandidateFitBrief.CandidateSummary,
+                input.CandidateFitBrief.SkillGroups,
+                input.CandidateFitBrief.Competencies,
+                input.CandidateFitBrief.RelevantProjects,
+                input.CandidateFitBrief.TransferableStrengths,
+                input.CandidateFitBrief.RiskNotes
+            };
 
         return $"""
         {EvidenceMatchingPrompt}
@@ -553,6 +569,9 @@ public sealed class OllamaAiProvider : IAiProvider
 
         Approved profile facts:
         {JsonSerializer.Serialize(approvedFacts, JsonOptions)}
+
+        Candidate fit brief context:
+        {JsonSerializer.Serialize(candidateFitBrief, JsonOptions)}
         """;
     }
 
@@ -726,6 +745,17 @@ public sealed class OllamaAiProvider : IAiProvider
             fact.Technologies,
             fact.AllowedClaims
         });
+        var candidateFitBrief = input.CandidateFitBrief is null
+            ? null
+            : new
+            {
+                input.CandidateFitBrief.CandidateSummary,
+                input.CandidateFitBrief.SkillGroups,
+                input.CandidateFitBrief.Competencies,
+                input.CandidateFitBrief.RelevantProjects,
+                input.CandidateFitBrief.TransferableStrengths,
+                input.CandidateFitBrief.RiskNotes
+            };
 
         return
         $"""
@@ -733,6 +763,7 @@ public sealed class OllamaAiProvider : IAiProvider
         Return only strict JSON. Do not include markdown.
         Every job signal id listed below must appear exactly once: either in evidenceMatches or in unmatchedRequirements.
         Use only the listed approved profile fact ids for evidenceMatches.
+        Evidence matches must include quality exactly as Strong, Partial, or Weak, and a reviewer-facing reason.
         For unmatchedRequirements, include signalId and recommendation; the API will derive display fields from the job signal.
 
         Validation error:
@@ -743,6 +774,9 @@ public sealed class OllamaAiProvider : IAiProvider
 
         Approved profile facts:
         {JsonSerializer.Serialize(approvedFacts, JsonOptions)}
+
+        Candidate fit brief context:
+        {JsonSerializer.Serialize(candidateFitBrief, JsonOptions)}
 
         Invalid JSON:
         {invalidJson}
@@ -852,6 +886,8 @@ public sealed class OllamaAiProvider : IAiProvider
         string SignalId,
         string ProfileFactId,
         string Summary,
+        string Quality,
+        string Reason,
         IReadOnlyList<string> MatchedTerms);
 
     private sealed record OllamaUnmatchedRequirementResponse(

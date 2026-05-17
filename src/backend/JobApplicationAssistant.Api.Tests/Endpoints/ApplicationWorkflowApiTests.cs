@@ -1143,6 +1143,8 @@ public sealed class ApplicationWorkflowApiTests
                       "signalId": "dotnet",
                       "profileFactId": "{{approvedFact.Id}}",
                       "summary": "Approved API work demonstrates .NET experience.",
+                      "quality": "Strong",
+                      "reason": ".NET is directly supported by approved API work.",
                       "matchedTerms": [".NET"]
                     }
                   ],
@@ -1186,6 +1188,8 @@ public sealed class ApplicationWorkflowApiTests
                       "signalId": "unknown-signal",
                       "profileFactId": "00000000-0000-0000-0000-000000000000",
                       "summary": "Unsupported reference.",
+                      "quality": "Strong",
+                      "reason": "Invalid signal should still be rejected.",
                       "matchedTerms": [".NET"]
                     }
                   ],
@@ -1322,6 +1326,8 @@ public sealed class ApplicationWorkflowApiTests
                       "signalId": "dotnet",
                       "profileFactId": "{{approvedFact.Id}}",
                       "summary": "Approved API work demonstrates .NET experience.",
+                      "quality": "Strong",
+                      "reason": ".NET is directly supported by approved API work.",
                       "matchedTerms": [".NET"]
                     }
                   ],
@@ -1374,12 +1380,16 @@ public sealed class ApplicationWorkflowApiTests
                       "signalId": "dotnet",
                       "profileFactId": "{{approvedFact.Id}}",
                       "summary": "First match.",
+                      "quality": "Strong",
+                      "reason": ".NET is directly supported by approved API work.",
                       "matchedTerms": [".NET"]
                     },
                     {
                       "signalId": "dotnet",
                       "profileFactId": "{{approvedFact.Id}}",
                       "summary": "Duplicate match.",
+                      "quality": "Strong",
+                      "reason": ".NET is directly supported by approved API work.",
                       "matchedTerms": [".NET"]
                     }
                   ],
@@ -1437,6 +1447,8 @@ public sealed class ApplicationWorkflowApiTests
                       "signalId": "dotnet",
                       "profileFactId": "{{approvedFact.Id}}",
                       "summary": "Approved API work demonstrates .NET experience.",
+                      "quality": "Strong",
+                      "reason": ".NET is directly supported by approved API work.",
                       "matchedTerms": [".NET"]
                     }
                   ],
@@ -3861,6 +3873,8 @@ public sealed class ApplicationWorkflowApiTests
               "signalId": "dotnet",
               "profileFactId": "{{profileFactId}}",
               "summary": "Approved API work demonstrates .NET experience.",
+              "quality": "Strong",
+              "reason": ".NET is directly supported by approved API work.",
               "matchedTerms": [".NET"]
             }
           ],
@@ -3881,6 +3895,8 @@ public sealed class ApplicationWorkflowApiTests
               "signalId": "dotnet",
               "profileFactId": "{{profileFactId}}",
               "summary": "Approved API work demonstrates .NET experience.",
+              "quality": "Strong",
+              "reason": ".NET is directly supported by approved API work.",
               "matchedTerms": [".NET"]
             }
           ],

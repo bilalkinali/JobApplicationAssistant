@@ -435,7 +435,8 @@ public static class ApplicationEndpoints
                 InputSummary = JsonSerializer.Serialize(new
                 {
                     SignalCount = signals.Count,
-                    ApprovedFactCount = approvedFacts.Count
+                    ApprovedFactCount = approvedFacts.Count,
+                    CandidateFitBriefAvailable = true
                 }, JsonOptions)
             };
             db.AiRuns.Add(matchingRun);
@@ -443,7 +444,7 @@ public static class ApplicationEndpoints
             EvidenceMatchResult matchingResult;
             try
             {
-                matchingResult = await aiProvider.MatchEvidenceAsync(new EvidenceMatchInput(signals, approvedFacts), ct);
+                matchingResult = await aiProvider.MatchEvidenceAsync(new EvidenceMatchInput(signals, approvedFacts, fitBriefResult), ct);
             }
             catch (AiProviderException exception)
             {
@@ -617,7 +618,8 @@ public static class ApplicationEndpoints
                 InputSummary = JsonSerializer.Serialize(new
                 {
                     SignalCount = signals.Count,
-                    ApprovedFactCount = approvedFacts.Count
+                    ApprovedFactCount = approvedFacts.Count,
+                    CandidateFitBriefAvailable = ReadCandidateFitBrief(application.CandidateFitBrief) is not null
                 }, JsonOptions)
             };
             db.AiRuns.Add(run);
@@ -625,7 +627,7 @@ public static class ApplicationEndpoints
             EvidenceMatchResult result;
             try
             {
-                result = await aiProvider.MatchEvidenceAsync(new EvidenceMatchInput(signals, approvedFacts), ct);
+                result = await aiProvider.MatchEvidenceAsync(new EvidenceMatchInput(signals, approvedFacts, ReadCandidateFitBrief(application.CandidateFitBrief)), ct);
             }
             catch (AiProviderException exception)
             {
@@ -1618,6 +1620,19 @@ public static class ApplicationEndpoints
         catch (JsonException)
         {
             return [];
+        }
+    }
+
+    private static CandidateFitBriefResult? ReadCandidateFitBrief(string candidateFitBrief)
+    {
+        try
+        {
+            var result = JsonSerializer.Deserialize<CandidateFitBriefResult>(candidateFitBrief, JsonOptions);
+            return string.IsNullOrWhiteSpace(result?.CandidateSummary) ? null : result;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 

@@ -108,8 +108,13 @@ public sealed partial class FakeAiProvider : IAiProvider
                 {
                     Fact = fact,
                     Terms = signal.Keywords
-                        .Where(keyword => FactContains(fact, keyword))
-                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Select(keyword => new
+                        {
+                            Keyword = keyword,
+                            Quality = ClassifyFactMatch(fact, keyword)
+                        })
+                        .Where(match => match.Quality is not null)
+                        .DistinctBy(match => match.Keyword, StringComparer.OrdinalIgnoreCase)
                         .ToList()
                 })
                 .Where(match => match.Terms.Count > 0)
@@ -126,15 +131,21 @@ public sealed partial class FakeAiProvider : IAiProvider
                 continue;
             }
 
-            matches.AddRange(signalMatches.Select(match => new EvidenceMatch(
-                $"match-{signal.Id}-{match.Fact.Id:N}",
-                signal.Id,
-                signal.Label,
-                signal.Category,
-                match.Fact.Id,
-                match.Fact.Title,
-                match.Fact.Summary,
-                match.Terms)));
+            matches.AddRange(signalMatches.Select(match =>
+            {
+                var quality = BestQuality(match.Terms.Select(term => term.Quality!).ToList());
+                return new EvidenceMatch(
+                    $"match-{signal.Id}-{match.Fact.Id:N}",
+                    signal.Id,
+                    signal.Label,
+                    signal.Category,
+                    match.Fact.Id,
+                    match.Fact.Title,
+                    match.Fact.Summary,
+                    match.Terms.Select(term => term.Keyword).ToList(),
+                    quality,
+                    QualityReason(quality, signal.Label, match.Fact.Title));
+            }));
         }
 
         return Task.FromResult(new EvidenceMatchResult(matches, unmatched));
@@ -501,19 +512,48 @@ public sealed partial class FakeAiProvider : IAiProvider
     private static bool ContainsAny(string text, IReadOnlyList<string> keywords) =>
         keywords.Any(keyword => ContainsTerm(text, keyword));
 
-    private static bool FactContains(ProfileFact fact, string keyword)
+    private static string? ClassifyFactMatch(ProfileFact fact, string keyword)
     {
-        var haystack = string.Join(' ', [
-            fact.Type,
-            fact.Title,
-            fact.Summary,
-            ExtractJsonText(fact.FactItems),
-            ExtractJsonText(fact.Technologies),
-            ExtractJsonText(fact.AllowedClaims)
-        ]);
+        if (ContainsTerm(fact.AllowedClaims, keyword) ||
+            ContainsTerm(fact.Summary, keyword))
+        {
+            return EvidenceQuality.Strong;
+        }
 
-        return ContainsTerm(haystack, keyword);
+        if (ContainsTerm(fact.FactItems, keyword) ||
+            ContainsTerm(fact.Technologies, keyword))
+        {
+            return EvidenceQuality.Partial;
+        }
+
+        if (ContainsTerm(fact.Title, keyword) ||
+            ContainsTerm(fact.Type, keyword))
+        {
+            return EvidenceQuality.Weak;
+        }
+
+        return null;
     }
+
+    private static string BestQuality(IReadOnlyList<string> qualities)
+    {
+        if (qualities.Contains(EvidenceQuality.Strong, StringComparer.Ordinal))
+        {
+            return EvidenceQuality.Strong;
+        }
+
+        return qualities.Contains(EvidenceQuality.Partial, StringComparer.Ordinal)
+            ? EvidenceQuality.Partial
+            : EvidenceQuality.Weak;
+    }
+
+    private static string QualityReason(string quality, string signal, string profileFactTitle) =>
+        quality switch
+        {
+            EvidenceQuality.Strong => $"{signal} is directly supported by approved claims or summary in {profileFactTitle}.",
+            EvidenceQuality.Partial => $"{signal} appears in structured approved fact details for {profileFactTitle}, so wording should stay careful.",
+            _ => $"{signal} only appears in broad approved fact metadata for {profileFactTitle}; review before using it as proof."
+        };
 
     private static IReadOnlyList<string> SplitClaims(params string[] texts) =>
         texts

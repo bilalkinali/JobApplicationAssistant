@@ -140,6 +140,50 @@ public sealed class FakeAiProviderTests
     }
 
     [Fact]
+    public async Task MatchEvidenceAsync_returns_deterministic_quality_labels_reasons_and_unmatched_requirements()
+    {
+        var provider = new FakeAiProvider();
+        var signals = new[]
+        {
+            new JobSignal("dotnet", ".NET", "RequiredSkill", [".net"]),
+            new JobSignal("react", "React", "RequiredSkill", ["react"]),
+            new JobSignal("docker", "Docker", "PreferredSkill", ["docker"]),
+            new JobSignal("kubernetes", "Kubernetes", "PreferredSkill", ["kubernetes"])
+        };
+        var approvedFacts = new[]
+        {
+            new ProfileFact
+            {
+                Id = Guid.NewGuid(),
+                Type = "Project",
+                Title = "Docker learning notes",
+                Summary = "Built ASP.NET Core APIs.",
+                Status = ProfileFactStatus.Approved,
+                Technologies = """["React"]""",
+                AllowedClaims = """["Delivered .NET services"]"""
+            }
+        };
+
+        var result = await provider.MatchEvidenceAsync(
+            new EvidenceMatchInput(signals, approvedFacts),
+            CancellationToken.None);
+
+        Assert.Contains(result.EvidenceMatches, match =>
+            match.SignalId == "dotnet" &&
+            match.Quality == EvidenceQuality.Strong &&
+            match.Reason.Contains("directly supported", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.EvidenceMatches, match =>
+            match.SignalId == "react" &&
+            match.Quality == EvidenceQuality.Partial &&
+            match.Reason.Contains("careful", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.EvidenceMatches, match =>
+            match.SignalId == "docker" &&
+            match.Quality == EvidenceQuality.Weak &&
+            match.Reason.Contains("review", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.UnmatchedRequirements, requirement => requirement.SignalId == "kubernetes");
+    }
+
+    [Fact]
     public async Task GenerateDraftAsync_creates_deterministic_text_from_approved_evidence_and_unmatched_requirements()
     {
         var provider = new FakeAiProvider();
