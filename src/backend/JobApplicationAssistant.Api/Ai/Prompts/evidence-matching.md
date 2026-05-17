@@ -22,4 +22,5 @@ Return only strict JSON with this exact shape:
 Use only the provided approved profile facts as evidence.
 Reference only existing job signal ids.
 Put each signal in either evidenceMatches or unmatchedRequirements.
+Every job signal id must appear exactly once across evidenceMatches and unmatchedRequirements.
 Do not reference draft, archived, unknown, or inferred profile facts.

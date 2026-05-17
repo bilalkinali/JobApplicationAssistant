@@ -1082,6 +1082,78 @@ button:disabled {
   background: #ffffff;
 }
 
+.fit-brief-summary {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #d9d7d0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.fit-brief-summary .section-heading {
+  align-items: flex-start;
+}
+
+.fit-brief-candidate-summary {
+  margin: 0;
+  color: #344250;
+  line-height: 1.5;
+}
+
+.fit-brief-skill-groups,
+.fit-brief-section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.fit-brief-card {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #d7dde2;
+  border-radius: 8px;
+  background: #f7f8f5;
+}
+
+.fit-brief-card.risk {
+  border-color: #e2d2a9;
+  background: #fff8e8;
+}
+
+.fit-brief-card h5 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.fit-brief-card ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fit-brief-card li {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.fit-brief-card span,
+.fit-brief-card small {
+  overflow-wrap: anywhere;
+}
+
+.fit-brief-card small {
+  color: #64717c;
+  line-height: 1.4;
+}
+
 .custom-facts-panel {
   display: grid;
   grid-column: 1 / -1;

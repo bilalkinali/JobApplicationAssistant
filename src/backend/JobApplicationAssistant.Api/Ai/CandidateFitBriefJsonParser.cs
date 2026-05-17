@@ -15,7 +15,7 @@ internal static class CandidateFitBriefJsonParser
         CandidateFitBriefResponse? payload;
         try
         {
-            payload = JsonSerializer.Deserialize<CandidateFitBriefResponse>(responseText, JsonOptions);
+            payload = JsonSerializer.Deserialize<CandidateFitBriefResponse>(ExtractJsonObject(responseText), JsonOptions);
         }
         catch (JsonException exception)
         {
@@ -34,14 +34,21 @@ internal static class CandidateFitBriefJsonParser
         }
 
         var approvedFactIds = input.ApprovedProfileFacts.Select(fact => fact.Id).ToHashSet();
+        var riskNotes = payload.RiskNotes
+            .Select(item => ValidateItem(item, approvedFactIds, providerName, attemptCount, allowEmptySupport: true))
+            .ToList();
+        var skillGroups = payload.SkillGroups
+            .Select(group => ValidateSkillGroup(group, approvedFactIds, providerName, attemptCount, riskNotes))
+            .Where(group => group.Items.Count > 0)
+            .ToList();
 
         return new CandidateFitBriefResult(
             payload.CandidateSummary.Trim(),
-            payload.SkillGroups.Select(group => ValidateSkillGroup(group, approvedFactIds, providerName, attemptCount)).ToList(),
-            payload.Competencies.Select(item => ValidateItem(item, approvedFactIds, providerName, attemptCount, allowEmptySupport: false)).ToList(),
-            payload.RelevantProjects.Select(item => ValidateItem(item, approvedFactIds, providerName, attemptCount, allowEmptySupport: false)).ToList(),
-            payload.TransferableStrengths.Select(item => ValidateItem(item, approvedFactIds, providerName, attemptCount, allowEmptySupport: false)).ToList(),
-            payload.RiskNotes.Select(item => ValidateItem(item, approvedFactIds, providerName, attemptCount, allowEmptySupport: true)).ToList())
+            skillGroups,
+            ValidateSupportedItems(payload.Competencies, approvedFactIds, providerName, attemptCount, riskNotes),
+            ValidateSupportedItems(payload.RelevantProjects, approvedFactIds, providerName, attemptCount, riskNotes),
+            ValidateSupportedItems(payload.TransferableStrengths, approvedFactIds, providerName, attemptCount, riskNotes),
+            riskNotes)
         {
             AttemptCount = attemptCount
         };
@@ -51,7 +58,8 @@ internal static class CandidateFitBriefJsonParser
         CandidateFitSkillGroupResponse? group,
         ISet<Guid> approvedFactIds,
         string providerName,
-        int attemptCount)
+        int attemptCount,
+        List<CandidateFitBriefItem> riskNotes)
     {
         if (group is null || string.IsNullOrWhiteSpace(group.Name) || group.Items is null)
         {
@@ -60,7 +68,31 @@ internal static class CandidateFitBriefJsonParser
 
         return new CandidateFitSkillGroup(
             group.Name.Trim(),
-            group.Items.Select(item => ValidateItem(item, approvedFactIds, providerName, attemptCount, allowEmptySupport: false)).ToList());
+            ValidateSupportedItems(group.Items, approvedFactIds, providerName, attemptCount, riskNotes));
+    }
+
+    private static List<CandidateFitBriefItem> ValidateSupportedItems(
+        IReadOnlyList<CandidateFitBriefItemResponse> items,
+        ISet<Guid> approvedFactIds,
+        string providerName,
+        int attemptCount,
+        List<CandidateFitBriefItem> riskNotes)
+    {
+        var supportedItems = new List<CandidateFitBriefItem>();
+        foreach (var item in items)
+        {
+            var validated = ValidateItem(item, approvedFactIds, providerName, attemptCount, allowEmptySupport: true);
+            if (validated.SupportingProfileFactIds.Count == 0)
+            {
+                riskNotes.Add(validated);
+            }
+            else
+            {
+                supportedItems.Add(validated);
+            }
+        }
+
+        return supportedItems;
     }
 
     private static CandidateFitBriefItem ValidateItem(
@@ -107,6 +139,67 @@ internal static class CandidateFitBriefJsonParser
 
     private static AiInvalidOutputException Invalid(string providerName, int attemptCount) =>
         new($"{providerName} returned structurally invalid candidate fit brief JSON.", attemptCount);
+
+    private static string ExtractJsonObject(string responseText)
+    {
+        var trimmed = responseText.Trim();
+        if (trimmed.StartsWith('{') && trimmed.EndsWith('}'))
+        {
+            return trimmed;
+        }
+
+        var start = trimmed.IndexOf('{');
+        if (start < 0)
+        {
+            return trimmed;
+        }
+
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+        for (var index = start; index < trimmed.Length; index++)
+        {
+            var current = trimmed[index];
+
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+
+            if (current == '\\' && inString)
+            {
+                escaped = true;
+                continue;
+            }
+
+            if (current == '"')
+            {
+                inString = !inString;
+                continue;
+            }
+
+            if (inString)
+            {
+                continue;
+            }
+
+            if (current == '{')
+            {
+                depth++;
+            }
+            else if (current == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return trimmed[start..(index + 1)];
+                }
+            }
+        }
+
+        return trimmed;
+    }
 
     private sealed record CandidateFitBriefResponse(
         string CandidateSummary,

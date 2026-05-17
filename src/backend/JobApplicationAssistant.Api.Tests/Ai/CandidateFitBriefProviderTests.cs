@@ -68,6 +68,30 @@ public sealed class CandidateFitBriefProviderTests
         Assert.Contains(fact.Id.ToString(), requestJson);
     }
 
+    [Fact]
+    public async Task OpenAi_compatible_candidate_fit_brief_accepts_json_wrapped_in_markdown_fence()
+    {
+        var fact = ApprovedFact("Approved API work", "Built ASP.NET Core APIs backed by PostgreSQL.", """[".NET"]""");
+        var wrappedJson = $"""
+        Here is the candidate fit brief JSON:
+
+        ```json
+        {ValidCandidateFitBriefJson(fact.Id)}
+        ```
+        """;
+        var handler = new QueuedHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent(wrappedJson) }
+        ]));
+        var provider = new OpenAiCompatibleAiProvider(new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434/v1/") }, Options());
+
+        var result = await provider.GenerateCandidateFitBriefAsync(CandidateFitInput([fact]), CancellationToken.None);
+
+        Assert.Equal(1, result.AttemptCount);
+        Assert.Equal("Candidate has traceable API delivery evidence.", result.CandidateSummary);
+        Assert.Contains(result.SkillGroups.SelectMany(group => group.Items), item => item.SupportingProfileFactIds.Contains(fact.Id));
+    }
+
     [Theory]
     [InlineData("{ malformed")]
     [InlineData("""{"candidateSummary":"summary","skillGroups":[]}""")]
@@ -108,24 +132,36 @@ public sealed class CandidateFitBriefProviderTests
     }
 
     [Fact]
-    public async Task Ollama_candidate_fit_brief_rejects_concrete_items_without_supporting_profile_fact_ids()
+    public async Task Ollama_candidate_fit_brief_moves_unsupported_concrete_items_to_risk_notes()
     {
         var fact = ApprovedFact("Approved API work", "Built ASP.NET Core APIs backed by PostgreSQL.", """[".NET"]""");
-        var invalidJson = ValidCandidateFitBriefJson(fact.Id).Replace(
-            $"\"supportingProfileFactIds\": [\"{fact.Id}\"]",
-            "\"supportingProfileFactIds\": []",
+        var jsonWithUnsupportedTransferableStrength = ValidCandidateFitBriefJson(fact.Id).Replace(
+            $$"""
+                {
+                  "title": "Evidence-led delivery",
+                  "summary": "Uses reviewed facts for claims.",
+                  "supportingProfileFactIds": ["{{fact.Id}}"]
+                }
+            """,
+            """
+                {
+                  "title": "Interest in new technologies",
+                  "summary": "No approved fact directly supports this as a strength.",
+                  "supportingProfileFactIds": []
+                }
+            """,
             StringComparison.Ordinal);
         var handler = new QueuedHandler(new Queue<HttpResponseMessage>(
         [
-            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(invalidJson) },
-            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(invalidJson) }
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(jsonWithUnsupportedTransferableStrength) }
         ]));
         var provider = new OllamaAiProvider(new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") }, Options());
 
-        await Assert.ThrowsAsync<AiInvalidOutputException>(() =>
-            provider.GenerateCandidateFitBriefAsync(CandidateFitInput([fact]), CancellationToken.None));
+        var result = await provider.GenerateCandidateFitBriefAsync(CandidateFitInput([fact]), CancellationToken.None);
 
-        Assert.Equal(2, handler.Requests.Count);
+        Assert.DoesNotContain(result.TransferableStrengths, item => item.Title == "Interest in new technologies");
+        Assert.Contains(result.RiskNotes, item => item.Title == "Interest in new technologies" && item.SupportingProfileFactIds.Count == 0);
+        Assert.Single(handler.Requests);
     }
 
     private static CandidateFitBriefInput CandidateFitInput(IReadOnlyList<ProfileFact> facts) =>

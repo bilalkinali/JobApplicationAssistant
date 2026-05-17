@@ -104,7 +104,7 @@ public sealed class OllamaAiProvider : IAiProvider
         }
         catch (AiInvalidOutputException firstFailure)
         {
-            var repairedText = await GenerateAsync(BuildEvidenceMatchingRepairPrompt(responseText, firstFailure.Message), attemptCount: 2, ct);
+            var repairedText = await GenerateAsync(BuildEvidenceMatchingRepairPrompt(responseText, firstFailure.Message, input), attemptCount: 2, ct);
             return ParseEvidenceMatching(repairedText, input, attemptCount: 2);
         }
     }
@@ -707,17 +707,47 @@ public sealed class OllamaAiProvider : IAiProvider
         {invalidJson}
         """;
 
-    private static string BuildEvidenceMatchingRepairPrompt(string invalidJson, string validationError) =>
+    private static string BuildEvidenceMatchingRepairPrompt(string invalidJson, string validationError, EvidenceMatchInput input)
+    {
+        var signals = input.Signals.Select(signal => new
+        {
+            signal.Id,
+            signal.Label,
+            signal.Category,
+            signal.Keywords
+        });
+        var approvedFacts = input.ApprovedFacts.Select(fact => new
+        {
+            fact.Id,
+            fact.Type,
+            fact.Title,
+            fact.Summary,
+            fact.FactItems,
+            fact.Technologies,
+            fact.AllowedClaims
+        });
+
+        return
         $"""
         Repair this evidence matching JSON so it matches the required contract exactly.
         Return only strict JSON. Do not include markdown.
+        Every job signal id listed below must appear exactly once: either in evidenceMatches or in unmatchedRequirements.
+        Use only the listed approved profile fact ids for evidenceMatches.
+        For unmatchedRequirements, include signalId and recommendation; the API will derive display fields from the job signal.
 
         Validation error:
         {validationError}
 
+        Job signals:
+        {JsonSerializer.Serialize(signals, JsonOptions)}
+
+        Approved profile facts:
+        {JsonSerializer.Serialize(approvedFacts, JsonOptions)}
+
         Invalid JSON:
         {invalidJson}
         """;
+    }
 
     private static string BuildDraftGenerationRepairPrompt(string invalidJson, string validationError) =>
         $"""

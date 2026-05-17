@@ -1341,6 +1341,9 @@ public sealed class ApplicationWorkflowApiTests
 
         var repairRequestJson = await handler.Requests[1].Content!.ReadAsStringAsync();
         Assert.Contains("Repair this evidence matching JSON", repairRequestJson);
+        Assert.Contains("Every job signal id listed below must appear exactly once", repairRequestJson);
+        Assert.Contains("kubernetes", repairRequestJson);
+        Assert.Contains(approvedFact.Id.ToString(), repairRequestJson);
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
