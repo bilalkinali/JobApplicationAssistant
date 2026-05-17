@@ -18,6 +18,8 @@ public interface IAiProvider
 
     Task<CandidateFitBriefResult> GenerateCandidateFitBriefAsync(CandidateFitBriefInput input, CancellationToken ct);
 
+    Task<ApplicationStrategyResult> GenerateApplicationStrategyAsync(ApplicationStrategyInput input, CancellationToken ct);
+
     Task<AssistedProfileImportResult> ImportProfileFactsAsync(AssistedProfileImportInput input, CancellationToken ct);
 }
 
@@ -149,6 +151,47 @@ public sealed record CandidateFitBriefItem(
     // Traceability only. These ids must never be treated as approved evidence for final claims,
     // evidence review, draft generation, or claim audit.
     IReadOnlyList<Guid> SupportingProfileFactIds);
+
+public sealed record ApplicationStrategyInput(
+    JobAnalysisResult JobAnalysis,
+    CandidateFitBriefResult CandidateFitBrief,
+    IReadOnlyList<EvidenceMatch> ApprovedEvidence,
+    IReadOnlyList<UnmatchedRequirement> UnmatchedRequirements,
+    IReadOnlyList<DraftGapDecision> GapDecisions,
+    IReadOnlyList<DraftCustomFact> ApprovedCustomFacts,
+    string? SelectedLanguage,
+    string? TonePreference);
+
+public sealed record ApplicationStrategyResult(
+    IReadOnlyList<ApplicationStrategyAngle> PrimaryAngles,
+    IReadOnlyList<ApplicationStrategyAngle> SecondaryAngles,
+    IReadOnlyList<ApplicationStrategyGapGuidance> GapHandlingGuidance,
+    IReadOnlyList<ApplicationStrategyClaimToAvoid> ClaimsToAvoid,
+    string ToneGuidance,
+    IReadOnlyList<ApplicationStrategyOutlineItem> DraftOutline)
+{
+    public int AttemptCount { get; init; } = 1;
+}
+
+public sealed record ApplicationStrategyAngle(
+    string Title,
+    string Rationale,
+    IReadOnlyList<string> EvidenceIds,
+    IReadOnlyList<Guid> ProfileFactIds);
+
+public sealed record ApplicationStrategyGapGuidance(
+    string UnmatchedRequirementId,
+    string Guidance);
+
+public sealed record ApplicationStrategyClaimToAvoid(
+    string Claim,
+    string Reason);
+
+public sealed record ApplicationStrategyOutlineItem(
+    string Section,
+    string Guidance,
+    IReadOnlyList<string> EvidenceIds,
+    IReadOnlyList<Guid> ProfileFactIds);
 
 public sealed record AssistedProfileImportInput(
     string FileName,

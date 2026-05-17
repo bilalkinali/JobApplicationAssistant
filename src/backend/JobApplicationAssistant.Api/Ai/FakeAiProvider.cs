@@ -328,6 +328,91 @@ public sealed partial class FakeAiProvider : IAiProvider
         return Task.FromResult(result);
     }
 
+    public Task<ApplicationStrategyResult> GenerateApplicationStrategyAsync(ApplicationStrategyInput input, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var language = string.IsNullOrWhiteSpace(input.SelectedLanguage) ? input.JobAnalysis.SelectedLanguage : input.SelectedLanguage.Trim();
+        var tone = string.IsNullOrWhiteSpace(input.TonePreference) ? "evidence-led and specific" : input.TonePreference.Trim();
+        var approvedEvidence = input.ApprovedEvidence
+            .OrderBy(evidence => EvidenceQualityRank(evidence.Quality))
+            .ThenBy(evidence => evidence.ProfileFactTitle, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(evidence => evidence.Id, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var primaryEvidence = approvedEvidence.Take(2).ToList();
+        var secondaryEvidence = approvedEvidence.Skip(2).Take(3).ToList();
+        if (secondaryEvidence.Count == 0)
+        {
+            secondaryEvidence = approvedEvidence.Skip(1).Take(1).ToList();
+        }
+
+        List<ApplicationStrategyAngle> primaryAngles = primaryEvidence.Count == 0
+            ? []
+            : primaryEvidence
+                .Select(evidence => new ApplicationStrategyAngle(
+                    $"{evidence.Signal} through {evidence.ProfileFactTitle}",
+                    $"{evidence.Quality} approved evidence supports a concrete {input.JobAnalysis.RoleTitle} story: {evidence.Summary}",
+                    [evidence.Id],
+                    [evidence.ProfileFactId]))
+                .ToList();
+        var secondaryAngles = secondaryEvidence
+            .Select(evidence => new ApplicationStrategyAngle(
+                $"Secondary {evidence.Signal} context",
+                $"Use {evidence.ProfileFactTitle} as supporting context only where it strengthens the primary story.",
+                [evidence.Id],
+                [evidence.ProfileFactId]))
+            .ToList();
+        var gapGuidance = input.UnmatchedRequirements
+            .OrderBy(requirement => requirement.Requirement, StringComparer.OrdinalIgnoreCase)
+            .Select(requirement => new ApplicationStrategyGapGuidance(
+                requirement.Id,
+                GapStrategyLine(requirement, input.GapDecisions, input.ApprovedCustomFacts)))
+            .ToList();
+        var claimsToAvoid = input.UnmatchedRequirements
+            .Select(requirement => new ApplicationStrategyClaimToAvoid(
+                $"Hands-on {requirement.Requirement} experience",
+                "No approved evidence supports this as an existing capability."))
+            .Concat(input.ApprovedEvidence
+                .Where(evidence => evidence.Quality == EvidenceQuality.Weak)
+                .Select(evidence => new ApplicationStrategyClaimToAvoid(
+                    $"Strong ownership of {evidence.Signal}",
+                    $"Only weak evidence supports {evidence.Signal}; keep wording contextual.")))
+            .ToList();
+        var outlineEvidenceIds = primaryEvidence.Select(evidence => evidence.Id).ToList();
+        var outlineProfileFactIds = primaryEvidence.Select(evidence => evidence.ProfileFactId).Distinct().ToList();
+
+        var result = new ApplicationStrategyResult(
+            primaryAngles,
+            secondaryAngles,
+            gapGuidance,
+            claimsToAvoid,
+            $"Write in {language} with a {tone} tone. Lead with approved evidence, keep trace-only fit brief facts contextual, and avoid unsupported claims.",
+            [
+                new ApplicationStrategyOutlineItem(
+                    "Opening",
+                    $"Name the {input.JobAnalysis.RoleTitle} role at {input.JobAnalysis.CompanyName} and introduce the strongest evidence-led angle.",
+                    outlineEvidenceIds,
+                    outlineProfileFactIds),
+                new ApplicationStrategyOutlineItem(
+                    "Evidence story",
+                    "Develop the primary approved evidence before adding secondary context.",
+                    outlineEvidenceIds,
+                    outlineProfileFactIds),
+                new ApplicationStrategyOutlineItem(
+                    "Gap handling",
+                    "Mention selected gaps only as learning interests or approved custom facts.",
+                    [],
+                    []),
+                new ApplicationStrategyOutlineItem(
+                    "Close",
+                    "End with concise motivation tied to the role context and reviewed evidence.",
+                    outlineEvidenceIds,
+                    outlineProfileFactIds)
+            ]);
+
+        return Task.FromResult(result);
+    }
+
     public Task<AssistedProfileImportResult> ImportProfileFactsAsync(AssistedProfileImportInput input, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -554,6 +639,38 @@ public sealed partial class FakeAiProvider : IAiProvider
             EvidenceQuality.Partial => $"{signal} appears in structured approved fact details for {profileFactTitle}, so wording should stay careful.",
             _ => $"{signal} only appears in broad approved fact metadata for {profileFactTitle}; review before using it as proof."
         };
+
+    private static int EvidenceQualityRank(string quality) =>
+        quality switch
+        {
+            EvidenceQuality.Strong => 0,
+            EvidenceQuality.Partial => 1,
+            _ => 2
+        };
+
+    private static string GapStrategyLine(
+        UnmatchedRequirement requirement,
+        IReadOnlyList<DraftGapDecision> gapDecisions,
+        IReadOnlyList<DraftCustomFact> approvedCustomFacts)
+    {
+        var decision = gapDecisions.FirstOrDefault(decision =>
+            string.Equals(decision.UnmatchedRequirementId, requirement.Id, StringComparison.OrdinalIgnoreCase));
+        if (decision is null)
+        {
+            return $"Treat {requirement.Requirement} as unsupported; omit concrete claims and use only a learning-interest framing if useful.";
+        }
+
+        if (decision.Decision == "CoveredByCustomFact" &&
+            decision.CustomFactId is not null &&
+            approvedCustomFacts.Any(fact => fact.Id == decision.CustomFactId.Value))
+        {
+            return $"Use the approved custom fact for {requirement.Requirement}; do not rely on the original unmatched requirement as proof.";
+        }
+
+        return decision.Decision == "MentionAsLearningInterest"
+            ? $"Mention {requirement.Requirement} only as an interest to learn."
+            : $"Omit {requirement.Requirement} unless reviewed evidence is added.";
+    }
 
     private static IReadOnlyList<string> SplitClaims(params string[] texts) =>
         texts

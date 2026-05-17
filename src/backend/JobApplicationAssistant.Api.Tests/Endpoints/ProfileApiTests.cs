@@ -1222,6 +1222,9 @@ public sealed class ProfileApiTests
         public Task<CandidateFitBriefResult> GenerateCandidateFitBriefAsync(CandidateFitBriefInput input, CancellationToken ct) =>
             throw new NotSupportedException();
 
+        public Task<ApplicationStrategyResult> GenerateApplicationStrategyAsync(ApplicationStrategyInput input, CancellationToken ct) =>
+            throw new NotSupportedException();
+
         public Task<AssistedProfileImportResult> ImportProfileFactsAsync(AssistedProfileImportInput input, CancellationToken ct) =>
             Task.FromResult(importResult);
     }

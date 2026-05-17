@@ -12,6 +12,7 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
     private static readonly string DraftGenerationPrompt = LoadPrompt("draft-generation.md");
     private static readonly string ClaimAuditPrompt = LoadPrompt("claim-audit.md");
     private static readonly string CandidateFitBriefPrompt = LoadPrompt("candidate-fit-brief.md");
+    private static readonly string ApplicationStrategyPrompt = LoadPrompt("application-strategy.md");
     private static readonly string AssistedProfileImportPrompt = LoadPrompt("assisted-profile-import.md");
 
     private readonly HttpClient httpClient;
@@ -213,6 +214,20 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         {
             var repairedText = await ChatAsync(BuildCandidateFitBriefRepairPrompt(responseText, firstFailure.Message), attemptCount: 2, ct);
             return CandidateFitBriefJsonParser.Parse(repairedText, input, "OpenAI-compatible endpoint", attemptCount: 2);
+        }
+    }
+
+    public async Task<ApplicationStrategyResult> GenerateApplicationStrategyAsync(ApplicationStrategyInput input, CancellationToken ct)
+    {
+        var responseText = await ChatAsync(BuildApplicationStrategyPrompt(input), attemptCount: 1, ct);
+        try
+        {
+            return ApplicationStrategyJsonParser.Parse(responseText, input, "OpenAI-compatible endpoint", attemptCount: 1);
+        }
+        catch (AiInvalidOutputException firstFailure)
+        {
+            var repairedText = await ChatAsync(BuildApplicationStrategyRepairPrompt(responseText, firstFailure.Message, input), attemptCount: 2, ct);
+            return ApplicationStrategyJsonParser.Parse(repairedText, input, "OpenAI-compatible endpoint", attemptCount: 2);
         }
     }
 
@@ -870,6 +885,65 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         """;
     }
 
+    private static string BuildApplicationStrategyPrompt(ApplicationStrategyInput input)
+    {
+        var approvedEvidence = input.ApprovedEvidence.Select(evidence => new
+        {
+            evidence.Id,
+            evidence.SignalId,
+            evidence.Signal,
+            evidence.Category,
+            evidence.ProfileFactId,
+            evidence.ProfileFactTitle,
+            evidence.Summary,
+            evidence.MatchedTerms,
+            evidence.Quality,
+            evidence.Reason
+        });
+        var approvedCustomFacts = input.ApprovedCustomFacts.Select(fact => new
+        {
+            fact.Id,
+            fact.UnmatchedRequirementId,
+            fact.Title,
+            fact.Summary,
+            fact.Technologies,
+            fact.AllowedClaims
+        });
+
+        return $"""
+        {ApplicationStrategyPrompt}
+
+        Application context:
+        {JsonSerializer.Serialize(new
+        {
+            input.JobAnalysis.CompanyName,
+            input.JobAnalysis.RoleTitle,
+            input.JobAnalysis.DetectedLanguage,
+            input.JobAnalysis.SelectedLanguage,
+            RequestedLanguage = input.SelectedLanguage,
+            input.TonePreference
+        }, JsonOptions)}
+
+        Job analysis:
+        {JsonSerializer.Serialize(input.JobAnalysis.JobSignals, JsonOptions)}
+
+        Candidate fit brief:
+        {JsonSerializer.Serialize(input.CandidateFitBrief, JsonOptions)}
+
+        Approved evidence:
+        {JsonSerializer.Serialize(approvedEvidence, JsonOptions)}
+
+        Unmatched requirements:
+        {JsonSerializer.Serialize(input.UnmatchedRequirements, JsonOptions)}
+
+        Gap decisions:
+        {JsonSerializer.Serialize(input.GapDecisions, JsonOptions)}
+
+        Approved job-local custom facts:
+        {JsonSerializer.Serialize(approvedCustomFacts, JsonOptions)}
+        """;
+    }
+
     private static string BuildRepairPrompt(string invalidJson, string validationError) =>
         $"""
         Repair this job analysis JSON so it matches the required contract exactly.
@@ -974,6 +1048,42 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         Invalid JSON:
         {invalidJson}
         """;
+
+    private static string BuildApplicationStrategyRepairPrompt(
+        string invalidJson,
+        string validationError,
+        ApplicationStrategyInput input) =>
+        $"""
+        Repair this application strategy JSON so it matches the required contract exactly.
+        Return only strict JSON. Do not include markdown.
+        Use only approved evidence ids from the supplied approved evidence.
+        Use profileFactIds only for narrative context traceability, and only when listed in approved evidence or candidate fit brief.
+        All arrays are required, even when empty.
+
+        Validation error:
+        {validationError}
+
+        Approved evidence ids:
+        {JsonSerializer.Serialize(input.ApprovedEvidence.Select(evidence => evidence.Id), JsonOptions)}
+
+        Valid profile fact ids:
+        {JsonSerializer.Serialize(ValidApplicationStrategyProfileFactIds(input), JsonOptions)}
+
+        Unmatched requirement ids:
+        {JsonSerializer.Serialize(input.UnmatchedRequirements.Select(requirement => requirement.Id), JsonOptions)}
+
+        Invalid JSON:
+        {invalidJson}
+        """;
+
+    private static IEnumerable<Guid> ValidApplicationStrategyProfileFactIds(ApplicationStrategyInput input) =>
+        input.ApprovedEvidence.Select(evidence => evidence.ProfileFactId)
+            .Concat(input.CandidateFitBrief.SkillGroups.SelectMany(group => group.Items).SelectMany(item => item.SupportingProfileFactIds))
+            .Concat(input.CandidateFitBrief.Competencies.SelectMany(item => item.SupportingProfileFactIds))
+            .Concat(input.CandidateFitBrief.RelevantProjects.SelectMany(item => item.SupportingProfileFactIds))
+            .Concat(input.CandidateFitBrief.TransferableStrengths.SelectMany(item => item.SupportingProfileFactIds))
+            .Concat(input.CandidateFitBrief.RiskNotes.SelectMany(item => item.SupportingProfileFactIds))
+            .Distinct();
 
     private static bool IsSupportedLanguage(string language) =>
         string.Equals(language.Trim(), "English", StringComparison.OrdinalIgnoreCase) ||
