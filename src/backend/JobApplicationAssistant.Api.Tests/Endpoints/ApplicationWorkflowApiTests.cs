@@ -731,23 +731,18 @@ public sealed class ApplicationWorkflowApiTests
             match.Quality == EvidenceQuality.Weak &&
             !string.IsNullOrWhiteSpace(match.Reason));
 
-        var weakApprovalResponse = await client.PutAsJsonAsync(
-            $"/api/applications/{application.Id}/approved-evidence",
-            new ApprovedEvidenceRequest(JsonSerializer.Serialize(new[] { new { weak.Id } }, JsonOptions)));
-        Assert.Equal(HttpStatusCode.BadRequest, weakApprovalResponse.StatusCode);
-
         var reviewedResponse = await client.PutAsJsonAsync(
             $"/api/applications/{application.Id}/approved-evidence",
-            new ApprovedEvidenceRequest(JsonSerializer.Serialize(new[] { new { strong.Id }, new { partial.Id } }, JsonOptions)));
+            new ApprovedEvidenceRequest(JsonSerializer.Serialize(new[] { new { strong.Id }, new { partial.Id }, new { weak.Id } }, JsonOptions)));
         reviewedResponse.EnsureSuccessStatusCode();
         var reviewed = await reviewedResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
         Assert.NotNull(reviewed);
         var approvedEvidence = JsonSerializer.Deserialize<List<EvidenceMatch>>(reviewed.ApprovedEvidence, JsonOptions);
         Assert.NotNull(approvedEvidence);
-        Assert.Equal(2, approvedEvidence.Count);
-        Assert.DoesNotContain(approvedEvidence, match => match.Quality == EvidenceQuality.Weak);
+        Assert.Equal(3, approvedEvidence.Count);
         Assert.Contains(approvedEvidence, match => match.Id == strong.Id && match.Quality == EvidenceQuality.Strong);
         Assert.Contains(approvedEvidence, match => match.Id == partial.Id && match.Quality == EvidenceQuality.Partial);
+        Assert.Contains(approvedEvidence, match => match.Id == weak.Id && match.Quality == EvidenceQuality.Weak);
     }
 
     [Fact]

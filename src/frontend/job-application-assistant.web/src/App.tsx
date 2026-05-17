@@ -31,6 +31,12 @@ import {
   getReadinessTone,
   isFakeProvider
 } from "./readiness";
+import {
+  canApproveEvidenceMatch,
+  evidenceQualityPresentation,
+  isWeakEvidence,
+  weakEvidenceReviewLabel
+} from "./evidenceReview";
 import "./styles.css";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:5108";
@@ -237,6 +243,8 @@ type EvidenceMatch = {
   profileFactTitle: string;
   summary: string;
   matchedTerms: string[];
+  quality?: string | null;
+  reason?: string | null;
 };
 
 type CustomFact = {
@@ -330,6 +338,7 @@ function App() {
   const [applicationReadinessFilter, setApplicationReadinessFilter] = useState("All");
   const [includeArchivedApplications, setIncludeArchivedApplications] = useState(false);
   const [approvedEvidenceDraft, setApprovedEvidenceDraft] = useState<EvidenceMatch[]>([]);
+  const [reviewedWeakMatchIds, setReviewedWeakMatchIds] = useState<string[]>([]);
   const [gapDecisionsDraft, setGapDecisionsDraft] = useState<GapDecision[]>([]);
   const [customFactDrafts, setCustomFactDrafts] = useState<Record<string, CustomFactDraft>>({});
   const [generatedDraftForm, setGeneratedDraftForm] = useState<GeneratedDraftForm>({
@@ -556,6 +565,10 @@ function App() {
   useEffect(() => {
     setApprovedEvidenceDraft(savedApprovedEvidence);
   }, [selectedApplicationId, savedApprovedEvidence]);
+
+  useEffect(() => {
+    setReviewedWeakMatchIds([]);
+  }, [selectedApplicationId, selectedApplication?.evidenceMatches]);
 
   useEffect(() => {
     setGapDecisionsDraft(savedGapDecisions);
@@ -1416,9 +1429,17 @@ function App() {
   }
 
   function approveMatch(match: EvidenceMatch) {
+    if (!canApproveEvidenceMatch(match, reviewedWeakMatchIds.includes(match.id))) {
+      return;
+    }
+
     setApprovedEvidenceDraft((current) =>
       current.some((item) => item.id === match.id) ? current : [...current, match]
     );
+  }
+
+  function reviewWeakMatch(matchId: string) {
+    setReviewedWeakMatchIds((current) => (current.includes(matchId) ? current : [...current, matchId]));
   }
 
   function removeApprovedEvidence(matchId: string) {
@@ -1963,15 +1984,43 @@ function App() {
                   <section className="review-column">
                     <h4>Matched evidence</h4>
                     {evidenceMatches.length === 0 && <p className="empty-state compact">No matches yet.</p>}
-                    {evidenceMatches.map((match) => (
-                      <article className="evidence-card" key={match.id}>
-                        <strong>{match.signal}</strong>
-                        <span>{match.profileFactTitle}</span>
-                        <p>{match.summary}</p>
-                        <small>Matched: {match.matchedTerms.join(", ")}</small>
-                        <button type="button" onClick={() => approveMatch(match)}>Approve</button>
-                      </article>
-                    ))}
+                    {evidenceMatches.map((match) => {
+                      const quality = evidenceQualityPresentation(match.quality);
+                      const isWeakMatch = isWeakEvidence(match);
+                      const hasReviewedWeakMatch = reviewedWeakMatchIds.includes(match.id);
+
+                      return (
+                        <article className={`evidence-card ${quality.cardClass}`} key={match.id}>
+                          <div className="evidence-card-heading">
+                            <strong>{match.signal}</strong>
+                            <StatusBadge tone={quality.tone}>{quality.label}</StatusBadge>
+                          </div>
+                          <span>{match.profileFactTitle}</span>
+                          <p>{match.summary}</p>
+                          {match.reason && <small>Reason: {match.reason}</small>}
+                          <small>{quality.guidance}</small>
+                          {match.matchedTerms.length > 0 && <small>Matched: {match.matchedTerms.join(", ")}</small>}
+                          {isWeakMatch ? (
+                            <div className="weak-match-review">
+                              <button
+                                type="button"
+                                className={hasReviewedWeakMatch ? "selected" : ""}
+                                onClick={() => reviewWeakMatch(match.id)}
+                                aria-pressed={hasReviewedWeakMatch}
+                              >
+                                {weakEvidenceReviewLabel(hasReviewedWeakMatch)}
+                              </button>
+                              {hasReviewedWeakMatch && (
+                                <button type="button" onClick={() => approveMatch(match)}>Approve weak match</button>
+                              )}
+                              <small>Weak matches should only guide cautious wording or prompt stronger evidence.</small>
+                            </div>
+                          ) : (
+                            <button type="button" onClick={() => approveMatch(match)}>Approve</button>
+                          )}
+                        </article>
+                      );
+                    })}
                   </section>
 
                   <section className="review-column">

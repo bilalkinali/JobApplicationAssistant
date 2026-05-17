@@ -1,6 +1,6 @@
 # Evidence Review Quality UX
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,15 +15,14 @@ The slice should help the user avoid approving weak proof by accident while pres
 
 ## Acceptance criteria
 
-- [ ] Evidence review displays quality labels for strong, partial, and weak matches.
-- [ ] Evidence review displays the reason for each match where available.
-- [ ] Weak matches are visually distinct from strong and partial matches.
-- [ ] Weak matches require deliberate opt-in review before they can support generation.
-- [ ] Partial matches are presented as usable but cautious evidence rather than full-strength proof.
-- [ ] Unsupported job signals remain visible as unmatched instead of appearing as weak evidence.
-- [ ] Frontend tests cover quality labels and weak-match review behavior where existing test seams support it.
+- [x] Evidence review displays quality labels for strong, partial, and weak matches.
+- [x] Evidence review displays the reason for each match where available.
+- [x] Weak matches are visually distinct from strong and partial matches.
+- [x] Weak matches require deliberate opt-in review before they can support generation.
+- [x] Partial matches are presented as usable but cautious evidence rather than full-strength proof.
+- [x] Unsupported job signals remain visible as unmatched instead of appearing as weak evidence.
+- [x] Frontend tests cover quality labels and weak-match review behavior where existing test seams support it.
 
 ## Blocked by
 
 - docs/planning/v2/issues/32-prepare-application-evidence-quality-state.md
-

@@ -7,5 +7,11 @@
     "outDir": "./dist-test",
     "rootDir": "./src"
   },
-  "include": ["src/candidateFitBrief.ts", "src/errorPresentation.ts", "src/exportControls.ts", "src/readiness.ts"]
+  "include": [
+    "src/candidateFitBrief.ts",
+    "src/errorPresentation.ts",
+    "src/evidenceReview.ts",
+    "src/exportControls.ts",
+    "src/readiness.ts"
+  ]
 }

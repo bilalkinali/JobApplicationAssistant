@@ -1349,12 +1349,6 @@ public static class ApplicationEndpoints
             return new ApprovedEvidenceValidation(errors, []);
         }
 
-        if (approvedIds.Any(id => string.Equals(currentById[id].Quality, EvidenceQuality.Weak, StringComparison.Ordinal)))
-        {
-            errors[nameof(request.ApprovedEvidence)] = ["Weak evidence cannot be approved as proof. Remove weak matches from approved evidence before continuing."];
-            return new ApprovedEvidenceValidation(errors, []);
-        }
-
         var approvedEvidence = approvedIds
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(id => currentById[id])
