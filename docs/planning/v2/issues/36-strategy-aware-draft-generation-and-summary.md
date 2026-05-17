@@ -1,6 +1,6 @@
 # Strategy-Aware Draft Generation And Summary
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,16 +15,15 @@ The slice should expose the writing plan and feed it into generation without add
 
 ## Acceptance criteria
 
-- [ ] Draft generation receives the latest application strategy when one has been generated.
-- [ ] Primary angles, secondary angles, gap guidance, claims to avoid, tone guidance, and draft outline are available to the draft provider.
-- [ ] Weak evidence does not support direct experience claims in generated draft inputs.
-- [ ] Partial evidence guides cautious wording rather than overstated experience claims.
-- [ ] A compact read-only strategy summary is shown near draft review or immediately before generation.
-- [ ] The summary includes primary angles, gap guidance, claims to avoid, and draft outline.
-- [ ] Tests cover strategy being passed to draft generation and strategy summary rendering where existing test seams support it.
+- [x] Draft generation receives the latest application strategy when one has been generated.
+- [x] Primary angles, secondary angles, gap guidance, claims to avoid, tone guidance, and draft outline are available to the draft provider.
+- [x] Weak evidence does not support direct experience claims in generated draft inputs.
+- [x] Partial evidence guides cautious wording rather than overstated experience claims.
+- [x] A compact read-only strategy summary is shown near draft review or immediately before generation.
+- [x] The summary includes primary angles, gap guidance, claims to avoid, and draft outline.
+- [x] Tests cover strategy being passed to draft generation and strategy summary rendering where existing test seams support it.
 
 ## Blocked by
 
 - docs/planning/v2/issues/33-evidence-review-quality-ux.md
 - docs/planning/v2/issues/35-guided-application-strategy-generation.md
-

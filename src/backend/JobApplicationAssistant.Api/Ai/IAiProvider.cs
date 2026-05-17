@@ -80,7 +80,8 @@ public sealed record DraftGenerationInput(
     IReadOnlyList<EvidenceMatch> ApprovedEvidence,
     IReadOnlyList<UnmatchedRequirement> UnmatchedRequirements,
     IReadOnlyList<DraftGapDecision> GapDecisions,
-    IReadOnlyList<DraftCustomFact> ApprovedCustomFacts);
+    IReadOnlyList<DraftCustomFact> ApprovedCustomFacts,
+    ApplicationStrategyResult? ApplicationStrategy = null);
 
 public sealed record DraftGapDecision(
     string UnmatchedRequirementId,

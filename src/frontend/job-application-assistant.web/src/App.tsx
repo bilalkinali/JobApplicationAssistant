@@ -17,6 +17,12 @@ import {
 } from "./candidateFitBrief";
 import type { CandidateFitBrief } from "./candidateFitBrief";
 import {
+  applicationStrategySections,
+  hasApplicationStrategyContent,
+  parseApplicationStrategy
+} from "./applicationStrategy";
+import type { ApplicationStrategy } from "./applicationStrategy";
+import {
   getAvailabilityLabel,
   getDraftReadinessLabel,
   getDraftGenerationState,
@@ -431,6 +437,10 @@ function App() {
   const candidateFitBrief = useMemo(
     () => parseCandidateFitBrief(selectedApplication?.candidateFitBrief),
     [selectedApplication?.candidateFitBrief]
+  );
+  const applicationStrategy = useMemo(
+    () => parseApplicationStrategy(selectedApplication?.applicationStrategy),
+    [selectedApplication?.applicationStrategy]
   );
   const savedApprovedCustomFactEvidenceCount = useMemo(
     () => countApprovedCustomFactEvidence(savedGapDecisions, unmatchedRequirements, customFacts),
@@ -2248,6 +2258,10 @@ function App() {
                   </button>
                 </div>
 
+                {hasApplicationStrategyContent(applicationStrategy) && (
+                  <ApplicationStrategySummary strategy={applicationStrategy} />
+                )}
+
                 {selectedApplication?.generatedDraft ? (
                   <section className="draft-editor" ref={draftReviewRef}>
                     <div className="section-heading">
@@ -2618,6 +2632,41 @@ function CandidateFitBriefSummary(props: { brief: CandidateFitBrief }) {
                     <span>{item.title}</span>
                     {item.summary && <small>{item.summary}</small>}
                   </li>
+                ))}
+              </ul>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ApplicationStrategySummary(props: { strategy: ApplicationStrategy }) {
+  const sections = applicationStrategySections(props.strategy);
+
+  return (
+    <section className="application-strategy-summary" aria-label="Application strategy summary">
+      <div className="section-heading">
+        <div>
+          <h4>Application strategy</h4>
+          <p>Read-only writing plan for the next generated draft.</p>
+        </div>
+        <StatusBadge tone="neutral">Read-only</StatusBadge>
+      </div>
+      {props.strategy.toneGuidance.trim() && (
+        <p className="strategy-tone-guidance">{props.strategy.toneGuidance}</p>
+      )}
+      <div className="strategy-section-grid">
+        {sections.map((section) => (
+          <article className={`strategy-card ${section.tone}`} key={section.key}>
+            <h5>{section.title}</h5>
+            {section.items.length === 0 ? (
+              <p className="empty-state compact">None recorded.</p>
+            ) : (
+              <ul>
+                {section.items.map((item, itemIndex) => (
+                  <li key={`${section.key}-${itemIndex}`}>{item}</li>
                 ))}
               </ul>
             )}

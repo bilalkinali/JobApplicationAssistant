@@ -756,7 +756,10 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
             evidence.Category,
             evidence.ProfileFactTitle,
             evidence.Summary,
-            evidence.MatchedTerms
+            evidence.MatchedTerms,
+            evidence.Quality,
+            evidence.Reason,
+            UseGuidance = EvidenceUseGuidance(evidence)
         });
         var unmatchedRequirements = input.UnmatchedRequirements.Select(requirement => new
         {
@@ -806,6 +809,9 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
 
         Approved job-local custom facts:
         {JsonSerializer.Serialize(approvedCustomFacts, JsonOptions)}
+
+        Application strategy:
+        {JsonSerializer.Serialize(input.ApplicationStrategy, JsonOptions)}
         """;
     }
 
@@ -943,6 +949,14 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         {JsonSerializer.Serialize(approvedCustomFacts, JsonOptions)}
         """;
     }
+
+    private static string EvidenceUseGuidance(EvidenceMatch evidence) =>
+        evidence.Quality switch
+        {
+            EvidenceQuality.Weak => "Weak evidence must not support direct experience claims. Use only as adjacent context or omit it.",
+            EvidenceQuality.Partial => "Partial evidence may guide cautious wording. Avoid claiming full direct experience.",
+            _ => "Strong evidence may support direct experience claims when the summary supports them."
+        };
 
     private static string BuildRepairPrompt(string invalidJson, string validationError) =>
         $"""

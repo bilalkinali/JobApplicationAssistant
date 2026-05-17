@@ -2096,6 +2096,7 @@ public sealed class ApplicationWorkflowApiTests
         using var client = factory.CreateClient();
         var application = await CreateApplicationAsync(client, "We need .NET and Kubernetes.", "English");
         await MarkApplicationReadyForDraftAsync(factory, application.Id);
+        await AddApprovedEvidenceQualityExamplesAsync(factory, application.Id);
 
         var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
 
@@ -2507,6 +2508,18 @@ public sealed class ApplicationWorkflowApiTests
         Assert.Contains("\"response_format\":{\"type\":\"text\"}", draftRequestJson);
         Assert.Contains("Return only strict JSON", draftRequestJson);
         Assert.Contains("Approved API work", draftRequestJson);
+        Assert.Contains("Application strategy:", draftRequestJson);
+        Assert.Contains("API delivery for platform work", draftRequestJson);
+        Assert.Contains("Mention Kubernetes only as a learning interest.", draftRequestJson);
+        Assert.Contains("Hands-on Kubernetes production ownership", draftRequestJson);
+        Assert.Contains("Opening", draftRequestJson);
+        Assert.Contains("quality", draftRequestJson);
+        Assert.Contains("Strong", draftRequestJson);
+        Assert.Contains("Partial", draftRequestJson);
+        Assert.Contains("Weak", draftRequestJson);
+        Assert.Contains("Strong evidence may support direct experience claims", draftRequestJson);
+        Assert.Contains("Partial evidence may guide cautious wording", draftRequestJson);
+        Assert.Contains("Weak evidence must not support direct experience claims", draftRequestJson);
         var auditRequestJson = await handler.Requests[2].Content!.ReadAsStringAsync();
         Assert.Contains("Ollama cover letter from approved API evidence.", auditRequestJson);
         Assert.Contains("match-dotnet-test", auditRequestJson);
@@ -3707,6 +3720,42 @@ public sealed class ApplicationWorkflowApiTests
                 new GapDecisionTestItem("unmatched-kubernetes", "MentionAsLearningInterest", null)
             },
             JsonOptions);
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task AddApprovedEvidenceQualityExamplesAsync(WebApplicationFactory<Program> factory, Guid applicationId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var application = await db.JobApplications.FindAsync(applicationId);
+        Assert.NotNull(application);
+        var approvedEvidence = JsonSerializer.Deserialize<List<EvidenceMatch>>(application.ApprovedEvidence, JsonOptions);
+        Assert.NotNull(approvedEvidence);
+        approvedEvidence.Add(
+            new EvidenceMatch(
+                "match-react-partial",
+                "react",
+                "React",
+                "PreferredSkill",
+                Guid.NewGuid(),
+                "Frontend collaboration",
+                "Collaborated with React engineers without owning the full frontend.",
+                ["React"],
+                EvidenceQuality.Partial,
+                "Adjacent frontend collaboration, not full ownership."));
+        approvedEvidence.Add(
+            new EvidenceMatch(
+                "match-kubernetes-weak",
+                "kubernetes",
+                "Kubernetes",
+                "PreferredSkill",
+                Guid.NewGuid(),
+                "Kubernetes learning",
+                "Explored Kubernetes in learning context only.",
+                ["Kubernetes"],
+                EvidenceQuality.Weak,
+                "Learning context only."));
+        application.ApprovedEvidence = JsonSerializer.Serialize(approvedEvidence, JsonOptions);
         await db.SaveChangesAsync();
     }
 

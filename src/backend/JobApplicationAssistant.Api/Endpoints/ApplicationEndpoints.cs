@@ -944,7 +944,8 @@ public static class ApplicationEndpoints
                         approvedEvidence,
                         draftUnmatchedRequirements,
                         gapDecisions,
-                        approvedCustomFacts),
+                        approvedCustomFacts,
+                        strategyResult),
                     ct);
             }
             catch (AiProviderException exception)

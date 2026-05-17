@@ -9,6 +9,7 @@
   },
   "include": [
     "src/candidateFitBrief.ts",
+    "src/applicationStrategy.ts",
     "src/errorPresentation.ts",
     "src/evidenceReview.ts",
     "src/exportControls.ts",

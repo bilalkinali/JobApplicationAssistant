@@ -184,6 +184,14 @@ public sealed partial class FakeAiProvider : IAiProvider
         var toneText = string.IsNullOrWhiteSpace(input.TonePreference)
             ? "plain and evidence-led"
             : input.TonePreference.Trim();
+        var strategyText = input.ApplicationStrategy is null
+            ? "No application strategy supplied."
+            : $"""
+            Primary angles: {string.Join(", ", input.ApplicationStrategy.PrimaryAngles.Select(angle => angle.Title))}
+            Gap guidance: {string.Join(" ", input.ApplicationStrategy.GapHandlingGuidance.Select(gap => gap.Guidance))}
+            Claims to avoid: {string.Join(", ", input.ApplicationStrategy.ClaimsToAvoid.Select(claim => claim.Claim))}
+            Outline: {string.Join(" | ", input.ApplicationStrategy.DraftOutline.Select(item => $"{item.Section}: {item.Guidance}"))}
+            """;
         var motivationGapText = gapLines.Count == 0
             ? "I will keep unsupported gaps out of concrete claims."
             : "I will describe selected unmatched requirements honestly as learning areas.";
@@ -199,6 +207,9 @@ public sealed partial class FakeAiProvider : IAiProvider
 
             Honest gap handling:
             {gapText}
+
+            Strategy:
+            {strategyText}
 
             Kind regards,
             {applicant}

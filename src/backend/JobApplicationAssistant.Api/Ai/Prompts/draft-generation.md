@@ -10,6 +10,8 @@ JSON contract:
 
 Rules:
 - Use only approved evidence as proof of experience.
+- Follow the supplied application strategy when it is present: primary angles, secondary angles, gap guidance, claims to avoid, tone guidance, and draft outline.
+- Evidence quality limits claim strength. Weak evidence must not support direct experience claims. Partial evidence may guide cautious wording but must not be overstated as full direct experience.
 - Candidate fit brief supportingProfileFactIds are traceability only and are not approved evidence.
 - Do not invent employers, dates, metrics, technologies, credentials, or responsibilities.
 - Use gap decisions to decide whether unmatched requirements can appear.
