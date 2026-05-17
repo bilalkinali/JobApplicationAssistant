@@ -87,6 +87,24 @@ public sealed class EvidenceMatchProviderTests
         Assert.Equal(2, handler.Requests.Count);
     }
 
+    [Fact]
+    public async Task OpenAi_compatible_evidence_matching_recovers_unknown_unmatched_signal_ids_as_conservative_gaps()
+    {
+        var fact = ApprovedFact();
+        var handler = new QueuedHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent(EvidenceMatchingJsonWithUnknownUnmatchedSignal(fact.Id)) }
+        ]));
+        var provider = new OpenAiCompatibleAiProvider(new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434/v1/") }, Options());
+
+        var result = await provider.MatchEvidenceAsync(EvidenceInput(fact), CancellationToken.None);
+
+        var unmatched = Assert.Single(result.UnmatchedRequirements);
+        Assert.Equal("kubernetes", unmatched.SignalId);
+        Assert.Equal("Kubernetes", unmatched.Requirement);
+        Assert.Equal("Review Kubernetes manually before making a claim.", unmatched.Recommendation);
+    }
+
     private static EvidenceMatchInput EvidenceInput(ProfileFact fact) =>
         new(
             [
@@ -167,6 +185,28 @@ public sealed class EvidenceMatchProviderTests
         }
         """;
     }
+
+    private static string EvidenceMatchingJsonWithUnknownUnmatchedSignal(Guid profileFactId) =>
+        $$"""
+        {
+          "evidenceMatches": [
+            {
+              "signalId": "dotnet",
+              "profileFactId": "{{profileFactId}}",
+              "summary": "Approved API work demonstrates .NET experience.",
+              "quality": "Strong",
+              "reason": "Directly supported by approved API work.",
+              "matchedTerms": [".NET"]
+            }
+          ],
+          "unmatchedRequirements": [
+            {
+              "signalId": "unknown-kubernetes",
+              "recommendation": "Treat Kubernetes as an honest learning area."
+            }
+          ]
+        }
+        """;
 
     private sealed class QueuedHandler(Queue<HttpResponseMessage> responses) : HttpMessageHandler
     {

@@ -562,6 +562,7 @@ function App() {
   );
   const workflowBusyReason = workflowBusy ? "Wait for the current workflow action to finish." : null;
   const exportBusyReason = exportBusy ? "Wait for the current export action to finish." : null;
+  const canRunPreparation = Boolean(selectedApplicationId && hasSavedJobPosting && approvedProfileFacts.length > 0);
 
   useEffect(() => {
     void loadProfile();
@@ -1942,6 +1943,26 @@ function App() {
                     <StatusBadge tone={coverLetterExportState.canExport ? "approved" : "pending"}>
                       {coverLetterExportState.canExport ? "Export ready" : "Export blocked"}
                     </StatusBadge>
+                  </div>
+                )}
+                {selectedApplication && selectedApplication.preparationStatus !== "NotStarted" && (
+                  <div className="workflow-step">
+                    <div>
+                      <h4>Preparation</h4>
+                      <p>Run the full preparation flow again when job analysis, fit brief, or evidence matching needs a fresh pass.</p>
+                    </div>
+                    <button
+                      className="secondary-workflow-action"
+                      type="button"
+                      onClick={prepareApplication}
+                      disabled={!canRunPreparation || workflowBusy !== null}
+                      title={disabledTitle(
+                        !canRunPreparation || workflowBusy !== null,
+                        workflowBusyReason ?? "Save a posting and approve at least one profile fact before preparing."
+                      )}
+                    >
+                      {workflowBusy === "prepare" ? "Preparing..." : "Re-run preparation"}
+                    </button>
                   </div>
                 )}
 

@@ -507,12 +507,16 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         {
             if (requirement is null ||
                 string.IsNullOrWhiteSpace(requirement.SignalId) ||
-                string.IsNullOrWhiteSpace(requirement.Recommendation) ||
-                !signalsById.TryGetValue(requirement.SignalId.Trim(), out var signal))
+                string.IsNullOrWhiteSpace(requirement.Recommendation))
             {
                 throw new AiInvalidOutputException(
                     AppendRawPayload("OpenAI-compatible endpoint returned structurally invalid unmatched requirement JSON.", responseText),
                     attemptCount);
+            }
+
+            if (!signalsById.TryGetValue(requirement.SignalId.Trim(), out var signal))
+            {
+                continue;
             }
 
             if (!unmatchedSignalIds.Add(signal.Id))
@@ -530,8 +534,18 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
                 requirement.Recommendation.Trim()));
         }
 
-        if (matchedSignalIds.Overlaps(unmatchedSignalIds) ||
-            input.Signals.Any(signal => !matchedSignalIds.Contains(signal.Id) && !unmatchedSignalIds.Contains(signal.Id)))
+        foreach (var signal in input.Signals.Where(signal => !matchedSignalIds.Contains(signal.Id) && !unmatchedSignalIds.Contains(signal.Id)))
+        {
+            unmatchedSignalIds.Add(signal.Id);
+            unmatched.Add(new UnmatchedRequirement(
+                $"unmatched-{signal.Id}",
+                signal.Id,
+                signal.Label,
+                signal.Category,
+                $"Review {signal.Label} manually before making a claim."));
+        }
+
+        if (matchedSignalIds.Overlaps(unmatchedSignalIds))
         {
             throw new AiInvalidOutputException(
                 AppendRawPayload("OpenAI-compatible endpoint returned incomplete or conflicting evidence matching JSON.", responseText),
