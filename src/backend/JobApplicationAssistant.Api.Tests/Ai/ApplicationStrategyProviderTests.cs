@@ -26,6 +26,21 @@ public sealed class ApplicationStrategyProviderTests
     }
 
     [Fact]
+    public async Task FakeAiProvider_uses_natural_danish_learning_interest_strategy_guidance()
+    {
+        var provider = new FakeAiProvider();
+        var input = StrategyInput(Guid.NewGuid(), "Danish");
+
+        var result = await provider.GenerateApplicationStrategyAsync(input, CancellationToken.None);
+
+        Assert.Contains(
+            result.GapHandlingGuidance,
+            guidance =>
+                guidance.Guidance.Contains("interesse i at lære", StringComparison.Ordinal) &&
+                !guidance.Guidance.Contains("interesseret i at lærer", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Ollama_application_strategy_accepts_valid_output()
     {
         var profileFactId = Guid.NewGuid();
@@ -185,13 +200,13 @@ public sealed class ApplicationStrategyProviderTests
         Assert.Contains("claimsToAvoid must include unsupported gaps", exception.Message);
     }
 
-    private static ApplicationStrategyInput StrategyInput(Guid profileFactId) =>
+    private static ApplicationStrategyInput StrategyInput(Guid profileFactId, string selectedLanguage = "English") =>
         new(
             new JobAnalysisResult(
                 "Northwind",
                 "Platform Developer",
                 "English",
-                "English",
+                selectedLanguage,
                 new JobSignalsDocument(
                     "test",
                     DateTimeOffset.Parse("2026-05-17T00:00:00+00:00"),
@@ -229,7 +244,7 @@ public sealed class ApplicationStrategyProviderTests
             ],
             [new DraftGapDecision("unmatched-kubernetes", "MentionAsLearningInterest", null)],
             [],
-            "English",
+            selectedLanguage,
             "direct");
 
     private static AiOptions Options() =>

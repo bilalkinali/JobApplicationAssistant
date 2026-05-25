@@ -898,6 +898,59 @@ button:disabled {
   background: #f7f8f5;
 }
 
+.final-review-first .generated-draft-action {
+  order: 10;
+  border-color: #b8ddcd;
+  background: #edf8f2;
+}
+
+.final-review-first .draft-editor {
+  order: 20;
+  border-color: #b8ddcd;
+  box-shadow: 0 10px 24px rgb(37 52 70 / 8%);
+}
+
+.final-review-first .preparation-context {
+  grid-column: 1 / -1;
+  order: 40;
+}
+
+.final-review-first .preparation-context .fit-brief-summary,
+.final-review-first .preparation-context .application-strategy-summary {
+  margin: 0;
+}
+
+.context-disclosure {
+  grid-column: 1 / -1;
+  padding: 12px 14px;
+  border: 1px solid #d9d7d0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.context-disclosure[open] {
+  display: grid;
+  gap: 12px;
+}
+
+.context-disclosure > summary {
+  cursor: pointer;
+  color: #263442;
+  font-weight: 800;
+}
+
+.context-disclosure > summary span {
+  margin-left: 4px;
+}
+
+.context-disclosure > summary small {
+  display: block;
+  margin: 4px 0 0 22px;
+  color: #64717c;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
 .guided-action {
   display: flex;
   align-items: center;
@@ -977,6 +1030,17 @@ button:disabled {
   line-height: 1.55;
 }
 
+.review-column-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.review-column-heading h4 {
+  margin: 0;
+}
+
 .evidence-card {
   display: grid;
   gap: 8px;
@@ -1004,6 +1068,11 @@ button:disabled {
 .evidence-card.quality-weak {
   border-color: #d6a09a;
   background: #fff7f5;
+}
+
+.evidence-card.approved {
+  border-color: #8fc3ad;
+  background: #edf7f2;
 }
 
 .evidence-card-heading {
@@ -1060,6 +1129,10 @@ button:disabled {
   gap: 10px;
 }
 
+.gap-decision-list.compact-review {
+  margin-top: 10px;
+}
+
 .approved-item,
 .gap-decision-item {
   display: flex;
@@ -1089,6 +1162,11 @@ button:disabled {
 .gap-decision-item.covered {
   border-color: #c7ded4;
   background: #edf5f2;
+}
+
+.gap-decision-item.compact-inline {
+  align-items: flex-start;
+  padding: 10px;
 }
 
 .approved-item.custom-proof {
@@ -1457,6 +1535,23 @@ button:disabled {
   grid-column: 1 / -1;
   gap: 12px;
   min-height: 160px;
+}
+
+.claim-audit.subordinate-to-quality {
+  min-height: 0;
+  padding-top: 4px;
+  border-top: 1px solid #d7dde2;
+}
+
+.claim-audit.subordinate-to-quality .section-heading h4 {
+  color: #52606b;
+}
+
+.audit-counts-subordinate {
+  margin: 0;
+  color: #64717c;
+  font-size: 0.9rem;
+  font-weight: 700;
 }
 
 .audit-list {

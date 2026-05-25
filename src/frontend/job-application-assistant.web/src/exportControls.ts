@@ -81,6 +81,13 @@ export function getAuditExportNotice(application: ExportApplication | null | und
     return null;
   }
 
+  if (draftNeedsRevision(draft.draftQualityCheck)) {
+    return {
+      tone: "warning",
+      message: "Draft quality still blocks export. Supported claim counts only mean evidence support, not that the draft is ready to send."
+    };
+  }
+
   if (draft.isClaimAuditStale) {
     return {
       tone: "warning",

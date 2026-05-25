@@ -32,6 +32,7 @@ export type GuidedNextActionKind =
   | "prepare-application"
   | "review-evidence"
   | "generate-draft"
+  | "revise-draft"
   | "refresh-audit"
   | "copy-export"
   | "ai-readiness"
@@ -196,6 +197,7 @@ export function getGuidedNextAction(input: {
   unmatchedRequirementCount: number;
   savedGapDecisionCount: number;
   hasGeneratedDraft: boolean;
+  draftQualityStatus?: string;
   auditReadiness: string;
   hasUnsavedDraftEdits?: boolean;
   canCopyOrExport?: boolean;
@@ -318,6 +320,17 @@ export function getGuidedNextAction(input: {
       canRun: true,
       tone: "success",
       message: "Approved evidence and gap decisions are saved. Generate the draft and claim audit in one step."
+    };
+  }
+
+  if (input.draftQualityStatus === "NeedsRevision") {
+    return {
+      kind: "revise-draft",
+      title: "Revise or regenerate draft",
+      buttonLabel: "Review draft",
+      canRun: true,
+      tone: "warning",
+      message: "Draft quality issues are blocking export. Revise and save the text, or regenerate the draft before copy/export."
     };
   }
 

@@ -75,7 +75,7 @@ export function applicationStrategySections(strategy: ApplicationStrategy): Appl
     {
       key: "gapHandlingGuidance",
       title: "Gap guidance",
-      items: strategy.gapHandlingGuidance.map((gap) => gap.guidance),
+      items: uniqueStrings(strategy.gapHandlingGuidance.map((gap) => gap.guidance)),
       tone: "neutral"
     },
     {
@@ -195,6 +195,23 @@ function normalizeOutline(value: unknown): ApplicationStrategyOutlineItem[] {
 
 function formatWithDetail(title: string, detail: string): string {
   return detail ? `${title}: ${detail}` : title;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+
+  for (const value of values) {
+    const normalized = value.trim().replace(/\s+/g, " ").toLowerCase();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+
+    seen.add(normalized);
+    unique.push(value);
+  }
+
+  return unique;
 }
 
 function normalizeString(value: unknown): string {

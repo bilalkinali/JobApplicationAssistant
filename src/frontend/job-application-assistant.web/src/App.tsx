@@ -361,6 +361,8 @@ function App() {
   const [approvedEvidenceDraft, setApprovedEvidenceDraft] = useState<EvidenceMatch[]>([]);
   const [reviewedWeakMatchIds, setReviewedWeakMatchIds] = useState<string[]>([]);
   const [gapDecisionsDraft, setGapDecisionsDraft] = useState<GapDecision[]>([]);
+  const [isEvidenceReviewEditing, setIsEvidenceReviewEditing] = useState(false);
+  const [expandedCustomFactRequirementId, setExpandedCustomFactRequirementId] = useState<string | null>(null);
   const [customFactDrafts, setCustomFactDrafts] = useState<Record<string, CustomFactDraft>>({});
   const [generatedDraftForm, setGeneratedDraftForm] = useState<GeneratedDraftForm>({
     coverLetterText: "",
@@ -464,6 +466,14 @@ function App() {
     () => approvedCustomFactEvidenceItems(savedGapDecisions, unmatchedRequirements, customFacts),
     [customFacts, savedGapDecisions, unmatchedRequirements]
   );
+  const currentApprovedCustomFactEvidenceCount = useMemo(
+    () => countApprovedCustomFactEvidence(gapDecisionsDraft, unmatchedRequirements, customFacts),
+    [customFacts, gapDecisionsDraft, unmatchedRequirements]
+  );
+  const currentApprovedCustomFactEvidence = useMemo(
+    () => approvedCustomFactEvidenceItems(gapDecisionsDraft, unmatchedRequirements, customFacts),
+    [customFacts, gapDecisionsDraft, unmatchedRequirements]
+  );
   const currentGapDecisionCount = useMemo(
     () => countCurrentGapDecisions(savedGapDecisions, unmatchedRequirements, customFacts),
     [customFacts, savedGapDecisions, unmatchedRequirements]
@@ -476,9 +486,27 @@ function App() {
     () => parseDraftQualityCheck(selectedApplication?.generatedDraft?.draftQualityCheck),
     [selectedApplication?.generatedDraft?.draftQualityCheck]
   );
+  const isDraftQualityBlocked = draftQualityCheck.status === "NeedsRevision";
   const hasSavedJobPosting = Boolean(selectedApplication?.jobPostingText.trim());
   const hasSavedApprovedEvidence = savedApprovedEvidence.length + savedApprovedCustomFactEvidenceCount > 0;
   const hasGeneratedDraft = Boolean(selectedApplication?.generatedDraft);
+  const approvedEvidenceDraftSummaryCount = approvedEvidenceDraft.length + currentApprovedCustomFactEvidenceCount;
+  const showCompactGapDecisionReview = !isEvidenceReviewEditing && savedGapDecisions.length > 0;
+  const preparationDetailsOpen = Boolean(selectedApplication && !hasGeneratedDraft);
+  const evidenceDetailsOpen = Boolean(selectedApplication && (!hasGeneratedDraft || !hasSavedApprovedEvidence));
+  const strategyDetailsOpen = Boolean(selectedApplication && !hasGeneratedDraft);
+  const preparationDetailsSummary = preparationSummary(
+    selectedApplication?.preparationStatus,
+    jobSignals,
+    candidateFitBrief
+  );
+  const evidenceDetailsSummary = evidenceSummary(
+    evidenceMatches.length,
+    unmatchedRequirements.length,
+    savedApprovedEvidence.length + savedApprovedCustomFactEvidenceCount,
+    currentGapDecisionCount
+  );
+  const strategyDetailsSummary = strategySummary(applicationStrategy);
   const auditSummary = useMemo(() => summarizeClaimAudit(claimAudit), [claimAudit]);
   const hasUnsavedDraftEdits =
     Boolean(selectedApplication?.generatedDraft) &&
@@ -505,12 +533,14 @@ function App() {
     Boolean(selectedApplication?.generatedDraft) &&
     effectiveAuditReadiness !== "Current" &&
     !isRealProviderUnavailable;
-  const effectiveAuditExportNotice = hasUnsavedDraftEdits
-    ? {
-        tone: "warning" as const,
-        message: "Claim audit is stale because the draft has unsaved edits. Refresh claim audit to save and re-check the edited text."
-      }
-    : auditExportNotice;
+  const effectiveAuditExportNotice = isDraftQualityBlocked
+    ? auditExportNotice
+    : hasUnsavedDraftEdits
+      ? {
+          tone: "warning" as const,
+          message: "Claim audit is stale because the draft has unsaved edits. Refresh claim audit to save and re-check the edited text."
+        }
+      : auditExportNotice;
   const profileReadiness = useMemo(
     () => getProfileReadiness(profile, approvedProfileFacts.length),
     [approvedProfileFacts.length, profile]
@@ -556,6 +586,7 @@ function App() {
         unmatchedRequirementCount: unmatchedRequirements.length,
         savedGapDecisionCount: currentGapDecisionCount,
         hasGeneratedDraft,
+        draftQualityStatus: draftQualityCheck.status,
         auditReadiness: effectiveAuditReadiness,
         hasUnsavedDraftEdits,
         canCopyOrExport: coverLetterExportState.canCopy || coverLetterExportState.canExport,
@@ -567,6 +598,7 @@ function App() {
       coverLetterExportState.canCopy,
       coverLetterExportState.canExport,
       currentGapDecisionCount,
+      draftQualityCheck.status,
       effectiveAuditReadiness,
       hasGeneratedDraft,
       hasSavedJobPosting,
@@ -606,6 +638,8 @@ function App() {
 
   useEffect(() => {
     setCustomFactDrafts({});
+    setIsEvidenceReviewEditing(false);
+    setExpandedCustomFactRequirementId(null);
   }, [selectedApplicationId]);
 
   useEffect(() => {
@@ -1114,6 +1148,7 @@ function App() {
         { gapDecisions: JSON.stringify(gapDecisionsDraft) }
       );
       replaceApplication(reviewed);
+      setIsEvidenceReviewEditing(false);
       setNotice("Evidence review saved.");
     } catch (apiError) {
       setError(formatError(apiError));
@@ -1148,6 +1183,7 @@ function App() {
       );
       replaceApplication(saved);
       setCustomFactDrafts((current) => ({ ...current, [unmatchedRequirementId]: emptyCustomFactDraft() }));
+      setExpandedCustomFactRequirementId(null);
       setNotice("Job-local custom fact added for review.");
     } catch (apiError) {
       setError(formatError(apiError));
@@ -1410,6 +1446,9 @@ function App() {
       case "generate-draft":
         void generateDraft();
         return;
+      case "revise-draft":
+        draftReviewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
       case "refresh-audit":
         void refreshClaimAudit();
         return;
@@ -1481,6 +1520,9 @@ function App() {
       ...current.filter((item) => item.unmatchedRequirementId !== unmatchedRequirementId),
       { unmatchedRequirementId, decision, customFactId }
     ]);
+    setExpandedCustomFactRequirementId((current) =>
+      current === unmatchedRequirementId ? null : current
+    );
   }
 
   function updateCustomFactDraft(unmatchedRequirementId: string, changes: Partial<CustomFactDraft>) {
@@ -1916,7 +1958,7 @@ function App() {
                 </div>
               )}
 
-              <section className="workflow-panel">
+              <section className={`workflow-panel${hasGeneratedDraft ? " final-review-first" : ""}`}>
                 <div className="section-heading">
                   <h3>Application text workflow</h3>
                   <p>Move from job analysis to approved evidence, generated text, and claim audit before final use.</p>
@@ -1963,87 +2005,109 @@ function App() {
                     </StatusBadge>
                   </div>
                 )}
-                {selectedApplication && selectedApplication.preparationStatus !== "NotStarted" && (
-                  <div className="workflow-step">
-                    <div>
-                      <h4>Preparation</h4>
-                      <p>Run the full preparation flow again when job analysis, fit brief, or evidence matching needs a fresh pass.</p>
+                {selectedApplication && (
+                  <details className="context-disclosure preparation-context" open={preparationDetailsOpen}>
+                    <summary>
+                      <span>Preparation details</span>
+                      <small>{preparationDetailsSummary}</small>
+                    </summary>
+                    {selectedApplication.preparationStatus !== "NotStarted" && (
+                      <div className="workflow-step">
+                        <div>
+                          <h4>Preparation</h4>
+                          <p>Run the full preparation flow again when job analysis, fit brief, or evidence matching needs a fresh pass.</p>
+                        </div>
+                        <button
+                          className="secondary-workflow-action"
+                          type="button"
+                          onClick={prepareApplication}
+                          disabled={!canRunPreparation || workflowBusy !== null}
+                          title={disabledTitle(
+                            !canRunPreparation || workflowBusy !== null,
+                            workflowBusyReason ?? "Save a posting and approve at least one profile fact before preparing."
+                          )}
+                        >
+                          {workflowBusy === "prepare" ? "Preparing..." : "Re-run preparation"}
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="workflow-step">
+                      <div>
+                        <h4>1. Job analysis</h4>
+                        <p>{jobAnalysisState.message}</p>
+                      </div>
+                      <button
+                        className="secondary-workflow-action"
+                        type="button"
+                        onClick={analyzeJob}
+                        disabled={!jobAnalysisState.canRun || workflowBusy !== null}
+                        title={disabledTitle(!jobAnalysisState.canRun || workflowBusy !== null, workflowBusyReason ?? jobAnalysisState.message)}
+                      >
+                        {workflowBusy === "analysis" ? "Analyzing..." : "Analyze job"}
+                      </button>
                     </div>
-                    <button
-                      className="secondary-workflow-action"
-                      type="button"
-                      onClick={prepareApplication}
-                      disabled={!canRunPreparation || workflowBusy !== null}
-                      title={disabledTitle(
-                        !canRunPreparation || workflowBusy !== null,
-                        workflowBusyReason ?? "Save a posting and approve at least one profile fact before preparing."
-                      )}
-                    >
-                      {workflowBusy === "prepare" ? "Preparing..." : "Re-run preparation"}
-                    </button>
-                  </div>
+
+                    {jobSignals.signals.length > 0 ? (
+                      <div className="signal-grid">
+                        <SignalColumn title="Required skills" values={jobSignals.requiredSkills} />
+                        <SignalColumn title="Preferred skills" values={jobSignals.preferredSkills} />
+                        <SignalColumn title="Responsibilities" values={jobSignals.responsibilities} />
+                      </div>
+                    ) : (
+                      <p className="empty-state compact">No analysis results yet.</p>
+                    )}
+
+                    {hasCandidateFitBriefContent(candidateFitBrief) && (
+                      <CandidateFitBriefSummary brief={candidateFitBrief} />
+                    )}
+                  </details>
                 )}
 
-                <div className="workflow-step">
-                  <div>
-                    <h4>1. Job analysis</h4>
-                    <p>{jobAnalysisState.message}</p>
-                  </div>
-                  <button
-                    className="secondary-workflow-action"
-                    type="button"
-                    onClick={analyzeJob}
-                    disabled={!jobAnalysisState.canRun || workflowBusy !== null}
-                    title={disabledTitle(!jobAnalysisState.canRun || workflowBusy !== null, workflowBusyReason ?? jobAnalysisState.message)}
-                  >
-                    {workflowBusy === "analysis" ? "Analyzing..." : "Analyze job"}
-                  </button>
-                </div>
-
-                {jobSignals.signals.length > 0 ? (
-                  <div className="signal-grid">
-                    <SignalColumn title="Required skills" values={jobSignals.requiredSkills} />
-                    <SignalColumn title="Preferred skills" values={jobSignals.preferredSkills} />
-                    <SignalColumn title="Responsibilities" values={jobSignals.responsibilities} />
-                  </div>
-                ) : (
-                  <p className="empty-state compact">No analysis results yet.</p>
-                )}
-
-                {hasCandidateFitBriefContent(candidateFitBrief) && (
-                  <CandidateFitBriefSummary brief={candidateFitBrief} />
-                )}
-
-                <div className="workflow-step">
-                  <div>
-                    <h4>2. Evidence matching</h4>
-                    <p>{evidenceMatchingState.message}</p>
-                  </div>
-                  <button
-                    className="secondary-workflow-action"
-                    type="button"
-                    onClick={matchEvidence}
-                    disabled={!evidenceMatchingState.canRun || workflowBusy !== null}
-                    title={disabledTitle(!evidenceMatchingState.canRun || workflowBusy !== null, workflowBusyReason ?? evidenceMatchingState.message)}
-                  >
-                    {workflowBusy === "matching" ? "Matching..." : "Match evidence"}
-                  </button>
-                </div>
+                {selectedApplication && (
+                  <details className="context-disclosure preparation-context" open={evidenceDetailsOpen}>
+                    <summary>
+                      <span>Evidence details</span>
+                      <small>{evidenceDetailsSummary}</small>
+                    </summary>
+                    <div className="workflow-step">
+                      <div>
+                        <h4>2. Evidence matching</h4>
+                        <p>{evidenceMatchingState.message}</p>
+                      </div>
+                      <button
+                        className="secondary-workflow-action"
+                        type="button"
+                        onClick={matchEvidence}
+                        disabled={!evidenceMatchingState.canRun || workflowBusy !== null}
+                        title={disabledTitle(!evidenceMatchingState.canRun || workflowBusy !== null, workflowBusyReason ?? evidenceMatchingState.message)}
+                      >
+                        {workflowBusy === "matching" ? "Matching..." : "Match evidence"}
+                      </button>
+                    </div>
 
                 <div className="review-grid" ref={evidenceReviewRef}>
                   <section className="review-column">
-                    <h4>Matched evidence</h4>
+                    <div className="review-column-heading">
+                      <h4>Matched evidence</h4>
+                      <StatusBadge tone={approvedEvidenceDraftSummaryCount > 0 ? "approved" : "neutral"}>
+                        {approvedEvidenceCountLabel(approvedEvidenceDraftSummaryCount)}
+                      </StatusBadge>
+                    </div>
                     {evidenceMatches.length === 0 && <p className="empty-state compact">No matches yet.</p>}
                     {evidenceMatches.map((match) => {
                       const quality = evidenceQualityPresentation(match.quality);
                       const isWeakMatch = isWeakEvidence(match);
                       const hasReviewedWeakMatch = reviewedWeakMatchIds.includes(match.id);
+                      const isApproved = approvedEvidenceDraft.some((item) => item.id === match.id);
 
                       return (
-                        <article className={`evidence-card ${quality.cardClass}`} key={match.id}>
+                        <article className={`evidence-card ${quality.cardClass} ${isApproved ? "approved" : ""}`} key={match.id}>
                           <div className="evidence-card-heading">
                             <strong>{match.signal}</strong>
-                            <StatusBadge tone={quality.tone}>{quality.label}</StatusBadge>
+                            <StatusBadge tone={isApproved ? "approved" : quality.tone}>
+                              {isApproved ? "Approved evidence" : quality.label}
+                            </StatusBadge>
                           </div>
                           <span>{match.profileFactTitle}</span>
                           <p>{match.summary}</p>
@@ -2054,19 +2118,23 @@ function App() {
                             <div className="weak-match-review">
                               <button
                                 type="button"
-                                className={hasReviewedWeakMatch ? "selected" : ""}
+                                className={hasReviewedWeakMatch || isApproved ? "selected" : ""}
                                 onClick={() => reviewWeakMatch(match.id)}
-                                aria-pressed={hasReviewedWeakMatch}
+                                aria-pressed={hasReviewedWeakMatch || isApproved}
                               >
-                                {weakEvidenceReviewLabel(hasReviewedWeakMatch)}
+                                {weakEvidenceReviewLabel(hasReviewedWeakMatch || isApproved)}
                               </button>
-                              {hasReviewedWeakMatch && (
-                                <button type="button" onClick={() => approveMatch(match)}>Approve weak match</button>
+                              {(hasReviewedWeakMatch || isApproved) && (
+                                <button type="button" onClick={() => (isApproved ? removeApprovedEvidence(match.id) : approveMatch(match))}>
+                                  {isApproved ? "Remove from approved" : "Approve weak match"}
+                                </button>
                               )}
                               <small>Weak matches should only guide cautious wording or prompt stronger evidence.</small>
                             </div>
                           ) : (
-                            <button type="button" onClick={() => approveMatch(match)}>Approve</button>
+                            <button type="button" onClick={() => (isApproved ? removeApprovedEvidence(match.id) : approveMatch(match))}>
+                              {isApproved ? "Remove from approved" : "Approve"}
+                            </button>
                           )}
                         </article>
                       );
@@ -2074,13 +2142,40 @@ function App() {
                   </section>
 
                   <section className="review-column">
-                    <h4>Unmatched requirements</h4>
+                    <div className="review-column-heading">
+                      <h4>Unmatched requirements</h4>
+                      {showCompactGapDecisionReview && (
+                        <button type="button" onClick={() => setIsEvidenceReviewEditing(true)}>
+                          Edit evidence review
+                        </button>
+                      )}
+                    </div>
                     {unmatchedRequirements.length === 0 && <p className="empty-state compact">No unmatched requirements recorded.</p>}
-                    {unmatchedRequirements.map((requirement) => {
+                    {showCompactGapDecisionReview ? (
+                      <div className="gap-decision-list compact-review">
+                        {savedGapDecisions.map((decision) => {
+                          const requirement = unmatchedRequirements.find((item) => item.id === decision.unmatchedRequirementId);
+
+                          return (
+                            <article className={`gap-decision-item ${gapDecisionClass(decision)}`} key={decision.unmatchedRequirementId}>
+                              <div>
+                                <StatusBadge tone={gapDecisionTone(decision)}>
+                                  {gapDecisionLabel(decision.decision)}
+                                </StatusBadge>
+                                <strong>{requirement?.requirement ?? decision.unmatchedRequirementId}</strong>
+                                <span>{gapDecisionSummary(decision, customFacts)}</span>
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                    unmatchedRequirements.map((requirement) => {
                       const gapDecision = gapDecisionForRequirement(gapDecisionsDraft, requirement.id);
                       const requirementCustomFacts = customFactsForRequirement(customFacts, requirement.id);
                       const approvedCustomFacts = requirementCustomFacts.filter((fact) => fact.status === "Approved");
                       const customFactDraft = customFactDrafts[requirement.id] ?? emptyCustomFactDraft();
+                      const isCustomFactEditorExpanded = expandedCustomFactRequirementId === requirement.id;
 
                       return (
                         <article className="evidence-card muted" key={requirement.id}>
@@ -2121,38 +2216,63 @@ function App() {
                                 Cover with {fact.title}
                               </button>
                             ))}
-                          </div>
-
-                          <div className="custom-fact-editor">
-                            <Field
-                              label="Custom fact title"
-                              value={customFactDraft.title}
-                              onChange={(title) => updateCustomFactDraft(requirement.id, { title })}
-                            />
-                            <Textarea
-                              label="Custom fact summary"
-                              value={customFactDraft.summary}
-                              onChange={(summary) => updateCustomFactDraft(requirement.id, { summary })}
-                            />
-                            <Textarea
-                              label="Technologies"
-                              value={customFactDraft.technologies}
-                              onChange={(technologies) => updateCustomFactDraft(requirement.id, { technologies })}
-                            />
-                            <Textarea
-                              label="Allowed claims"
-                              value={customFactDraft.allowedClaims}
-                              onChange={(allowedClaims) => updateCustomFactDraft(requirement.id, { allowedClaims })}
-                            />
                             <button
                               type="button"
-                              onClick={() => createCustomFact(requirement.id)}
-                              disabled={workflowBusy !== null}
-                              title={disabledTitle(workflowBusy !== null, workflowBusyReason)}
+                              className={isCustomFactEditorExpanded ? "selected" : ""}
+                              onClick={() =>
+                                setExpandedCustomFactRequirementId((current) =>
+                                  current === requirement.id ? null : requirement.id
+                                )
+                              }
+                              aria-expanded={isCustomFactEditorExpanded}
                             >
-                              {workflowBusy === `custom-fact-${requirement.id}` ? "Adding..." : "Add job-local fact"}
+                              Add custom fact
                             </button>
                           </div>
+
+                          {gapDecision && gapDecision.decision !== "CoveredByCustomFact" && (
+                            <article className={`gap-decision-item compact-inline ${gapDecisionClass(gapDecision)}`}>
+                              <div>
+                                <StatusBadge tone={gapDecisionTone(gapDecision)}>
+                                  {gapDecisionLabel(gapDecision.decision)}
+                                </StatusBadge>
+                                <span>{gapDecisionSummary(gapDecision, customFacts)}</span>
+                              </div>
+                            </article>
+                          )}
+
+                          {isCustomFactEditorExpanded && (
+                            <div className="custom-fact-editor">
+                              <Field
+                                label="Custom fact title"
+                                value={customFactDraft.title}
+                                onChange={(title) => updateCustomFactDraft(requirement.id, { title })}
+                              />
+                              <Textarea
+                                label="Custom fact summary"
+                                value={customFactDraft.summary}
+                                onChange={(summary) => updateCustomFactDraft(requirement.id, { summary })}
+                              />
+                              <Textarea
+                                label="Technologies"
+                                value={customFactDraft.technologies}
+                                onChange={(technologies) => updateCustomFactDraft(requirement.id, { technologies })}
+                              />
+                              <Textarea
+                                label="Allowed claims"
+                                value={customFactDraft.allowedClaims}
+                                onChange={(allowedClaims) => updateCustomFactDraft(requirement.id, { allowedClaims })}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => createCustomFact(requirement.id)}
+                                disabled={workflowBusy !== null}
+                                title={disabledTitle(workflowBusy !== null, workflowBusyReason)}
+                              >
+                                {workflowBusy === `custom-fact-${requirement.id}` ? "Adding..." : "Add job-local fact"}
+                              </button>
+                            </div>
+                          )}
 
                           {requirementCustomFacts.length > 0 && (
                             <div className="custom-fact-list compact">
@@ -2188,7 +2308,8 @@ function App() {
                           )}
                         </article>
                       );
-                    })}
+                    })
+                    )}
                   </section>
                 </div>
 
@@ -2212,7 +2333,7 @@ function App() {
                 </div>
 
                 <div className="approved-list">
-                  {approvedEvidenceDraft.length === 0 && savedApprovedCustomFactEvidence.length === 0 && (
+                  {approvedEvidenceDraft.length === 0 && currentApprovedCustomFactEvidence.length === 0 && (
                     <p className="empty-state compact">No approved evidence selected.</p>
                   )}
                   {approvedEvidenceDraft.map((match) => (
@@ -2225,7 +2346,7 @@ function App() {
                       <button type="button" onClick={() => removeApprovedEvidence(match.id)}>Remove</button>
                     </article>
                   ))}
-                  {savedApprovedCustomFactEvidence.map((item) => (
+                  {currentApprovedCustomFactEvidence.map((item) => (
                     <article className="approved-item custom-proof" key={item.fact.id}>
                       <div>
                         <StatusBadge tone="approved">Approved job-local fact</StatusBadge>
@@ -2275,8 +2396,10 @@ function App() {
                     </div>
                   )}
                 </section>
+                  </details>
+                )}
 
-                <div className="workflow-step">
+                <div className="workflow-step generated-draft-action">
                   <div>
                     <h4>4. Generated draft</h4>
                     <p>{draftGenerationState.message}</p>
@@ -2293,12 +2416,18 @@ function App() {
                     disabled={!draftGenerationState.canRun || workflowBusy !== null}
                     title={disabledTitle(!draftGenerationState.canRun || workflowBusy !== null, workflowBusyReason ?? draftGenerationState.message)}
                   >
-                    {workflowBusy === "draft" ? "Generating..." : "Generate and audit draft"}
+                    {workflowBusy === "draft" ? "Generating..." : hasGeneratedDraft ? "Regenerate and audit draft" : "Generate and audit draft"}
                   </button>
                 </div>
 
-                {hasApplicationStrategyContent(applicationStrategy) && (
-                  <ApplicationStrategySummary strategy={applicationStrategy} />
+                {selectedApplication && hasApplicationStrategyContent(applicationStrategy) && (
+                  <details className="context-disclosure preparation-context" open={strategyDetailsOpen}>
+                    <summary>
+                      <span>Strategy details</span>
+                      <small>{strategyDetailsSummary}</small>
+                    </summary>
+                    <ApplicationStrategySummary strategy={applicationStrategy} />
+                  </details>
                 )}
 
                 {selectedApplication?.generatedDraft ? (
@@ -2314,7 +2443,7 @@ function App() {
                     {aiStatus && isFakeProvider(aiStatus) && (
                       <p className="workflow-note warning">Fake AI mode: this draft uses deterministic demo/test output.</p>
                     )}
-                    {draftQualityCheck.status === "NeedsRevision" && (
+                    {isDraftQualityBlocked && (
                       <section className="claim-audit">
                         <div className="section-heading">
                           <h4>Draft quality</h4>
@@ -2323,6 +2452,7 @@ function App() {
                             {draftQualityCheck.copiedPhraseThreshold > 0 ? `, threshold ${draftQualityCheck.copiedPhraseThreshold}` : ""}
                           </p>
                         </div>
+                        <p className="workflow-note warning">{coverLetterExportState.reason ?? "Resolve draft quality issues before exporting."}</p>
                         <div className="audit-list">
                           {draftQualityCheck.issues.map((issue) => (
                             <article className="audit-item needsreview" key={issue.code}>
@@ -2419,16 +2549,25 @@ function App() {
                         </button>
                       </div>
                     </section>
-                    <section className="claim-audit">
+                    <section className={`claim-audit ${isDraftQualityBlocked ? "subordinate-to-quality" : ""}`}>
                       <div className="section-heading">
                         <h4>Claim audit</h4>
                         <p>
-                          {selectedApplication.generatedDraft.auditUpdatedAt
-                            ? `Updated ${formatDate(selectedApplication.generatedDraft.auditUpdatedAt)} - ${auditSummary.supported} supported, ${auditSummary.unsupported} unsupported, ${auditSummary.needsReview} needs review`
+                          {isDraftQualityBlocked
+                            ? selectedApplication.generatedDraft.auditUpdatedAt
+                              ? `Draft quality still blocks export - audit updated ${formatDate(selectedApplication.generatedDraft.auditUpdatedAt)}`
+                              : "Draft quality still blocks export - run claim audit after the generated text is ready."
+                            : selectedApplication.generatedDraft.auditUpdatedAt
+                              ? `Updated ${formatDate(selectedApplication.generatedDraft.auditUpdatedAt)} - ${auditSummary.supported} supported, ${auditSummary.unsupported} unsupported, ${auditSummary.needsReview} needs review`
                             : "Run claim audit after the generated text is ready."}
                         </p>
                       </div>
                       {effectiveAuditExportNotice && <p className={`workflow-note ${effectiveAuditExportNotice.tone}`}>{effectiveAuditExportNotice.message}</p>}
+                      {isDraftQualityBlocked && selectedApplication.generatedDraft.auditUpdatedAt && (
+                        <p className="audit-counts-subordinate">
+                          {auditSummary.supported} supported, {auditSummary.unsupported} unsupported, {auditSummary.needsReview} needs review
+                        </p>
+                      )}
                       {claimAudit.claims.length === 0 ? (
                         <p className="empty-state compact">No claim audit results yet.</p>
                       ) : (
@@ -3021,6 +3160,47 @@ function approvedEvidenceCountLabel(count: number): string {
   return count === 1 ? "1 approved evidence item" : `${count} approved evidence items`;
 }
 
+function preparationSummary(
+  preparationStatus: string | undefined,
+  jobSignals: JobSignalsDocument,
+  candidateFitBrief: CandidateFitBrief | null
+): string {
+  const signalSummary = countLabel(jobSignals.signals.length, "job signal");
+  const fitBriefSummary = hasCandidateFitBriefContent(candidateFitBrief) ? "fit brief ready" : "no fit brief";
+
+  return `${preparationStatusLabel(preparationStatus ?? "NotStarted")}; ${signalSummary}; ${fitBriefSummary}`;
+}
+
+function evidenceSummary(
+  matchCount: number,
+  unmatchedRequirementCount: number,
+  approvedEvidenceCount: number,
+  gapDecisionCount: number
+): string {
+  return [
+    countLabel(approvedEvidenceCount, "approved item"),
+    countLabel(matchCount, "match"),
+    countLabel(unmatchedRequirementCount, "gap"),
+    countLabel(gapDecisionCount, "decision")
+  ].join("; ");
+}
+
+function strategySummary(strategy: ApplicationStrategy | null): string {
+  if (!hasApplicationStrategyContent(strategy)) {
+    return "No strategy yet";
+  }
+
+  return [
+    countLabel(strategy.primaryAngles.length, "primary angle"),
+    countLabel(strategy.claimsToAvoid.length, "claim to avoid", "claims to avoid"),
+    countLabel(strategy.draftOutline.length, "outline item")
+  ].join("; ");
+}
+
+function countLabel(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 function auditReadinessLabel(readiness: string): string {
   return `Audit ${readinessLabel(readiness)}`;
 }
@@ -3100,6 +3280,7 @@ function applicationNextActionLabel(application: ApplicationSession, approvedPro
     unmatchedRequirementCount: unmatchedRequirements.length,
     savedGapDecisionCount: countCurrentGapDecisions(gapDecisions, unmatchedRequirements, customFacts),
     hasGeneratedDraft: application.hasGeneratedDraft,
+    draftQualityStatus: parseDraftQualityCheck(application.generatedDraft?.draftQualityCheck).status,
     auditReadiness: application.auditReadiness ?? auditReadinessForDraft(application.generatedDraft),
     canCopyOrExport: Boolean(application.generatedDraft?.coverLetterText.trim())
   }).title;

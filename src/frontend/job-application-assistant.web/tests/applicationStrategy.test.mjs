@@ -27,6 +27,10 @@ const strategyJson = JSON.stringify({
     {
       unmatchedRequirementId: "gap-kubernetes",
       guidance: "Mention Kubernetes as a learning interest only."
+    },
+    {
+      unmatchedRequirementId: "gap-kubernetes-duplicate",
+      guidance: "  Mention Kubernetes as a learning interest only.  "
     }
   ],
   claimsToAvoid: [
@@ -60,7 +64,9 @@ test("application strategy summary exposes compact read-only draft guidance", ()
     ["Primary angles", "Gap guidance", "Claims to avoid", "Draft outline"]
   );
   assert.match(sections.find((section) => section.key === "primaryAngles").items[0], /Backend delivery/);
-  assert.match(sections.find((section) => section.key === "gapHandlingGuidance").items[0], /learning interest/);
+  assert.deepEqual(sections.find((section) => section.key === "gapHandlingGuidance").items, [
+    "Mention Kubernetes as a learning interest only."
+  ]);
   assert.equal(sections.find((section) => section.key === "claimsToAvoid").tone, "risk");
   assert.match(sections.find((section) => section.key === "draftOutline").items[0], /Opening/);
 });

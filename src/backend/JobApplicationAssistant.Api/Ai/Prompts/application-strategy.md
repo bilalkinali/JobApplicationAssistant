@@ -44,6 +44,7 @@ Return only strict JSON with this shape:
 
 Rules:
 - Use the selected language when supplied.
+- When selected language is Danish and a gap should be framed as learning interest, use natural wording such as "interesse i at lære"; do not write "interesseret i at lærer" or direct English translations.
 - Apply the tone preference when supplied.
 - Choose primary angles from the strongest approved evidence, preferring Strong evidence over Partial and Weak evidence.
 - Secondary angles may provide context, but must not introduce unsupported claims.

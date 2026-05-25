@@ -404,7 +404,7 @@ public sealed partial class FakeAiProvider : IAiProvider
             .OrderBy(requirement => requirement.Requirement, StringComparer.OrdinalIgnoreCase)
             .Select(requirement => new ApplicationStrategyGapGuidance(
                 requirement.Id,
-                GapStrategyLine(requirement, input.GapDecisions, input.ApprovedCustomFacts)))
+                GapStrategyLine(requirement, input.GapDecisions, input.ApprovedCustomFacts, input.SelectedLanguage)))
             .ToList();
         var claimsToAvoid = input.UnmatchedRequirements
             .Select(requirement => new ApplicationStrategyClaimToAvoid(
@@ -689,7 +689,8 @@ public sealed partial class FakeAiProvider : IAiProvider
     private static string GapStrategyLine(
         UnmatchedRequirement requirement,
         IReadOnlyList<DraftGapDecision> gapDecisions,
-        IReadOnlyList<DraftCustomFact> approvedCustomFacts)
+        IReadOnlyList<DraftCustomFact> approvedCustomFacts,
+        string? selectedLanguage)
     {
         var decision = gapDecisions.FirstOrDefault(decision =>
             string.Equals(decision.UnmatchedRequirementId, requirement.Id, StringComparison.OrdinalIgnoreCase));
@@ -706,9 +707,14 @@ public sealed partial class FakeAiProvider : IAiProvider
         }
 
         return decision.Decision == "MentionAsLearningInterest"
-            ? $"Mention {requirement.Requirement} only as an interest to learn."
+            ? LearningInterestGuidance(requirement.Requirement, selectedLanguage)
             : $"Omit {requirement.Requirement} unless reviewed evidence is added.";
     }
+
+    private static string LearningInterestGuidance(string requirement, string? inputLanguage) =>
+        string.Equals(inputLanguage?.Trim(), "Danish", StringComparison.OrdinalIgnoreCase)
+            ? $"Nævn kun {requirement} som en interesse i at lære, ikke som eksisterende erfaring."
+            : $"Mention {requirement} only as an interest to learn.";
 
     private static IReadOnlyList<string> SplitClaims(params string[] texts) =>
         texts

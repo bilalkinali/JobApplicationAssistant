@@ -402,6 +402,27 @@ test("guided next action refreshes stale audit before final use", () => {
   assert.equal(action.buttonLabel, "Refresh claim audit");
 });
 
+test("guided next action asks for draft revision when draft quality blocks export", () => {
+  const action = getGuidedNextAction({
+    selectedApplicationId: "application-1",
+    hasSavedJobPosting: true,
+    preparationStatus: "PreparedForEvidenceReview",
+    approvedProfileFactCount: 2,
+    savedApprovedEvidenceCount: 1,
+    unmatchedRequirementCount: 0,
+    savedGapDecisionCount: 0,
+    hasGeneratedDraft: true,
+    draftQualityStatus: "NeedsRevision",
+    auditReadiness: "Current",
+    canCopyOrExport: false
+  });
+
+  assert.equal(action.kind, "revise-draft");
+  assert.equal(action.title, "Revise or regenerate draft");
+  assert.equal(action.buttonLabel, "Review draft");
+  assert.match(action.message, /blocking export/);
+});
+
 test("guided next action treats unsaved draft edits as stale audit", () => {
   const action = getGuidedNextAction({
     selectedApplicationId: "application-1",

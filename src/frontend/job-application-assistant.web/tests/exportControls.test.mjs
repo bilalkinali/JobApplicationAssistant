@@ -73,16 +73,21 @@ test("downloads are blocked until visible draft edits are saved", () => {
 });
 
 test("copy and downloads are blocked when draft quality needs revision", () => {
-  const state = getCoverLetterExportState({
+  const application = {
     generatedDraft: {
       ...baseApplication.generatedDraft,
       draftQualityCheck: '{"status":"NeedsRevision","issues":[]}'
     }
-  }, { clipboardAvailable: true });
+  };
+  const state = getCoverLetterExportState(application, { clipboardAvailable: true });
 
   assert.equal(state.canExport, false);
   assert.equal(state.canCopy, false);
   assert.equal(state.reason, "Resolve draft quality issues before exporting. Regenerate the draft, or edit and save it so the quality check passes.");
+  assert.equal(
+    getAuditExportWarning(application),
+    "Draft quality still blocks export. Supported claim counts only mean evidence support, not that the draft is ready to send."
+  );
 });
 
 test("claim audit is missing when the audit payload is still empty", () => {
