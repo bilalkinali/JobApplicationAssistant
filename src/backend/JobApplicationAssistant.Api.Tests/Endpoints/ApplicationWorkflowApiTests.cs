@@ -1190,7 +1190,7 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
-    public async Task MatchEvidence_with_ollama_repairs_incomplete_signal_coverage_once()
+    public async Task MatchEvidence_with_ollama_recovers_incomplete_signal_coverage_as_conservative_gaps()
     {
         var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>());
         await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
@@ -1224,13 +1224,17 @@ public sealed class ApplicationWorkflowApiTests
         var response = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
 
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
-        Assert.Equal(2, handler.Requests.Count);
+        Assert.Single(handler.Requests);
+        var matched = await response.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(matched);
+        Assert.Contains("unmatched-kubernetes", matched.UnmatchedRequirements);
+        Assert.Contains("Review Kubernetes manually before making a claim.", matched.UnmatchedRequirements);
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var run = Assert.Single(db.AiRuns);
-        Assert.Equal("RepairedSucceeded", run.Status);
-        Assert.Equal(2, run.AttemptCount);
+        Assert.Equal("Succeeded", run.Status);
+        Assert.Equal(1, run.AttemptCount);
     }
 
     [Fact]
@@ -1373,7 +1377,7 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
-    public async Task MatchEvidence_with_openai_compatible_repairs_incomplete_signal_coverage_once()
+    public async Task MatchEvidence_with_openai_compatible_recovers_incomplete_signal_coverage_as_conservative_gaps()
     {
         var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>());
         await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
@@ -1407,19 +1411,17 @@ public sealed class ApplicationWorkflowApiTests
         var response = await client.PostAsync($"/api/applications/{application.Id}/match-evidence", null);
 
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
-        Assert.Equal(2, handler.Requests.Count);
-
-        var repairRequestJson = await handler.Requests[1].Content!.ReadAsStringAsync();
-        Assert.Contains("Repair this evidence matching JSON", repairRequestJson);
-        Assert.Contains("Every job signal id listed below must appear exactly once", repairRequestJson);
-        Assert.Contains("kubernetes", repairRequestJson);
-        Assert.Contains(approvedFact.Id.ToString(), repairRequestJson);
+        Assert.Single(handler.Requests);
+        var matched = await response.Content.ReadFromJsonAsync<ApplicationResponse>();
+        Assert.NotNull(matched);
+        Assert.Contains("unmatched-kubernetes", matched.UnmatchedRequirements);
+        Assert.Contains("Review Kubernetes manually before making a claim.", matched.UnmatchedRequirements);
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var run = Assert.Single(db.AiRuns);
-        Assert.Equal("RepairedSucceeded", run.Status);
-        Assert.Equal(2, run.AttemptCount);
+        Assert.Equal("Succeeded", run.Status);
+        Assert.Equal(1, run.AttemptCount);
     }
 
     [Fact]

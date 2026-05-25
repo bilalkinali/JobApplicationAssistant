@@ -105,6 +105,23 @@ public sealed class EvidenceMatchProviderTests
         Assert.Equal("Review Kubernetes manually before making a claim.", unmatched.Recommendation);
     }
 
+    [Fact]
+    public async Task Ollama_evidence_matching_accepts_prefixed_unmatched_requirement_ids()
+    {
+        var fact = ApprovedFact();
+        var handler = new QueuedHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(EvidenceMatchingJsonWithPrefixedUnmatchedRequirementId(fact.Id)) }
+        ]));
+        var provider = new OllamaAiProvider(new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") }, Options());
+
+        var result = await provider.MatchEvidenceAsync(EvidenceInput(fact), CancellationToken.None);
+
+        var unmatched = Assert.Single(result.UnmatchedRequirements);
+        Assert.Equal("kubernetes", unmatched.SignalId);
+        Assert.Equal("Treat Kubernetes as an honest learning area.", unmatched.Recommendation);
+    }
+
     private static EvidenceMatchInput EvidenceInput(ProfileFact fact) =>
         new(
             [
@@ -202,6 +219,28 @@ public sealed class EvidenceMatchProviderTests
           "unmatchedRequirements": [
             {
               "signalId": "unknown-kubernetes",
+              "recommendation": "Treat Kubernetes as an honest learning area."
+            }
+          ]
+        }
+        """;
+
+    private static string EvidenceMatchingJsonWithPrefixedUnmatchedRequirementId(Guid profileFactId) =>
+        $$"""
+        {
+          "evidenceMatches": [
+            {
+              "signalId": "dotnet",
+              "profileFactId": "{{profileFactId}}",
+              "summary": "Approved API work demonstrates .NET experience.",
+              "quality": "Strong",
+              "reason": "Directly supported by approved API work.",
+              "matchedTerms": [".NET"]
+            }
+          ],
+          "unmatchedRequirements": [
+            {
+              "id": "unmatched-kubernetes",
               "recommendation": "Treat Kubernetes as an honest learning area."
             }
           ]

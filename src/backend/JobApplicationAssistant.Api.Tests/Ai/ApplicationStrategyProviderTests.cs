@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using JobApplicationAssistant.Api.Ai;
 using Xunit;
 
@@ -76,9 +77,14 @@ public sealed class ApplicationStrategyProviderTests
         ]));
         var provider = new OllamaAiProvider(new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") }, Options());
 
-        await Assert.ThrowsAsync<AiInvalidOutputException>(() =>
+        var exception = await Assert.ThrowsAsync<AiInvalidOutputException>(() =>
             provider.GenerateApplicationStrategyAsync(StrategyInput(profileFactId), CancellationToken.None));
 
+        Assert.Contains(
+            invalidJson.Contains("\"primaryAngles\"", StringComparison.Ordinal)
+                ? "missing required array 'secondaryAngles'"
+                : "malformed application strategy JSON",
+            exception.Message);
         Assert.Equal(2, handler.Requests.Count);
         var repairRequestJson = await handler.Requests[1].Content!.ReadAsStringAsync();
         Assert.Contains("Repair this application strategy JSON", repairRequestJson);
@@ -96,8 +102,10 @@ public sealed class ApplicationStrategyProviderTests
         ]));
         var provider = new OllamaAiProvider(new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") }, Options());
 
-        await Assert.ThrowsAsync<AiInvalidOutputException>(() =>
+        var exception = await Assert.ThrowsAsync<AiInvalidOutputException>(() =>
             provider.GenerateApplicationStrategyAsync(StrategyInput(profileFactId), CancellationToken.None));
+
+        Assert.Contains("invalid evidence id 'unknown-match'", exception.Message);
     }
 
     [Fact]
@@ -112,8 +120,69 @@ public sealed class ApplicationStrategyProviderTests
         ]));
         var provider = new OllamaAiProvider(new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") }, Options());
 
-        await Assert.ThrowsAsync<AiInvalidOutputException>(() =>
+        var exception = await Assert.ThrowsAsync<AiInvalidOutputException>(() =>
             provider.GenerateApplicationStrategyAsync(StrategyInput(profileFactId), CancellationToken.None));
+
+        Assert.Contains("invalid profile fact id", exception.Message);
+    }
+
+    [Fact]
+    public async Task Ollama_application_strategy_reports_invalid_unmatched_requirement_ids()
+    {
+        var profileFactId = Guid.NewGuid();
+        var invalidJson = ValidApplicationStrategyJson(profileFactId, "match-dotnet")
+            .Replace("unmatched-kubernetes", "unmatched-unknown", StringComparison.Ordinal);
+        var handler = new QueuedHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(invalidJson) },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(invalidJson) }
+        ]));
+        var provider = new OllamaAiProvider(new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") }, Options());
+
+        var exception = await Assert.ThrowsAsync<AiInvalidOutputException>(() =>
+            provider.GenerateApplicationStrategyAsync(StrategyInput(profileFactId), CancellationToken.None));
+
+        Assert.Contains("invalid unmatched requirement id 'unmatched-unknown'", exception.Message);
+    }
+
+    [Fact]
+    public async Task Ollama_application_strategy_requires_two_to_three_primary_angles()
+    {
+        var profileFactId = Guid.NewGuid();
+        var invalidPayload = JsonNode.Parse(ValidApplicationStrategyJson(profileFactId, "match-dotnet"))!.AsObject();
+        invalidPayload["primaryAngles"] = new JsonArray(invalidPayload["primaryAngles"]!.AsArray()[0]!.DeepClone());
+        var invalidJson = invalidPayload.ToJsonString();
+        var handler = new QueuedHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(invalidJson) },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(invalidJson) }
+        ]));
+        var provider = new OllamaAiProvider(new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") }, Options());
+
+        var exception = await Assert.ThrowsAsync<AiInvalidOutputException>(() =>
+            provider.GenerateApplicationStrategyAsync(StrategyInput(profileFactId), CancellationToken.None));
+
+        Assert.Contains("primaryAngles must contain 2 or 3 angles", exception.Message);
+    }
+
+    [Fact]
+    public async Task Ollama_application_strategy_requires_claims_to_avoid_when_gaps_exist()
+    {
+        var profileFactId = Guid.NewGuid();
+        var invalidPayload = JsonNode.Parse(ValidApplicationStrategyJson(profileFactId, "match-dotnet"))!.AsObject();
+        invalidPayload["claimsToAvoid"] = new JsonArray();
+        var invalidJson = invalidPayload.ToJsonString();
+        var handler = new QueuedHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(invalidJson) },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(invalidJson) }
+        ]));
+        var provider = new OllamaAiProvider(new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") }, Options());
+
+        var exception = await Assert.ThrowsAsync<AiInvalidOutputException>(() =>
+            provider.GenerateApplicationStrategyAsync(StrategyInput(profileFactId), CancellationToken.None));
+
+        Assert.Contains("claimsToAvoid must include unsupported gaps", exception.Message);
     }
 
     private static ApplicationStrategyInput StrategyInput(Guid profileFactId) =>
@@ -198,6 +267,12 @@ public sealed class ApplicationStrategyProviderTests
               "rationale": "Lead with the strongest approved API evidence.",
               "evidenceIds": ["{{evidenceId}}"],
               "profileFactIds": ["{{profileFactId}}"]
+            },
+            {
+              "title": "Careful gap handling",
+              "rationale": "Handle Kubernetes as a learning interest without overstating hands-on ownership.",
+              "evidenceIds": [],
+              "profileFactIds": []
             }
           ],
           "secondaryAngles": [

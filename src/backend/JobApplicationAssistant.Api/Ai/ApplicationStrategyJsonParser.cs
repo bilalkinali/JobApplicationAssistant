@@ -22,15 +22,29 @@ internal static class ApplicationStrategyJsonParser
             throw new AiInvalidOutputException($"{providerName} returned malformed application strategy JSON.", attemptCount, exception);
         }
 
-        if (payload is null ||
-            payload.PrimaryAngles is null ||
-            payload.SecondaryAngles is null ||
-            payload.GapHandlingGuidance is null ||
-            payload.ClaimsToAvoid is null ||
-            string.IsNullOrWhiteSpace(payload.ToneGuidance) ||
-            payload.DraftOutline is null)
+        if (payload is null)
         {
-            throw Invalid(providerName, attemptCount);
+            throw Invalid(providerName, attemptCount, "missing strategy object.");
+        }
+
+        ValidateRequiredArray(payload.PrimaryAngles, "primaryAngles", providerName, attemptCount);
+        ValidateRequiredArray(payload.SecondaryAngles, "secondaryAngles", providerName, attemptCount);
+        ValidateRequiredArray(payload.GapHandlingGuidance, "gapHandlingGuidance", providerName, attemptCount);
+        ValidateRequiredArray(payload.ClaimsToAvoid, "claimsToAvoid", providerName, attemptCount);
+        ValidateRequiredArray(payload.DraftOutline, "draftOutline", providerName, attemptCount);
+        if (payload.PrimaryAngles.Count is < 2 or > 3)
+        {
+            throw Invalid(providerName, attemptCount, "primaryAngles must contain 2 or 3 angles.");
+        }
+
+        if (RequiresClaimToAvoid(input) && payload.ClaimsToAvoid.Count == 0)
+        {
+            throw Invalid(providerName, attemptCount, "claimsToAvoid must include unsupported gaps or cautious evidence overstatements.");
+        }
+
+        if (string.IsNullOrWhiteSpace(payload.ToneGuidance))
+        {
+            throw Invalid(providerName, attemptCount, "missing required field 'toneGuidance'.");
         }
 
         var approvedEvidenceIds = input.ApprovedEvidence
@@ -69,7 +83,7 @@ internal static class ApplicationStrategyJsonParser
             angle.EvidenceIds is null ||
             angle.ProfileFactIds is null)
         {
-            throw Invalid(providerName, attemptCount);
+            throw Invalid(providerName, attemptCount, "invalid strategy angle.");
         }
 
         return new ApplicationStrategyAngle(
@@ -90,7 +104,11 @@ internal static class ApplicationStrategyJsonParser
             string.IsNullOrWhiteSpace(gap.Guidance) ||
             !unmatchedRequirementIds.Contains(gap.UnmatchedRequirementId.Trim()))
         {
-            throw Invalid(providerName, attemptCount);
+            var invalidId = gap?.UnmatchedRequirementId?.Trim();
+            var reason = string.IsNullOrWhiteSpace(invalidId)
+                ? "missing required gap guidance unmatched requirement id."
+                : $"invalid unmatched requirement id '{invalidId}'.";
+            throw Invalid(providerName, attemptCount, reason);
         }
 
         return new ApplicationStrategyGapGuidance(gap.UnmatchedRequirementId.Trim(), gap.Guidance.Trim());
@@ -105,7 +123,7 @@ internal static class ApplicationStrategyJsonParser
             string.IsNullOrWhiteSpace(claim.Claim) ||
             string.IsNullOrWhiteSpace(claim.Reason))
         {
-            throw Invalid(providerName, attemptCount);
+            throw Invalid(providerName, attemptCount, "invalid claim to avoid.");
         }
 
         return new ApplicationStrategyClaimToAvoid(claim.Claim.Trim(), claim.Reason.Trim());
@@ -124,7 +142,7 @@ internal static class ApplicationStrategyJsonParser
             item.EvidenceIds is null ||
             item.ProfileFactIds is null)
         {
-            throw Invalid(providerName, attemptCount);
+            throw Invalid(providerName, attemptCount, "invalid draft outline item.");
         }
 
         return new ApplicationStrategyOutlineItem(
@@ -145,7 +163,11 @@ internal static class ApplicationStrategyJsonParser
         {
             if (string.IsNullOrWhiteSpace(rawId) || !approvedEvidenceIds.Contains(rawId.Trim()))
             {
-                throw Invalid(providerName, attemptCount);
+                var invalidId = rawId?.Trim();
+                var reason = string.IsNullOrWhiteSpace(invalidId)
+                    ? "missing required evidence id."
+                    : $"invalid evidence id '{invalidId}'.";
+                throw Invalid(providerName, attemptCount, reason);
             }
 
             if (!evidenceIds.Contains(rawId.Trim(), StringComparer.OrdinalIgnoreCase))
@@ -170,7 +192,11 @@ internal static class ApplicationStrategyJsonParser
                 !Guid.TryParse(rawId, out var profileFactId) ||
                 !validProfileFactIds.Contains(profileFactId))
             {
-                throw Invalid(providerName, attemptCount);
+                var invalidId = rawId?.Trim();
+                var reason = string.IsNullOrWhiteSpace(invalidId)
+                    ? "missing required profile fact id."
+                    : $"invalid profile fact id '{invalidId}'.";
+                throw Invalid(providerName, attemptCount, reason);
             }
 
             if (!profileFactIds.Contains(profileFactId))
@@ -191,8 +217,26 @@ internal static class ApplicationStrategyJsonParser
             .Concat(brief.RiskNotes)
             .SelectMany(item => item.SupportingProfileFactIds);
 
-    private static AiInvalidOutputException Invalid(string providerName, int attemptCount) =>
-        new($"{providerName} returned structurally invalid application strategy JSON.", attemptCount);
+    private static bool RequiresClaimToAvoid(ApplicationStrategyInput input) =>
+        input.UnmatchedRequirements.Count > 0 ||
+        input.ApprovedEvidence.Any(evidence =>
+            string.Equals(evidence.Quality, EvidenceQuality.Partial, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(evidence.Quality, EvidenceQuality.Weak, StringComparison.OrdinalIgnoreCase));
+
+    private static void ValidateRequiredArray<T>(
+        IReadOnlyList<T>? value,
+        string fieldName,
+        string providerName,
+        int attemptCount)
+    {
+        if (value is null)
+        {
+            throw Invalid(providerName, attemptCount, $"missing required array '{fieldName}'.");
+        }
+    }
+
+    private static AiInvalidOutputException Invalid(string providerName, int attemptCount, string reason) =>
+        new($"{providerName} returned structurally invalid application strategy JSON: {reason}", attemptCount);
 
     private static string ExtractJsonObject(string responseText)
     {

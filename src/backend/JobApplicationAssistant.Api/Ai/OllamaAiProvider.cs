@@ -374,14 +374,13 @@ public sealed class OllamaAiProvider : IAiProvider
 
         foreach (var requirement in payload.UnmatchedRequirements)
         {
-            if (requirement is null ||
-                string.IsNullOrWhiteSpace(requirement.SignalId) ||
-                string.IsNullOrWhiteSpace(requirement.Recommendation))
+            if (requirement is null)
             {
-                throw new AiInvalidOutputException("Ollama returned structurally invalid unmatched requirement JSON.", attemptCount);
+                continue;
             }
 
-            if (!signalsById.TryGetValue(requirement.SignalId.Trim(), out var signal))
+            var rawSignalId = NormalizeUnmatchedSignalId(requirement.SignalId ?? requirement.Id);
+            if (rawSignalId is null || !signalsById.TryGetValue(rawSignalId, out var signal))
             {
                 continue;
             }
@@ -396,7 +395,9 @@ public sealed class OllamaAiProvider : IAiProvider
                 signal.Id,
                 signal.Label,
                 signal.Category,
-                requirement.Recommendation.Trim()));
+                string.IsNullOrWhiteSpace(requirement.Recommendation)
+                    ? $"Review {signal.Label} manually before making a claim."
+                    : requirement.Recommendation.Trim()));
         }
 
         foreach (var signal in input.Signals.Where(signal => !matchedSignalIds.Contains(signal.Id) && !unmatchedSignalIds.Contains(signal.Id)))
@@ -957,6 +958,20 @@ public sealed class OllamaAiProvider : IAiProvider
             .Concat(input.CandidateFitBrief.RiskNotes.SelectMany(item => item.SupportingProfileFactIds))
             .Distinct();
 
+    private static string? NormalizeUnmatchedSignalId(string? rawId)
+    {
+        var value = rawId?.Trim();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        const string unmatchedPrefix = "unmatched-";
+        return value.StartsWith(unmatchedPrefix, StringComparison.OrdinalIgnoreCase)
+            ? value[unmatchedPrefix.Length..]
+            : value;
+    }
+
     private static bool IsSupportedLanguage(string language) =>
         string.Equals(language.Trim(), "English", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(language.Trim(), "Danish", StringComparison.OrdinalIgnoreCase);
@@ -1029,8 +1044,9 @@ public sealed class OllamaAiProvider : IAiProvider
         IReadOnlyList<string> MatchedTerms);
 
     private sealed record OllamaUnmatchedRequirementResponse(
-        string SignalId,
-        string Recommendation);
+        string? SignalId,
+        string? Id,
+        string? Recommendation);
 
     private sealed record OllamaDraftGenerationResponse(
         string CoverLetterText,
