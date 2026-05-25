@@ -1,6 +1,6 @@
 # V2.2 Creative Output Manual QA
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,14 +15,13 @@ The slice should give a human tester a concrete checklist for judging whether th
 
 ## Acceptance criteria
 
-- [ ] Manual QA documentation includes a Vejle Kommune AI-builder scenario checklist.
-- [ ] Manual QA documentation includes the Milestone 2 backend-platform scenario as a regression comparison.
-- [ ] The checklist compares app output with a direct-chat baseline using the same model.
-- [ ] The checklist covers broader background usage, including AI tooling, integrations, education, business or customer experience, communication, technical architecture, language, and location where applicable.
-- [ ] The checklist covers phrase copying, repeated evidence, short motivation distinctness, and unsupported claim audit behavior.
-- [ ] The checklist records model/provider, date, input fixture or source, observed draft quality, and audit outcome.
+- [x] Manual QA documentation includes a Vejle Kommune AI-builder scenario checklist.
+- [x] Manual QA documentation includes the Milestone 2 backend-platform scenario as a regression comparison.
+- [x] The checklist compares app output with a direct-chat baseline using the same model.
+- [x] The checklist covers broader background usage, including AI tooling, integrations, education, business or customer experience, communication, technical architecture, language, and location where applicable.
+- [x] The checklist covers phrase copying, repeated evidence, short motivation distinctness, and unsupported claim audit behavior.
+- [x] The checklist records model/provider, date, input fixture or source, observed draft quality, and audit outcome.
 
 ## Blocked by
 
 None - can start immediately
-
