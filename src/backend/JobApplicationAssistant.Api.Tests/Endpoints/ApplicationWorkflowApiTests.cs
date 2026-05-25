@@ -2138,7 +2138,7 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
-    public async Task GenerateDraft_with_ollama_does_not_send_candidate_fit_brief_profile_fact_ids_to_draft_or_audit()
+    public async Task GenerateDraft_with_ollama_sends_fit_brief_context_to_draft_without_profile_fact_ids()
     {
         var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
         [
@@ -2161,7 +2161,13 @@ public sealed class ApplicationWorkflowApiTests
         var auditRequestJson = await handler.Requests[2].Content!.ReadAsStringAsync();
         Assert.Contains("match-dotnet-test", draftRequestJson);
         Assert.Contains("match-dotnet-test", auditRequestJson);
+        Assert.Contains("Candidate fit brief writing context", draftRequestJson);
+        Assert.Contains("Traceability-only fit context", draftRequestJson);
+        Assert.Contains("Traceability-only profile fact", draftRequestJson);
+        var draftFitBriefContext = draftRequestJson[
+            draftRequestJson.LastIndexOf("Candidate fit brief writing context", StringComparison.Ordinal)..];
         Assert.DoesNotContain(traceOnlyProfileFactId.ToString(), draftRequestJson);
+        Assert.DoesNotContain("supportingProfileFactIds", draftFitBriefContext);
         Assert.DoesNotContain(traceOnlyProfileFactId.ToString(), auditRequestJson);
     }
 
@@ -4169,6 +4175,12 @@ public sealed class ApplicationWorkflowApiTests
             {
               "title": "API delivery for platform work",
               "rationale": "Lead with the strongest approved API evidence.",
+              "evidenceIds": ["match-dotnet-test"],
+              "profileFactIds": ["{{DraftProfileFactId}}"]
+            },
+            {
+              "title": "Evidence-led backend contribution",
+              "rationale": "Use the same approved API evidence as a second focused story angle.",
               "evidenceIds": ["match-dotnet-test"],
               "profileFactIds": ["{{DraftProfileFactId}}"]
             }

@@ -671,6 +671,9 @@ public sealed class OllamaAiProvider : IAiProvider
 
         Application strategy:
         {JsonSerializer.Serialize(input.ApplicationStrategy, JsonOptions)}
+
+        Candidate fit brief writing context:
+        {JsonSerializer.Serialize(input.CandidateFitBriefContext, JsonOptions)}
         """;
     }
 

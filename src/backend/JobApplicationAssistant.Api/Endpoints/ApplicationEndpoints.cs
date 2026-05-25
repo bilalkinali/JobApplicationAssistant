@@ -852,6 +852,7 @@ public static class ApplicationEndpoints
 
             var candidateFitBrief = ReadCandidateFitBrief(application.CandidateFitBrief) ??
                 new CandidateFitBriefResult("No candidate fit brief is available for this application.", [], [], [], [], []);
+            var draftCandidateFitBriefContext = ToDraftCandidateFitBriefContext(candidateFitBrief);
             var previousApplicationStrategy = application.ApplicationStrategy;
 
             var strategyRun = new AiRun
@@ -945,7 +946,8 @@ public static class ApplicationEndpoints
                         draftUnmatchedRequirements,
                         gapDecisions,
                         approvedCustomFacts,
-                        strategyResult),
+                        strategyResult,
+                        draftCandidateFitBriefContext),
                     ct);
             }
             catch (AiProviderException exception)
@@ -1742,6 +1744,22 @@ public static class ApplicationEndpoints
             return null;
         }
     }
+
+    private static DraftCandidateFitBriefContext ToDraftCandidateFitBriefContext(CandidateFitBriefResult brief) =>
+        new(
+            brief.CandidateSummary,
+            brief.SkillGroups
+                .Select(group => new DraftCandidateFitBriefGroup(
+                    group.Name,
+                    group.Items.Select(ToDraftCandidateFitBriefItem).ToList()))
+                .ToList(),
+            brief.Competencies.Select(ToDraftCandidateFitBriefItem).ToList(),
+            brief.RelevantProjects.Select(ToDraftCandidateFitBriefItem).ToList(),
+            brief.TransferableStrengths.Select(ToDraftCandidateFitBriefItem).ToList(),
+            brief.RiskNotes.Select(ToDraftCandidateFitBriefItem).ToList());
+
+    private static DraftCandidateFitBriefItem ToDraftCandidateFitBriefItem(CandidateFitBriefItem item) =>
+        new(item.Title, item.Summary);
 
     private static IReadOnlyList<EvidenceMatch> ReadApprovedEvidenceForApplication(JobApplication application)
     {

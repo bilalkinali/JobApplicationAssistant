@@ -81,7 +81,24 @@ public sealed record DraftGenerationInput(
     IReadOnlyList<UnmatchedRequirement> UnmatchedRequirements,
     IReadOnlyList<DraftGapDecision> GapDecisions,
     IReadOnlyList<DraftCustomFact> ApprovedCustomFacts,
-    ApplicationStrategyResult? ApplicationStrategy = null);
+    ApplicationStrategyResult? ApplicationStrategy = null,
+    DraftCandidateFitBriefContext? CandidateFitBriefContext = null);
+
+public sealed record DraftCandidateFitBriefContext(
+    string CandidateSummary,
+    IReadOnlyList<DraftCandidateFitBriefGroup> SkillGroups,
+    IReadOnlyList<DraftCandidateFitBriefItem> Competencies,
+    IReadOnlyList<DraftCandidateFitBriefItem> RelevantProjects,
+    IReadOnlyList<DraftCandidateFitBriefItem> TransferableStrengths,
+    IReadOnlyList<DraftCandidateFitBriefItem> RiskNotes);
+
+public sealed record DraftCandidateFitBriefGroup(
+    string Name,
+    IReadOnlyList<DraftCandidateFitBriefItem> Items);
+
+public sealed record DraftCandidateFitBriefItem(
+    string Title,
+    string Summary);
 
 public sealed record DraftGapDecision(
     string UnmatchedRequirementId,
