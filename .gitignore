@@ -22,6 +22,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Local manual/Playwright QA output
+artifacts/
+docs/testing/v2.2/creative-output-playwright-qa-*.md
+
 # OS / editor
 .DS_Store
 Thumbs.db
