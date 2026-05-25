@@ -30,3 +30,6 @@
 - [ ] Draft generation works
 - [ ] Missing profile/job data gives clear guidance
 - [ ] Generated draft can be copied/exported
+
+## V2.2 Creative Output
+- [ ] Complete the V2.2 creative output manual QA checklist in `docs/testing/v2.2/creative-output-manual-qa.md`

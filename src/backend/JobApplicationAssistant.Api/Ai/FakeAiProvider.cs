@@ -195,6 +195,10 @@ public sealed partial class FakeAiProvider : IAiProvider
         var motivationGapText = gapLines.Count == 0
             ? "I will keep unsupported gaps out of concrete claims."
             : "I will describe selected unmatched requirements honestly as learning areas.";
+        var evidencePitch = input.ApprovedEvidence.Count == 0
+            ? "reviewed evidence"
+            : string.Join(", ", input.ApprovedEvidence.Select(evidence => evidence.ProfileFactTitle));
+        var writingContext = DraftWritingContext(input.CandidateFitBriefContext);
 
         var coverLetter = $"""
             Language: {language}
@@ -211,16 +215,39 @@ public sealed partial class FakeAiProvider : IAiProvider
             Strategy:
             {strategyText}
 
+            Relevant writing context:
+            {writingContext}
+
             Kind regards,
             {applicant}
             """;
 
         var shortMotivation = $"""
             Language: {language}
-            I am interested in the {input.RoleTitle} role at {input.CompanyName} because my reviewed evidence includes {string.Join(", ", input.ApprovedEvidence.Select(evidence => evidence.ProfileFactTitle))}. {motivationGapText}
+            Concise pitch for {input.CompanyName}: I bring {evidencePitch} to the {input.RoleTitle} role, with unsupported gaps handled transparently. {motivationGapText}
             """;
 
         return Task.FromResult(new DraftGenerationResult(coverLetter, shortMotivation));
+    }
+
+    private static string DraftWritingContext(DraftCandidateFitBriefContext? context)
+    {
+        if (context is null)
+        {
+            return "- No additional fit brief context supplied.";
+        }
+
+        var contextLines = context.Competencies
+            .Concat(context.TransferableStrengths)
+            .Concat(context.RelevantProjects)
+            .Select(item => $"- {item.Title}: {item.Summary}")
+            .Concat(context.SkillGroups.SelectMany(group =>
+                group.Items.Select(item => $"- {group.Name}: {item.Title}: {item.Summary}")))
+            .ToList();
+
+        return contextLines.Count == 0
+            ? "- No currently approved fit brief context supplied."
+            : string.Join(Environment.NewLine, contextLines);
     }
 
     private static string? GapDecisionLine(
@@ -256,7 +283,7 @@ public sealed partial class FakeAiProvider : IAiProvider
                     .ToList();
                 var status = evidenceIds.Count > 0
                     ? "Supported"
-                    : ClaimNeedsReview(claim) ? "NeedsReview" : "Unsupported";
+                    : ClaimNeedsReview(claim) && !ClaimStatesExperience(claim) ? "NeedsReview" : "Unsupported";
 
                 return new ClaimAuditClaim($"claim-{index + 1}", claim, status, evidenceIds);
             })
@@ -719,8 +746,21 @@ public sealed partial class FakeAiProvider : IAiProvider
         ContainsTerm(claim, "may") ||
         ContainsTerm(claim, "might") ||
         ContainsTerm(claim, "interested") ||
+        ContainsTerm(claim, "interest") ||
+        ContainsTerm(claim, "motivated") ||
+        ContainsTerm(claim, "eager") ||
         ContainsTerm(claim, "learn") ||
         ContainsTerm(claim, "fit");
+
+    private static bool ClaimStatesExperience(string claim) =>
+        ContainsTerm(claim, "experience") ||
+        ContainsTerm(claim, "experienced") ||
+        ContainsTerm(claim, "built") ||
+        ContainsTerm(claim, "delivered") ||
+        ContainsTerm(claim, "led") ||
+        ContainsTerm(claim, "owned") ||
+        ContainsTerm(claim, "implemented") ||
+        ContainsTerm(claim, "shipped");
 
     private static bool ContainsTerm(string text, string keyword)
     {

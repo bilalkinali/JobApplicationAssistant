@@ -12,12 +12,12 @@ Goal: avoid wasting tokens on broad repo exploration while still preserving loca
 - Do not broadly scan the repo.
 - Do not read entire large files unless required.
 - Use targeted search first, then read only the relevant surrounding lines.
-- Prefer ±80 lines around a located symbol instead of full-file reads.
+- Prefer +/-80 lines around a located symbol instead of full-file reads.
 - Do not inspect frontend files for backend-only issues.
 - Do not inspect migrations unless the change affects persistence shape.
 - Do not inspect unrelated V1/V2 planning docs unless needed.
 - If both V1 and V2 issue files exist, prefer V2 unless the user says otherwise.
-- Do not run tests or builds unless the user asks.
+- Do not run tests or builds unless the user asks to verify/check/review the work, or the change is risky enough that a narrow targeted test is the cheapest way to preserve quality.
 
 ## Backend map
 
@@ -63,11 +63,12 @@ Tests:
 2. Identify the feature area.
 3. If editing docs/issues, inspect the target file first.
 4. If the docs/issues formatting convention is unclear, inspect at most 1-2 nearby completed files in the same folder.
-5. If editing code, search only in likely folders first.
+5. If editing code, search only in likely folders first; prefer exact symbols, contract names, endpoint names, prompt names, or issue acceptance terms.
 6. Read only the relevant code ranges.
 7. Make the smallest coherent change.
 8. Update only directly related tests/docs.
-9. Stop.
+9. If verifying, run the narrowest relevant test filter instead of the whole suite unless the change crosses broad shared behavior.
+10. Stop.
 
 ## Issue completion rule
 

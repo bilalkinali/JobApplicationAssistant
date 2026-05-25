@@ -625,6 +625,7 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
                 string.IsNullOrWhiteSpace(claim.Status) ||
                 claim.EvidenceIds is null ||
                 !IsSupportedClaimStatus(claim.Status) ||
+                (string.Equals(NormalizeClaimStatus(claim.Status), "Supported", StringComparison.Ordinal) && claim.EvidenceIds.Count == 0) ||
                 claim.EvidenceIds.Any(evidenceId => string.IsNullOrWhiteSpace(evidenceId) || !approvedEvidenceIds.Contains(evidenceId.Trim())) ||
                 !claimIds.Add(claim.Id.Trim()))
             {
@@ -825,6 +826,9 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
 
         Application strategy:
         {JsonSerializer.Serialize(input.ApplicationStrategy, JsonOptions)}
+
+        Candidate fit brief writing context:
+        {JsonSerializer.Serialize(input.CandidateFitBriefContext, JsonOptions)}
         """;
     }
 
@@ -836,6 +840,7 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
             evidence.SignalId,
             evidence.Signal,
             evidence.Category,
+            evidence.ProfileFactId,
             evidence.ProfileFactTitle,
             evidence.Summary,
             evidence.MatchedTerms
@@ -853,6 +858,15 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
 
         Approved evidence:
         {JsonSerializer.Serialize(approvedEvidence, JsonOptions)}
+
+        Approved job-local custom facts:
+        {JsonSerializer.Serialize(input.ApprovedCustomFacts, JsonOptions)}
+
+        Gap decisions:
+        {JsonSerializer.Serialize(input.GapDecisions, JsonOptions)}
+
+        Candidate fit brief support mappings:
+        {JsonSerializer.Serialize(input.CandidateFitBriefSupportMappings, JsonOptions)}
         """;
     }
 

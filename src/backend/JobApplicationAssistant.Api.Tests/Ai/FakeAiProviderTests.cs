@@ -232,8 +232,18 @@ public sealed class FakeAiProviderTests
         Assert.Contains("Built ASP.NET Core APIs backed by PostgreSQL.", first.CoverLetterText);
         Assert.Contains("Kubernetes", first.CoverLetterText);
         Assert.Contains("area to learn", first.CoverLetterText);
+        Assert.False(string.IsNullOrWhiteSpace(first.ShortMotivationText));
+        Assert.NotEqual(first.CoverLetterText, first.ShortMotivationText);
+        Assert.DoesNotContain(NormalizeDraftText(first.ShortMotivationText), NormalizeDraftText(first.CoverLetterText));
+        Assert.DoesNotContain("Approved evidence:", first.ShortMotivationText);
+        Assert.DoesNotContain("Honest gap handling:", first.ShortMotivationText);
+        Assert.DoesNotContain("Dear Northwind hiring team", first.ShortMotivationText);
         Assert.Contains("Approved API work", first.ShortMotivationText);
+        Assert.Contains("Concise pitch", first.ShortMotivationText);
     }
+
+    private static string NormalizeDraftText(string value) =>
+        string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
     [Fact]
     public async Task GenerateDraftAsync_respects_saved_gap_decisions_deterministically()
@@ -295,6 +305,88 @@ public sealed class FakeAiProviderTests
     }
 
     [Fact]
+    public async Task GenerateDraftAsync_uses_transferable_fit_context_without_making_it_proof()
+    {
+        var provider = new FakeAiProvider();
+        var approvedEvidence = new[]
+        {
+            new EvidenceMatch(
+                "match-dotnet",
+                "dotnet",
+                ".NET",
+                "RequiredSkill",
+                Guid.NewGuid(),
+                "Approved API work",
+                "Built ASP.NET Core APIs backed by PostgreSQL.",
+                [".NET"])
+        };
+        var input = new DraftGenerationInput(
+            "Northwind",
+            "Technical Business Analyst",
+            "English",
+            "Bilal Kinali",
+            null,
+            approvedEvidence,
+            [],
+            [],
+            [],
+            CandidateFitBriefContext: new DraftCandidateFitBriefContext(
+                "Broad candidate context.",
+                [],
+                [new DraftCandidateFitBriefItem("Stakeholder communication", "Translated technical constraints for business stakeholders.")],
+                [],
+                [new DraftCandidateFitBriefItem("Business process experience", "Mapped operational workflows into delivery priorities.")],
+                []));
+
+        var result = await provider.GenerateDraftAsync(input, CancellationToken.None);
+
+        Assert.Contains("Relevant writing context:", result.CoverLetterText);
+        Assert.Contains("Stakeholder communication", result.CoverLetterText);
+        Assert.Contains("Business process experience", result.CoverLetterText);
+        Assert.Contains("Approved evidence:", result.CoverLetterText);
+        Assert.Contains("Approved API work", result.CoverLetterText);
+    }
+
+    [Fact]
+    public async Task GenerateDraftAsync_mentions_learning_interest_cautiously_and_keeps_ignored_gaps_quiet()
+    {
+        var provider = new FakeAiProvider();
+        var input = new DraftGenerationInput(
+            "Northwind",
+            "Platform Developer",
+            "English",
+            "Bilal Kinali",
+            null,
+            [
+                new EvidenceMatch(
+                    "match-dotnet",
+                    "dotnet",
+                    ".NET",
+                    "RequiredSkill",
+                    Guid.NewGuid(),
+                    "Approved API work",
+                    "Built ASP.NET Core APIs backed by PostgreSQL.",
+                    [".NET"])
+            ],
+            [
+                new UnmatchedRequirement("unmatched-kubernetes", "kubernetes", "Kubernetes", "PreferredSkill", "Ignore if unsupported."),
+                new UnmatchedRequirement("unmatched-azure", "azure", "Azure", "PreferredSkill", "Mention as learning interest.")
+            ],
+            [
+                new DraftGapDecision("unmatched-kubernetes", "Ignore", null),
+                new DraftGapDecision("unmatched-azure", "MentionAsLearningInterest", null)
+            ],
+            []);
+
+        var result = await provider.GenerateDraftAsync(input, CancellationToken.None);
+
+        Assert.DoesNotContain("Kubernetes", result.CoverLetterText);
+        Assert.Contains("Azure", result.CoverLetterText);
+        Assert.Contains("area to learn", result.CoverLetterText);
+        Assert.Contains("not as existing experience", result.CoverLetterText);
+    }
+
+    [Fact]
     public async Task AuditClaimsAsync_classifies_supported_unsupported_and_needs_review_claims_deterministically()
     {
         var provider = new FakeAiProvider();
@@ -317,7 +409,10 @@ public sealed class FakeAiProviderTests
             I may be a fit for the team.
             """,
             "",
-            approvedEvidence);
+            approvedEvidence,
+            [],
+            [],
+            []);
 
         var first = await provider.AuditClaimsAsync(input, CancellationToken.None);
         var second = await provider.AuditClaimsAsync(input, CancellationToken.None);
@@ -372,7 +467,21 @@ public sealed class FakeAiProviderTests
             Shipped Docker deployment for a client.
             """,
             "",
-            approvedEvidence);
+            approvedEvidence,
+            [
+                new DraftCustomFact(
+                    approvedCustomFactId,
+                    "docker",
+                    "Approved Docker deployment",
+                    "Shipped Docker deployment for a client.",
+                    ["Docker"],
+                    ["Shipped Docker deployment for a client."])
+            ],
+            [
+                new DraftGapDecision("azure", "MentionAsLearningInterest", null),
+                new DraftGapDecision("docker", "CoveredByCustomFact", approvedCustomFactId)
+            ],
+            []);
 
         var result = await provider.AuditClaimsAsync(input, CancellationToken.None);
 
@@ -384,5 +493,52 @@ public sealed class FakeAiProviderTests
             claim => claim.Text == "Shipped Docker deployment for a client." &&
                 claim.Status == "Supported" &&
                 claim.EvidenceIds.Contains($"custom-fact-{approvedCustomFactId:N}"));
+    }
+
+    [Fact]
+    public async Task AuditClaimsAsync_rejects_fit_brief_only_support_for_concrete_claims()
+    {
+        var provider = new FakeAiProvider();
+        var profileFactId = Guid.NewGuid();
+        var input = new ClaimAuditInput(
+            "Built GraphQL services for ecommerce teams.",
+            "",
+            [],
+            [],
+            [],
+            [
+                new ClaimAuditFitBriefSupportMapping(
+                    "RelevantProject",
+                    "GraphQL ecommerce context",
+                    "Built GraphQL services for ecommerce teams.",
+                    [profileFactId])
+            ]);
+
+        var result = await provider.AuditClaimsAsync(input, CancellationToken.None);
+
+        var claim = Assert.Single(result.Claims);
+        Assert.Equal("Unsupported", claim.Status);
+        Assert.Empty(claim.EvidenceIds);
+    }
+
+    [Fact]
+    public async Task AuditClaimsAsync_handles_cautious_motivation_separately_from_broad_competency_claims()
+    {
+        var provider = new FakeAiProvider();
+        var input = new ClaimAuditInput(
+            """
+            I am a strong stakeholder communicator.
+            I am eager to grow stakeholder communication in this role.
+            """,
+            "",
+            [],
+            [],
+            [new DraftGapDecision("stakeholder-communication", "MentionAsLearningInterest", null)],
+            []);
+
+        var result = await provider.AuditClaimsAsync(input, CancellationToken.None);
+
+        Assert.Contains(result.Claims, claim => claim.Text == "I am a strong stakeholder communicator." && claim.Status == "Unsupported");
+        Assert.Contains(result.Claims, claim => claim.Text == "I am eager to grow stakeholder communication in this role." && claim.Status == "NeedsReview");
     }
 }

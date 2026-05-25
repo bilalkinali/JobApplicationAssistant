@@ -852,6 +852,15 @@ public static class ApplicationEndpoints
 
             var candidateFitBrief = ReadCandidateFitBrief(application.CandidateFitBrief) ??
                 new CandidateFitBriefResult("No candidate fit brief is available for this application.", [], [], [], [], []);
+            var approvedProfileFactIds = approvedEvidence
+                .Select(evidence => evidence.ProfileFactId)
+                .Concat(await db.ProfileFacts
+                    .Where(fact => fact.Status == ProfileFactStatus.Approved)
+                    .Select(fact => fact.Id)
+                    .ToListAsync(ct))
+                .ToHashSet();
+            var currentCandidateFitBrief = SelectCurrentlyApprovedCandidateFitBriefContext(candidateFitBrief, approvedProfileFactIds);
+            var draftCandidateFitBriefContext = ToDraftCandidateFitBriefContext(currentCandidateFitBrief);
             var previousApplicationStrategy = application.ApplicationStrategy;
 
             var strategyRun = new AiRun
@@ -880,7 +889,7 @@ public static class ApplicationEndpoints
                 strategyResult = await aiProvider.GenerateApplicationStrategyAsync(
                     new ApplicationStrategyInput(
                         jobAnalysis,
-                        candidateFitBrief,
+                        currentCandidateFitBrief,
                         approvedEvidence,
                         strategyUnmatchedRequirements,
                         gapDecisions,
@@ -945,7 +954,8 @@ public static class ApplicationEndpoints
                         draftUnmatchedRequirements,
                         gapDecisions,
                         approvedCustomFacts,
-                        strategyResult),
+                        strategyResult,
+                        draftCandidateFitBriefContext),
                     ct);
             }
             catch (AiProviderException exception)
@@ -1016,7 +1026,10 @@ public static class ApplicationEndpoints
                     new ClaimAuditInput(
                         draft.CoverLetterText,
                         draft.ShortMotivationText,
-                        approvedEvidence),
+                        approvedEvidence,
+                        approvedCustomFacts,
+                        gapDecisions,
+                        ToClaimAuditFitBriefSupportMappings(currentCandidateFitBrief)),
                     ct);
 
                 draft.ClaimAudit = JsonSerializer.Serialize(auditResult, JsonOptions);
@@ -1094,6 +1107,14 @@ public static class ApplicationEndpoints
 
             var draft = application.GeneratedDraft;
             var approvedEvidence = ReadApprovedEvidenceForApplication(application);
+            var approvedCustomFacts = ReadApprovedCustomFactsForDraft(application);
+            var gapDecisions = ReadGapDecisions(application.GapDecisions, new Dictionary<string, string[]>())
+                .Select(decision => new DraftGapDecision(decision.UnmatchedRequirementId, decision.Decision, decision.CustomFactId))
+                .ToList();
+            var candidateFitBrief = ReadCandidateFitBrief(application.CandidateFitBrief);
+            var candidateFitBriefSupportMappings = candidateFitBrief is null
+                ? Array.Empty<ClaimAuditFitBriefSupportMapping>()
+                : ToClaimAuditFitBriefSupportMappings(candidateFitBrief);
             var run = new AiRun
             {
                 Id = Guid.NewGuid(),
@@ -1120,7 +1141,10 @@ public static class ApplicationEndpoints
                     new ClaimAuditInput(
                         draft.CoverLetterText,
                         draft.ShortMotivationText,
-                        approvedEvidence),
+                        approvedEvidence,
+                        approvedCustomFacts,
+                        gapDecisions,
+                        candidateFitBriefSupportMappings),
                     ct);
             }
             catch (AiProviderException exception)
@@ -1742,6 +1766,85 @@ public static class ApplicationEndpoints
             return null;
         }
     }
+
+    private static DraftCandidateFitBriefContext ToDraftCandidateFitBriefContext(CandidateFitBriefResult brief) =>
+        new(
+            brief.CandidateSummary,
+            brief.SkillGroups
+                .Select(group => new DraftCandidateFitBriefGroup(
+                    group.Name,
+                    group.Items.Select(ToDraftCandidateFitBriefItem).ToList()))
+                .ToList(),
+            brief.Competencies.Select(ToDraftCandidateFitBriefItem).ToList(),
+            brief.RelevantProjects.Select(ToDraftCandidateFitBriefItem).ToList(),
+            brief.TransferableStrengths.Select(ToDraftCandidateFitBriefItem).ToList(),
+            brief.RiskNotes.Select(ToDraftCandidateFitBriefItem).ToList());
+
+    private static DraftCandidateFitBriefItem ToDraftCandidateFitBriefItem(CandidateFitBriefItem item) =>
+        new(item.Title, item.Summary);
+
+    private static IReadOnlyList<ClaimAuditFitBriefSupportMapping> ToClaimAuditFitBriefSupportMappings(CandidateFitBriefResult brief)
+    {
+        var mappings = new List<ClaimAuditFitBriefSupportMapping>();
+        mappings.AddRange(brief.SkillGroups.SelectMany(group =>
+            group.Items.Select(item => ToClaimAuditFitBriefSupportMapping($"SkillGroup:{group.Name}", item))));
+        mappings.AddRange(brief.Competencies.Select(item => ToClaimAuditFitBriefSupportMapping("Competency", item)));
+        mappings.AddRange(brief.RelevantProjects.Select(item => ToClaimAuditFitBriefSupportMapping("RelevantProject", item)));
+        mappings.AddRange(brief.TransferableStrengths.Select(item => ToClaimAuditFitBriefSupportMapping("TransferableStrength", item)));
+        mappings.AddRange(brief.RiskNotes.Select(item => ToClaimAuditFitBriefSupportMapping("RiskNote", item)));
+
+        return mappings;
+    }
+
+    private static ClaimAuditFitBriefSupportMapping ToClaimAuditFitBriefSupportMapping(string section, CandidateFitBriefItem item) =>
+        new(section, item.Title, item.Summary, item.SupportingProfileFactIds);
+
+    private static CandidateFitBriefResult SelectCurrentlyApprovedCandidateFitBriefContext(
+        CandidateFitBriefResult brief,
+        ISet<Guid> approvedProfileFactIds)
+    {
+        var skillGroups = brief.SkillGroups
+            .Select(group => new CandidateFitSkillGroup(
+                group.Name,
+                SelectCurrentlyApprovedItems(group.Items, approvedProfileFactIds)))
+            .Where(group => group.Items.Count > 0)
+            .ToList();
+        var competencies = SelectCurrentlyApprovedItems(brief.Competencies, approvedProfileFactIds);
+        var relevantProjects = SelectCurrentlyApprovedItems(brief.RelevantProjects, approvedProfileFactIds);
+        var transferableStrengths = SelectCurrentlyApprovedItems(brief.TransferableStrengths, approvedProfileFactIds);
+        var hasSupportedContext = skillGroups.Count > 0 ||
+            competencies.Count > 0 ||
+            relevantProjects.Count > 0 ||
+            transferableStrengths.Count > 0;
+
+        return new CandidateFitBriefResult(
+            hasSupportedContext
+                ? "Candidate fit brief context is limited to currently approved supporting facts."
+                : "No currently approved candidate fit brief context is available.",
+            skillGroups,
+            competencies,
+            relevantProjects,
+            transferableStrengths,
+            SelectCurrentlyApprovedOrUnsupportedRiskNotes(brief.RiskNotes, approvedProfileFactIds));
+    }
+
+    private static List<CandidateFitBriefItem> SelectCurrentlyApprovedItems(
+        IReadOnlyList<CandidateFitBriefItem> items,
+        ISet<Guid> approvedProfileFactIds) =>
+        items
+            .Where(item =>
+                item.SupportingProfileFactIds.Count > 0 &&
+                item.SupportingProfileFactIds.All(approvedProfileFactIds.Contains))
+            .ToList();
+
+    private static List<CandidateFitBriefItem> SelectCurrentlyApprovedOrUnsupportedRiskNotes(
+        IReadOnlyList<CandidateFitBriefItem> items,
+        ISet<Guid> approvedProfileFactIds) =>
+        items
+            .Where(item =>
+                item.SupportingProfileFactIds.Count == 0 ||
+                item.SupportingProfileFactIds.All(approvedProfileFactIds.Contains))
+            .ToList();
 
     private static IReadOnlyList<EvidenceMatch> ReadApprovedEvidenceForApplication(JobApplication application)
     {

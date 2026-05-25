@@ -81,7 +81,24 @@ public sealed record DraftGenerationInput(
     IReadOnlyList<UnmatchedRequirement> UnmatchedRequirements,
     IReadOnlyList<DraftGapDecision> GapDecisions,
     IReadOnlyList<DraftCustomFact> ApprovedCustomFacts,
-    ApplicationStrategyResult? ApplicationStrategy = null);
+    ApplicationStrategyResult? ApplicationStrategy = null,
+    DraftCandidateFitBriefContext? CandidateFitBriefContext = null);
+
+public sealed record DraftCandidateFitBriefContext(
+    string CandidateSummary,
+    IReadOnlyList<DraftCandidateFitBriefGroup> SkillGroups,
+    IReadOnlyList<DraftCandidateFitBriefItem> Competencies,
+    IReadOnlyList<DraftCandidateFitBriefItem> RelevantProjects,
+    IReadOnlyList<DraftCandidateFitBriefItem> TransferableStrengths,
+    IReadOnlyList<DraftCandidateFitBriefItem> RiskNotes);
+
+public sealed record DraftCandidateFitBriefGroup(
+    string Name,
+    IReadOnlyList<DraftCandidateFitBriefItem> Items);
+
+public sealed record DraftCandidateFitBriefItem(
+    string Title,
+    string Summary);
 
 public sealed record DraftGapDecision(
     string UnmatchedRequirementId,
@@ -106,7 +123,16 @@ public sealed record DraftGenerationResult(
 public sealed record ClaimAuditInput(
     string CoverLetterText,
     string ShortMotivationText,
-    IReadOnlyList<EvidenceMatch> ApprovedEvidence);
+    IReadOnlyList<EvidenceMatch> ApprovedEvidence,
+    IReadOnlyList<DraftCustomFact> ApprovedCustomFacts,
+    IReadOnlyList<DraftGapDecision> GapDecisions,
+    IReadOnlyList<ClaimAuditFitBriefSupportMapping> CandidateFitBriefSupportMappings);
+
+public sealed record ClaimAuditFitBriefSupportMapping(
+    string Section,
+    string Title,
+    string Summary,
+    IReadOnlyList<Guid> SupportingProfileFactIds);
 
 public sealed record ClaimAuditResult(
     IReadOnlyList<ClaimAuditClaim> Claims)
