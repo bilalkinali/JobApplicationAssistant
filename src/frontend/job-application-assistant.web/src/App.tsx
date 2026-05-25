@@ -17,6 +17,12 @@ import {
 } from "./candidateFitBrief";
 import type { CandidateFitBrief } from "./candidateFitBrief";
 import {
+  applicationStrategySections,
+  hasApplicationStrategyContent,
+  parseApplicationStrategy
+} from "./applicationStrategy";
+import type { ApplicationStrategy } from "./applicationStrategy";
+import {
   getAvailabilityLabel,
   getDraftReadinessLabel,
   getDraftGenerationState,
@@ -31,6 +37,12 @@ import {
   getReadinessTone,
   isFakeProvider
 } from "./readiness";
+import {
+  canApproveEvidenceMatch,
+  evidenceQualityPresentation,
+  isWeakEvidence,
+  weakEvidenceReviewLabel
+} from "./evidenceReview";
 import "./styles.css";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:5108";
@@ -177,6 +189,7 @@ type ApplicationSession = ApplicationForm & {
   approvedEvidence: string;
   gapDecisions: string;
   customFacts: string;
+  applicationStrategy: string;
   lastPreparedAt: string | null;
   preparationStatus: string;
   generatedDraft: GeneratedDraft | null;
@@ -237,6 +250,8 @@ type EvidenceMatch = {
   profileFactTitle: string;
   summary: string;
   matchedTerms: string[];
+  quality?: string | null;
+  reason?: string | null;
 };
 
 type CustomFact = {
@@ -330,6 +345,7 @@ function App() {
   const [applicationReadinessFilter, setApplicationReadinessFilter] = useState("All");
   const [includeArchivedApplications, setIncludeArchivedApplications] = useState(false);
   const [approvedEvidenceDraft, setApprovedEvidenceDraft] = useState<EvidenceMatch[]>([]);
+  const [reviewedWeakMatchIds, setReviewedWeakMatchIds] = useState<string[]>([]);
   const [gapDecisionsDraft, setGapDecisionsDraft] = useState<GapDecision[]>([]);
   const [customFactDrafts, setCustomFactDrafts] = useState<Record<string, CustomFactDraft>>({});
   const [generatedDraftForm, setGeneratedDraftForm] = useState<GeneratedDraftForm>({
@@ -421,6 +437,10 @@ function App() {
   const candidateFitBrief = useMemo(
     () => parseCandidateFitBrief(selectedApplication?.candidateFitBrief),
     [selectedApplication?.candidateFitBrief]
+  );
+  const applicationStrategy = useMemo(
+    () => parseApplicationStrategy(selectedApplication?.applicationStrategy),
+    [selectedApplication?.applicationStrategy]
   );
   const savedApprovedCustomFactEvidenceCount = useMemo(
     () => countApprovedCustomFactEvidence(savedGapDecisions, unmatchedRequirements, customFacts),
@@ -542,6 +562,7 @@ function App() {
   );
   const workflowBusyReason = workflowBusy ? "Wait for the current workflow action to finish." : null;
   const exportBusyReason = exportBusy ? "Wait for the current export action to finish." : null;
+  const canRunPreparation = Boolean(selectedApplicationId && hasSavedJobPosting && approvedProfileFacts.length > 0);
 
   useEffect(() => {
     void loadProfile();
@@ -556,6 +577,10 @@ function App() {
   useEffect(() => {
     setApprovedEvidenceDraft(savedApprovedEvidence);
   }, [selectedApplicationId, savedApprovedEvidence]);
+
+  useEffect(() => {
+    setReviewedWeakMatchIds([]);
+  }, [selectedApplicationId, selectedApplication?.evidenceMatches]);
 
   useEffect(() => {
     setGapDecisionsDraft(savedGapDecisions);
@@ -1416,9 +1441,17 @@ function App() {
   }
 
   function approveMatch(match: EvidenceMatch) {
+    if (!canApproveEvidenceMatch(match, reviewedWeakMatchIds.includes(match.id))) {
+      return;
+    }
+
     setApprovedEvidenceDraft((current) =>
       current.some((item) => item.id === match.id) ? current : [...current, match]
     );
+  }
+
+  function reviewWeakMatch(matchId: string) {
+    setReviewedWeakMatchIds((current) => (current.includes(matchId) ? current : [...current, matchId]));
   }
 
   function removeApprovedEvidence(matchId: string) {
@@ -1912,6 +1945,26 @@ function App() {
                     </StatusBadge>
                   </div>
                 )}
+                {selectedApplication && selectedApplication.preparationStatus !== "NotStarted" && (
+                  <div className="workflow-step">
+                    <div>
+                      <h4>Preparation</h4>
+                      <p>Run the full preparation flow again when job analysis, fit brief, or evidence matching needs a fresh pass.</p>
+                    </div>
+                    <button
+                      className="secondary-workflow-action"
+                      type="button"
+                      onClick={prepareApplication}
+                      disabled={!canRunPreparation || workflowBusy !== null}
+                      title={disabledTitle(
+                        !canRunPreparation || workflowBusy !== null,
+                        workflowBusyReason ?? "Save a posting and approve at least one profile fact before preparing."
+                      )}
+                    >
+                      {workflowBusy === "prepare" ? "Preparing..." : "Re-run preparation"}
+                    </button>
+                  </div>
+                )}
 
                 <div className="workflow-step">
                   <div>
@@ -1963,15 +2016,43 @@ function App() {
                   <section className="review-column">
                     <h4>Matched evidence</h4>
                     {evidenceMatches.length === 0 && <p className="empty-state compact">No matches yet.</p>}
-                    {evidenceMatches.map((match) => (
-                      <article className="evidence-card" key={match.id}>
-                        <strong>{match.signal}</strong>
-                        <span>{match.profileFactTitle}</span>
-                        <p>{match.summary}</p>
-                        <small>Matched: {match.matchedTerms.join(", ")}</small>
-                        <button type="button" onClick={() => approveMatch(match)}>Approve</button>
-                      </article>
-                    ))}
+                    {evidenceMatches.map((match) => {
+                      const quality = evidenceQualityPresentation(match.quality);
+                      const isWeakMatch = isWeakEvidence(match);
+                      const hasReviewedWeakMatch = reviewedWeakMatchIds.includes(match.id);
+
+                      return (
+                        <article className={`evidence-card ${quality.cardClass}`} key={match.id}>
+                          <div className="evidence-card-heading">
+                            <strong>{match.signal}</strong>
+                            <StatusBadge tone={quality.tone}>{quality.label}</StatusBadge>
+                          </div>
+                          <span>{match.profileFactTitle}</span>
+                          <p>{match.summary}</p>
+                          {match.reason && <small>Reason: {match.reason}</small>}
+                          <small>{quality.guidance}</small>
+                          {match.matchedTerms.length > 0 && <small>Matched: {match.matchedTerms.join(", ")}</small>}
+                          {isWeakMatch ? (
+                            <div className="weak-match-review">
+                              <button
+                                type="button"
+                                className={hasReviewedWeakMatch ? "selected" : ""}
+                                onClick={() => reviewWeakMatch(match.id)}
+                                aria-pressed={hasReviewedWeakMatch}
+                              >
+                                {weakEvidenceReviewLabel(hasReviewedWeakMatch)}
+                              </button>
+                              {hasReviewedWeakMatch && (
+                                <button type="button" onClick={() => approveMatch(match)}>Approve weak match</button>
+                              )}
+                              <small>Weak matches should only guide cautious wording or prompt stronger evidence.</small>
+                            </div>
+                          ) : (
+                            <button type="button" onClick={() => approveMatch(match)}>Approve</button>
+                          )}
+                        </article>
+                      );
+                    })}
                   </section>
 
                   <section className="review-column">
@@ -2197,6 +2278,10 @@ function App() {
                     {workflowBusy === "draft" ? "Generating..." : "Generate and audit draft"}
                   </button>
                 </div>
+
+                {hasApplicationStrategyContent(applicationStrategy) && (
+                  <ApplicationStrategySummary strategy={applicationStrategy} />
+                )}
 
                 {selectedApplication?.generatedDraft ? (
                   <section className="draft-editor" ref={draftReviewRef}>
@@ -2578,6 +2663,41 @@ function CandidateFitBriefSummary(props: { brief: CandidateFitBrief }) {
   );
 }
 
+function ApplicationStrategySummary(props: { strategy: ApplicationStrategy }) {
+  const sections = applicationStrategySections(props.strategy);
+
+  return (
+    <section className="application-strategy-summary" aria-label="Application strategy summary">
+      <div className="section-heading">
+        <div>
+          <h4>Application strategy</h4>
+          <p>Read-only writing plan for the next generated draft.</p>
+        </div>
+        <StatusBadge tone="neutral">Read-only</StatusBadge>
+      </div>
+      {props.strategy.toneGuidance.trim() && (
+        <p className="strategy-tone-guidance">{props.strategy.toneGuidance}</p>
+      )}
+      <div className="strategy-section-grid">
+        {sections.map((section) => (
+          <article className={`strategy-card ${section.tone}`} key={section.key}>
+            <h5>{section.title}</h5>
+            {section.items.length === 0 ? (
+              <p className="empty-state compact">None recorded.</p>
+            ) : (
+              <ul>
+                {section.items.map((item, itemIndex) => (
+                  <li key={`${section.key}-${itemIndex}`}>{item}</li>
+                ))}
+              </ul>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 async function apiGet<T>(path: string): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`);
   return readResponse<T>(response);
@@ -2736,6 +2856,7 @@ function toApplicationSession(application: ApplicationSession): ApplicationSessi
     approvedEvidence: application.approvedEvidence || "[]",
     gapDecisions: application.gapDecisions || "[]",
     customFacts: application.customFacts || "[]",
+    applicationStrategy: application.applicationStrategy || "{}",
     lastPreparedAt: application.lastPreparedAt ?? null,
     preparationStatus: application.preparationStatus ?? "NotStarted",
     generatedDraft: application.generatedDraft ?? null,

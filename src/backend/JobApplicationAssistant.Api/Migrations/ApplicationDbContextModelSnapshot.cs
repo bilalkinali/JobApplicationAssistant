@@ -64,6 +64,7 @@ namespace JobApplicationAssistant.Api.Migrations
             {
                 b.Property<Guid>("Id").HasColumnType("uuid");
                 b.Property<string>("ApplicationUrl").HasMaxLength(500).HasColumnType("character varying(500)");
+                b.Property<string>("ApplicationStrategy").IsRequired().HasColumnType("jsonb");
                 b.Property<string>("ApprovedEvidence").IsRequired().HasColumnType("jsonb");
                 b.Property<string>("CandidateFitBrief").IsRequired().HasColumnType("jsonb");
                 b.Property<string>("CompanyName").IsRequired().HasMaxLength(200).HasColumnType("character varying(200)");

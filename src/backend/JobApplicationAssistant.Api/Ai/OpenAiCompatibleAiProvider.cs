@@ -12,6 +12,7 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
     private static readonly string DraftGenerationPrompt = LoadPrompt("draft-generation.md");
     private static readonly string ClaimAuditPrompt = LoadPrompt("claim-audit.md");
     private static readonly string CandidateFitBriefPrompt = LoadPrompt("candidate-fit-brief.md");
+    private static readonly string ApplicationStrategyPrompt = LoadPrompt("application-strategy.md");
     private static readonly string AssistedProfileImportPrompt = LoadPrompt("assisted-profile-import.md");
 
     private readonly HttpClient httpClient;
@@ -216,6 +217,20 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         }
     }
 
+    public async Task<ApplicationStrategyResult> GenerateApplicationStrategyAsync(ApplicationStrategyInput input, CancellationToken ct)
+    {
+        var responseText = await ChatAsync(BuildApplicationStrategyPrompt(input), attemptCount: 1, ct);
+        try
+        {
+            return ApplicationStrategyJsonParser.Parse(responseText, input, "OpenAI-compatible endpoint", attemptCount: 1);
+        }
+        catch (AiInvalidOutputException firstFailure)
+        {
+            var repairedText = await ChatAsync(BuildApplicationStrategyRepairPrompt(responseText, firstFailure.Message, input), attemptCount: 2, ct);
+            return ApplicationStrategyJsonParser.Parse(repairedText, input, "OpenAI-compatible endpoint", attemptCount: 2);
+        }
+    }
+
     public async Task<AssistedProfileImportResult> ImportProfileFactsAsync(AssistedProfileImportInput input, CancellationToken ct)
     {
         var responseText = await ChatAsync(BuildAssistedProfileImportPrompt(input), attemptCount: 1, ct);
@@ -311,14 +326,14 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         }
 
         var details = new List<string>();
-        if (!string.IsNullOrWhiteSpace(rawRequest))
-        {
-            details.Add($"Raw request: {rawRequest}");
-        }
-
         if (!string.IsNullOrWhiteSpace(rawResponse))
         {
             details.Add($"Raw response: {rawResponse}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(rawRequest))
+        {
+            details.Add($"Raw request: {rawRequest}");
         }
 
         if (!string.IsNullOrWhiteSpace(errorContext))
@@ -452,9 +467,12 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
                 string.IsNullOrWhiteSpace(match.SignalId) ||
                 string.IsNullOrWhiteSpace(match.ProfileFactId) ||
                 string.IsNullOrWhiteSpace(match.Summary) ||
+                string.IsNullOrWhiteSpace(match.Quality) ||
+                string.IsNullOrWhiteSpace(match.Reason) ||
                 match.MatchedTerms is null ||
                 match.MatchedTerms.Count == 0 ||
                 match.MatchedTerms.All(string.IsNullOrWhiteSpace) ||
+                !EvidenceQuality.IsValid(match.Quality.Trim()) ||
                 !signalsById.TryGetValue(match.SignalId.Trim(), out var signal) ||
                 !Guid.TryParse(match.ProfileFactId, out var profileFactId) ||
                 !approvedFactsById.TryGetValue(profileFactId, out var fact))
@@ -480,19 +498,22 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
                 fact.Id,
                 fact.Title,
                 match.Summary.Trim(),
-                match.MatchedTerms.Where(term => !string.IsNullOrWhiteSpace(term)).Select(term => term.Trim()).ToList()));
+                match.MatchedTerms.Where(term => !string.IsNullOrWhiteSpace(term)).Select(term => term.Trim()).ToList(),
+                match.Quality.Trim(),
+                match.Reason.Trim()));
         }
 
         foreach (var requirement in payload.UnmatchedRequirements)
         {
-            if (requirement is null ||
-                string.IsNullOrWhiteSpace(requirement.SignalId) ||
-                string.IsNullOrWhiteSpace(requirement.Recommendation) ||
-                !signalsById.TryGetValue(requirement.SignalId.Trim(), out var signal))
+            if (requirement is null)
             {
-                throw new AiInvalidOutputException(
-                    AppendRawPayload("OpenAI-compatible endpoint returned structurally invalid unmatched requirement JSON.", responseText),
-                    attemptCount);
+                continue;
+            }
+
+            var rawSignalId = NormalizeUnmatchedSignalId(requirement.SignalId ?? requirement.Id);
+            if (rawSignalId is null || !signalsById.TryGetValue(rawSignalId, out var signal))
+            {
+                continue;
             }
 
             if (!unmatchedSignalIds.Add(signal.Id))
@@ -507,11 +528,23 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
                 signal.Id,
                 signal.Label,
                 signal.Category,
-                requirement.Recommendation.Trim()));
+                string.IsNullOrWhiteSpace(requirement.Recommendation)
+                    ? $"Review {signal.Label} manually before making a claim."
+                    : requirement.Recommendation.Trim()));
         }
 
-        if (matchedSignalIds.Overlaps(unmatchedSignalIds) ||
-            input.Signals.Any(signal => !matchedSignalIds.Contains(signal.Id) && !unmatchedSignalIds.Contains(signal.Id)))
+        foreach (var signal in input.Signals.Where(signal => !matchedSignalIds.Contains(signal.Id) && !unmatchedSignalIds.Contains(signal.Id)))
+        {
+            unmatchedSignalIds.Add(signal.Id);
+            unmatched.Add(new UnmatchedRequirement(
+                $"unmatched-{signal.Id}",
+                signal.Id,
+                signal.Label,
+                signal.Category,
+                $"Review {signal.Label} manually before making a claim."));
+        }
+
+        if (matchedSignalIds.Overlaps(unmatchedSignalIds))
         {
             throw new AiInvalidOutputException(
                 AppendRawPayload("OpenAI-compatible endpoint returned incomplete or conflicting evidence matching JSON.", responseText),
@@ -700,6 +733,17 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
             fact.Technologies,
             fact.AllowedClaims
         });
+        var candidateFitBrief = input.CandidateFitBrief is null
+            ? null
+            : new
+            {
+                input.CandidateFitBrief.CandidateSummary,
+                input.CandidateFitBrief.SkillGroups,
+                input.CandidateFitBrief.Competencies,
+                input.CandidateFitBrief.RelevantProjects,
+                input.CandidateFitBrief.TransferableStrengths,
+                input.CandidateFitBrief.RiskNotes
+            };
 
         return $"""
         {EvidenceMatchingPrompt}
@@ -709,6 +753,9 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
 
         Approved profile facts:
         {JsonSerializer.Serialize(approvedFacts, JsonOptions)}
+
+        Candidate fit brief context:
+        {JsonSerializer.Serialize(candidateFitBrief, JsonOptions)}
         """;
     }
 
@@ -722,7 +769,10 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
             evidence.Category,
             evidence.ProfileFactTitle,
             evidence.Summary,
-            evidence.MatchedTerms
+            evidence.MatchedTerms,
+            evidence.Quality,
+            evidence.Reason,
+            UseGuidance = EvidenceUseGuidance(evidence)
         });
         var unmatchedRequirements = input.UnmatchedRequirements.Select(requirement => new
         {
@@ -772,6 +822,9 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
 
         Approved job-local custom facts:
         {JsonSerializer.Serialize(approvedCustomFacts, JsonOptions)}
+
+        Application strategy:
+        {JsonSerializer.Serialize(input.ApplicationStrategy, JsonOptions)}
         """;
     }
 
@@ -851,6 +904,73 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         """;
     }
 
+    private static string BuildApplicationStrategyPrompt(ApplicationStrategyInput input)
+    {
+        var approvedEvidence = input.ApprovedEvidence.Select(evidence => new
+        {
+            evidence.Id,
+            evidence.SignalId,
+            evidence.Signal,
+            evidence.Category,
+            evidence.ProfileFactId,
+            evidence.ProfileFactTitle,
+            evidence.Summary,
+            evidence.MatchedTerms,
+            evidence.Quality,
+            evidence.Reason
+        });
+        var approvedCustomFacts = input.ApprovedCustomFacts.Select(fact => new
+        {
+            fact.Id,
+            fact.UnmatchedRequirementId,
+            fact.Title,
+            fact.Summary,
+            fact.Technologies,
+            fact.AllowedClaims
+        });
+
+        return $"""
+        {ApplicationStrategyPrompt}
+
+        Application context:
+        {JsonSerializer.Serialize(new
+        {
+            input.JobAnalysis.CompanyName,
+            input.JobAnalysis.RoleTitle,
+            input.JobAnalysis.DetectedLanguage,
+            input.JobAnalysis.SelectedLanguage,
+            RequestedLanguage = input.SelectedLanguage,
+            input.TonePreference
+        }, JsonOptions)}
+
+        Job analysis:
+        {JsonSerializer.Serialize(input.JobAnalysis.JobSignals, JsonOptions)}
+
+        Candidate fit brief:
+        {JsonSerializer.Serialize(input.CandidateFitBrief, JsonOptions)}
+
+        Approved evidence:
+        {JsonSerializer.Serialize(approvedEvidence, JsonOptions)}
+
+        Unmatched requirements:
+        {JsonSerializer.Serialize(input.UnmatchedRequirements, JsonOptions)}
+
+        Gap decisions:
+        {JsonSerializer.Serialize(input.GapDecisions, JsonOptions)}
+
+        Approved job-local custom facts:
+        {JsonSerializer.Serialize(approvedCustomFacts, JsonOptions)}
+        """;
+    }
+
+    private static string EvidenceUseGuidance(EvidenceMatch evidence) =>
+        evidence.Quality switch
+        {
+            EvidenceQuality.Weak => "Weak evidence must not support direct experience claims. Use only as adjacent context or omit it.",
+            EvidenceQuality.Partial => "Partial evidence may guide cautious wording. Avoid claiming full direct experience.",
+            _ => "Strong evidence may support direct experience claims when the summary supports them."
+        };
+
     private static string BuildRepairPrompt(string invalidJson, string validationError) =>
         $"""
         Repair this job analysis JSON so it matches the required contract exactly.
@@ -882,6 +1002,17 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
             fact.Technologies,
             fact.AllowedClaims
         });
+        var candidateFitBrief = input.CandidateFitBrief is null
+            ? null
+            : new
+            {
+                input.CandidateFitBrief.CandidateSummary,
+                input.CandidateFitBrief.SkillGroups,
+                input.CandidateFitBrief.Competencies,
+                input.CandidateFitBrief.RelevantProjects,
+                input.CandidateFitBrief.TransferableStrengths,
+                input.CandidateFitBrief.RiskNotes
+            };
 
         return
         $"""
@@ -889,6 +1020,7 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         Return only strict JSON. Do not include markdown.
         Every job signal id listed below must appear exactly once: either in evidenceMatches or in unmatchedRequirements.
         Use only the listed approved profile fact ids for evidenceMatches.
+        Evidence matches must include quality exactly as Strong, Partial, or Weak, and a reviewer-facing reason.
         For unmatchedRequirements, include signalId and recommendation; the API will derive display fields from the job signal.
 
         Validation error:
@@ -899,6 +1031,9 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
 
         Approved profile facts:
         {JsonSerializer.Serialize(approvedFacts, JsonOptions)}
+
+        Candidate fit brief context:
+        {JsonSerializer.Serialize(candidateFitBrief, JsonOptions)}
 
         Invalid JSON:
         {invalidJson}
@@ -940,6 +1075,56 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         Invalid JSON:
         {invalidJson}
         """;
+
+    private static string BuildApplicationStrategyRepairPrompt(
+        string invalidJson,
+        string validationError,
+        ApplicationStrategyInput input) =>
+        $"""
+        Repair this application strategy JSON so it matches the required contract exactly.
+        Return only strict JSON. Do not include markdown.
+        Use only approved evidence ids from the supplied approved evidence.
+        Use profileFactIds only for narrative context traceability, and only when listed in approved evidence or candidate fit brief.
+        All arrays are required, even when empty.
+
+        Validation error:
+        {validationError}
+
+        Approved evidence ids:
+        {JsonSerializer.Serialize(input.ApprovedEvidence.Select(evidence => evidence.Id), JsonOptions)}
+
+        Valid profile fact ids:
+        {JsonSerializer.Serialize(ValidApplicationStrategyProfileFactIds(input), JsonOptions)}
+
+        Unmatched requirement ids:
+        {JsonSerializer.Serialize(input.UnmatchedRequirements.Select(requirement => requirement.Id), JsonOptions)}
+
+        Invalid JSON:
+        {invalidJson}
+        """;
+
+    private static IEnumerable<Guid> ValidApplicationStrategyProfileFactIds(ApplicationStrategyInput input) =>
+        input.ApprovedEvidence.Select(evidence => evidence.ProfileFactId)
+            .Concat(input.CandidateFitBrief.SkillGroups.SelectMany(group => group.Items).SelectMany(item => item.SupportingProfileFactIds))
+            .Concat(input.CandidateFitBrief.Competencies.SelectMany(item => item.SupportingProfileFactIds))
+            .Concat(input.CandidateFitBrief.RelevantProjects.SelectMany(item => item.SupportingProfileFactIds))
+            .Concat(input.CandidateFitBrief.TransferableStrengths.SelectMany(item => item.SupportingProfileFactIds))
+            .Concat(input.CandidateFitBrief.RiskNotes.SelectMany(item => item.SupportingProfileFactIds))
+            .Distinct();
+
+    private static string? NormalizeUnmatchedSignalId(string? rawId)
+    {
+        var value = rawId?.Trim();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        const string unmatchedPrefix = "unmatched-";
+        return value.StartsWith(unmatchedPrefix, StringComparison.OrdinalIgnoreCase)
+            ? value[unmatchedPrefix.Length..]
+            : value;
+    }
 
     private static bool IsSupportedLanguage(string language) =>
         string.Equals(language.Trim(), "English", StringComparison.OrdinalIgnoreCase) ||
@@ -1021,11 +1206,14 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         string SignalId,
         string ProfileFactId,
         string Summary,
+        string Quality,
+        string Reason,
         IReadOnlyList<string> MatchedTerms);
 
     private sealed record OpenAiUnmatchedRequirementResponse(
-        string SignalId,
-        string Recommendation);
+        string? SignalId,
+        string? Id,
+        string? Recommendation);
 
     private sealed record OpenAiDraftGenerationResponse(
         string CoverLetterText,

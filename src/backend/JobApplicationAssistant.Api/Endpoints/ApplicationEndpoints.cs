@@ -435,7 +435,8 @@ public static class ApplicationEndpoints
                 InputSummary = JsonSerializer.Serialize(new
                 {
                     SignalCount = signals.Count,
-                    ApprovedFactCount = approvedFacts.Count
+                    ApprovedFactCount = approvedFacts.Count,
+                    CandidateFitBriefAvailable = true
                 }, JsonOptions)
             };
             db.AiRuns.Add(matchingRun);
@@ -443,7 +444,7 @@ public static class ApplicationEndpoints
             EvidenceMatchResult matchingResult;
             try
             {
-                matchingResult = await aiProvider.MatchEvidenceAsync(new EvidenceMatchInput(signals, approvedFacts), ct);
+                matchingResult = await aiProvider.MatchEvidenceAsync(new EvidenceMatchInput(signals, approvedFacts, fitBriefResult), ct);
             }
             catch (AiProviderException exception)
             {
@@ -466,6 +467,7 @@ public static class ApplicationEndpoints
             application.ApprovedEvidence = "[]";
             application.GapDecisions = "[]";
             application.CustomFacts = "[]";
+            application.ApplicationStrategy = "{}";
             application.Status = "PreparedForEvidenceReview";
             application.LastPreparedAt = now;
             application.PreparationStatus = "PreparedForEvidenceReview";
@@ -556,6 +558,7 @@ public static class ApplicationEndpoints
             application.ApprovedEvidence = "[]";
             application.GapDecisions = "[]";
             application.CustomFacts = "[]";
+            application.ApplicationStrategy = "{}";
             application.PreparationStatus = "NotStarted";
             application.LastPreparedAt = null;
             application.Status = application.Status == "Draft" ? "PostingCaptured" : application.Status;
@@ -617,7 +620,8 @@ public static class ApplicationEndpoints
                 InputSummary = JsonSerializer.Serialize(new
                 {
                     SignalCount = signals.Count,
-                    ApprovedFactCount = approvedFacts.Count
+                    ApprovedFactCount = approvedFacts.Count,
+                    CandidateFitBriefAvailable = ReadCandidateFitBrief(application.CandidateFitBrief) is not null
                 }, JsonOptions)
             };
             db.AiRuns.Add(run);
@@ -625,7 +629,7 @@ public static class ApplicationEndpoints
             EvidenceMatchResult result;
             try
             {
-                result = await aiProvider.MatchEvidenceAsync(new EvidenceMatchInput(signals, approvedFacts), ct);
+                result = await aiProvider.MatchEvidenceAsync(new EvidenceMatchInput(signals, approvedFacts, ReadCandidateFitBrief(application.CandidateFitBrief)), ct);
             }
             catch (AiProviderException exception)
             {
@@ -643,6 +647,7 @@ public static class ApplicationEndpoints
             application.ApprovedEvidence = "[]";
             application.GapDecisions = "[]";
             application.CustomFacts = "[]";
+            application.ApplicationStrategy = "{}";
             application.Status = application.Status is "Draft" or "PostingCaptured" ? "ReadyForReview" : application.Status;
             application.UpdatedAt = DateTimeOffset.UtcNow;
             run.Status = result.AttemptCount > 1 ? "RepairedSucceeded" : "Succeeded";
@@ -674,6 +679,7 @@ public static class ApplicationEndpoints
             }
 
             application.ApprovedEvidence = JsonSerializer.Serialize(validation.ApprovedEvidence, JsonOptions);
+            application.ApplicationStrategy = "{}";
             application.Status = application.Status is "Draft" or "PostingCaptured" ? "ReadyForReview" : application.Status;
             application.UpdatedAt = DateTimeOffset.UtcNow;
 
@@ -697,6 +703,7 @@ public static class ApplicationEndpoints
             }
 
             application.GapDecisions = JsonSerializer.Serialize(validation.GapDecisions, JsonOptions);
+            application.ApplicationStrategy = "{}";
             application.Status = application.Status is "Draft" or "PostingCaptured" ? "ReadyForReview" : application.Status;
             application.UpdatedAt = DateTimeOffset.UtcNow;
 
@@ -722,6 +729,7 @@ public static class ApplicationEndpoints
             var customFacts = ReadCustomFacts(application.CustomFacts);
             customFacts.Add(validation.CustomFact);
             application.CustomFacts = JsonSerializer.Serialize(customFacts, JsonOptions);
+            application.ApplicationStrategy = "{}";
             application.UpdatedAt = DateTimeOffset.UtcNow;
 
             await db.SaveChangesAsync(ct);
@@ -773,6 +781,7 @@ public static class ApplicationEndpoints
                     JsonOptions);
             }
 
+            application.ApplicationStrategy = "{}";
             application.UpdatedAt = DateTimeOffset.UtcNow;
 
             await db.SaveChangesAsync(ct);
@@ -828,9 +837,80 @@ public static class ApplicationEndpoints
                 unmatchedRequirements,
                 gapDecisions,
                 savedGapDecisions.Count > 0);
+            var strategyUnmatchedRequirements = SelectUnmatchedRequirementsForStrategy(unmatchedRequirements, gapDecisions);
             var tonePreference = string.Equals(application.SelectedLanguage, "Danish", StringComparison.OrdinalIgnoreCase)
                 ? profile?.DanishTone
                 : profile?.EnglishTone;
+            var jobAnalysis = ReadJobAnalysis(application);
+            if (jobAnalysis is null)
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(application.PreparationStatus)] = ["Prepare the application before draft generation."]
+                }));
+            }
+
+            var candidateFitBrief = ReadCandidateFitBrief(application.CandidateFitBrief) ??
+                new CandidateFitBriefResult("No candidate fit brief is available for this application.", [], [], [], [], []);
+            var previousApplicationStrategy = application.ApplicationStrategy;
+
+            var strategyRun = new AiRun
+            {
+                Id = Guid.NewGuid(),
+                JobApplicationId = application.Id,
+                Step = "ApplicationStrategy",
+                Provider = aiOptions.Provider,
+                Model = aiOptions.Model,
+                Status = "Running",
+                AttemptCount = 1,
+                StartedAt = DateTimeOffset.UtcNow,
+                InputSummary = JsonSerializer.Serialize(new
+                {
+                    ApprovedEvidenceCount = approvedEvidence.Count,
+                    UnmatchedRequirementCount = strategyUnmatchedRequirements.Count,
+                    GapDecisionCount = gapDecisions.Count,
+                    ApprovedCustomFactCount = approvedCustomFacts.Count
+                }, JsonOptions)
+            };
+            db.AiRuns.Add(strategyRun);
+
+            ApplicationStrategyResult strategyResult;
+            try
+            {
+                strategyResult = await aiProvider.GenerateApplicationStrategyAsync(
+                    new ApplicationStrategyInput(
+                        jobAnalysis,
+                        candidateFitBrief,
+                        approvedEvidence,
+                        strategyUnmatchedRequirements,
+                        gapDecisions,
+                        approvedCustomFacts,
+                        application.SelectedLanguage,
+                        tonePreference),
+                    ct);
+            }
+            catch (AiProviderException exception)
+            {
+                RecordFailedRun(strategyRun, exception);
+                await db.SaveChangesAsync(ct);
+
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    ["AiProvider"] = [exception.Message]
+                }));
+            }
+
+            application.ApplicationStrategy = JsonSerializer.Serialize(strategyResult, JsonOptions);
+            strategyRun.Status = strategyResult.AttemptCount > 1 ? "RepairedSucceeded" : "Succeeded";
+            strategyRun.AttemptCount = strategyResult.AttemptCount;
+            strategyRun.CompletedAt = DateTimeOffset.UtcNow;
+            strategyRun.OutputSummary = JsonSerializer.Serialize(new
+            {
+                PrimaryAngleCount = strategyResult.PrimaryAngles.Count,
+                SecondaryAngleCount = strategyResult.SecondaryAngles.Count,
+                GapGuidanceCount = strategyResult.GapHandlingGuidance.Count
+            }, JsonOptions);
+
             var run = new AiRun
             {
                 Id = Guid.NewGuid(),
@@ -864,11 +944,13 @@ public static class ApplicationEndpoints
                         approvedEvidence,
                         draftUnmatchedRequirements,
                         gapDecisions,
-                        approvedCustomFacts),
+                        approvedCustomFacts,
+                        strategyResult),
                     ct);
             }
             catch (AiProviderException exception)
             {
+                application.ApplicationStrategy = previousApplicationStrategy;
                 RecordFailedRun(run, exception);
                 await db.SaveChangesAsync(ct);
 
@@ -1093,6 +1175,7 @@ public static class ApplicationEndpoints
             application.ApprovedEvidence,
             application.GapDecisions,
             application.CustomFacts,
+            application.ApplicationStrategy,
             application.LastPreparedAt,
             application.PreparationStatus,
             application.CreatedAt,
@@ -1113,6 +1196,7 @@ public static class ApplicationEndpoints
         string ApprovedEvidence,
         string GapDecisions,
         string CustomFacts,
+        string ApplicationStrategy,
         string Status,
         DateTimeOffset? LastPreparedAt,
         string PreparationStatus,
@@ -1131,6 +1215,7 @@ public static class ApplicationEndpoints
                 application.ApprovedEvidence,
                 application.GapDecisions,
                 application.CustomFacts,
+                application.ApplicationStrategy,
                 application.Status,
                 application.LastPreparedAt,
                 application.PreparationStatus,
@@ -1149,6 +1234,7 @@ public static class ApplicationEndpoints
             application.ApprovedEvidence = ApprovedEvidence;
             application.GapDecisions = GapDecisions;
             application.CustomFacts = CustomFacts;
+            application.ApplicationStrategy = ApplicationStrategy;
             application.Status = Status;
             application.LastPreparedAt = LastPreparedAt;
             application.PreparationStatus = PreparationStatus;
@@ -1621,6 +1707,42 @@ public static class ApplicationEndpoints
         }
     }
 
+    private static JobAnalysisResult? ReadJobAnalysis(JobApplication application)
+    {
+        try
+        {
+            var document = JsonSerializer.Deserialize<JobSignalsDocument>(application.JobSignals, JsonOptions);
+            if (document?.Signals.Count is null or 0)
+            {
+                return null;
+            }
+
+            return new JobAnalysisResult(
+                application.CompanyName,
+                application.RoleTitle,
+                application.DetectedLanguage ?? application.SelectedLanguage ?? "Unknown",
+                application.SelectedLanguage ?? application.DetectedLanguage ?? "Unknown",
+                document);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static CandidateFitBriefResult? ReadCandidateFitBrief(string candidateFitBrief)
+    {
+        try
+        {
+            var result = JsonSerializer.Deserialize<CandidateFitBriefResult>(candidateFitBrief, JsonOptions);
+            return string.IsNullOrWhiteSpace(result?.CandidateSummary) ? null : result;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     private static IReadOnlyList<EvidenceMatch> ReadApprovedEvidenceForApplication(JobApplication application)
     {
         var approvedEvidence = ReadEvidenceMatches(application.ApprovedEvidence).ToList();
@@ -1711,6 +1833,24 @@ public static class ApplicationEndpoints
 
         return unmatchedRequirements
             .Where(requirement => learningInterestIds.Contains(requirement.Id))
+            .ToList();
+    }
+
+    private static IReadOnlyList<UnmatchedRequirement> SelectUnmatchedRequirementsForStrategy(
+        IReadOnlyList<UnmatchedRequirement> unmatchedRequirements,
+        IReadOnlyList<DraftGapDecision> gapDecisions)
+    {
+        if (gapDecisions.Count == 0)
+        {
+            return unmatchedRequirements;
+        }
+
+        var selectedRequirementIds = gapDecisions
+            .Select(decision => decision.UnmatchedRequirementId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return unmatchedRequirements
+            .Where(requirement => selectedRequirementIds.Contains(requirement.Id))
             .ToList();
     }
 

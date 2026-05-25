@@ -18,6 +18,8 @@ public interface IAiProvider
 
     Task<CandidateFitBriefResult> GenerateCandidateFitBriefAsync(CandidateFitBriefInput input, CancellationToken ct);
 
+    Task<ApplicationStrategyResult> GenerateApplicationStrategyAsync(ApplicationStrategyInput input, CancellationToken ct);
+
     Task<AssistedProfileImportResult> ImportProfileFactsAsync(AssistedProfileImportInput input, CancellationToken ct);
 }
 
@@ -59,7 +61,8 @@ public sealed record JobAnalysisResult(
 
 public sealed record EvidenceMatchInput(
     IReadOnlyList<JobSignal> Signals,
-    IReadOnlyList<ProfileFact> ApprovedFacts);
+    IReadOnlyList<ProfileFact> ApprovedFacts,
+    CandidateFitBriefResult? CandidateFitBrief = null);
 
 public sealed record EvidenceMatchResult(
     IReadOnlyList<EvidenceMatch> EvidenceMatches,
@@ -77,7 +80,8 @@ public sealed record DraftGenerationInput(
     IReadOnlyList<EvidenceMatch> ApprovedEvidence,
     IReadOnlyList<UnmatchedRequirement> UnmatchedRequirements,
     IReadOnlyList<DraftGapDecision> GapDecisions,
-    IReadOnlyList<DraftCustomFact> ApprovedCustomFacts);
+    IReadOnlyList<DraftCustomFact> ApprovedCustomFacts,
+    ApplicationStrategyResult? ApplicationStrategy = null);
 
 public sealed record DraftGapDecision(
     string UnmatchedRequirementId,
@@ -149,6 +153,47 @@ public sealed record CandidateFitBriefItem(
     // evidence review, draft generation, or claim audit.
     IReadOnlyList<Guid> SupportingProfileFactIds);
 
+public sealed record ApplicationStrategyInput(
+    JobAnalysisResult JobAnalysis,
+    CandidateFitBriefResult CandidateFitBrief,
+    IReadOnlyList<EvidenceMatch> ApprovedEvidence,
+    IReadOnlyList<UnmatchedRequirement> UnmatchedRequirements,
+    IReadOnlyList<DraftGapDecision> GapDecisions,
+    IReadOnlyList<DraftCustomFact> ApprovedCustomFacts,
+    string? SelectedLanguage,
+    string? TonePreference);
+
+public sealed record ApplicationStrategyResult(
+    IReadOnlyList<ApplicationStrategyAngle> PrimaryAngles,
+    IReadOnlyList<ApplicationStrategyAngle> SecondaryAngles,
+    IReadOnlyList<ApplicationStrategyGapGuidance> GapHandlingGuidance,
+    IReadOnlyList<ApplicationStrategyClaimToAvoid> ClaimsToAvoid,
+    string ToneGuidance,
+    IReadOnlyList<ApplicationStrategyOutlineItem> DraftOutline)
+{
+    public int AttemptCount { get; init; } = 1;
+}
+
+public sealed record ApplicationStrategyAngle(
+    string Title,
+    string Rationale,
+    IReadOnlyList<string> EvidenceIds,
+    IReadOnlyList<Guid> ProfileFactIds);
+
+public sealed record ApplicationStrategyGapGuidance(
+    string UnmatchedRequirementId,
+    string Guidance);
+
+public sealed record ApplicationStrategyClaimToAvoid(
+    string Claim,
+    string Reason);
+
+public sealed record ApplicationStrategyOutlineItem(
+    string Section,
+    string Guidance,
+    IReadOnlyList<string> EvidenceIds,
+    IReadOnlyList<Guid> ProfileFactIds);
+
 public sealed record AssistedProfileImportInput(
     string FileName,
     string ExtractedText);
@@ -191,7 +236,21 @@ public sealed record EvidenceMatch(
     Guid ProfileFactId,
     string ProfileFactTitle,
     string Summary,
-    IReadOnlyList<string> MatchedTerms);
+    IReadOnlyList<string> MatchedTerms,
+    string Quality = EvidenceQuality.Strong,
+    string Reason = "Direct match against approved profile evidence.");
+
+public static class EvidenceQuality
+{
+    public const string Strong = "Strong";
+    public const string Partial = "Partial";
+    public const string Weak = "Weak";
+
+    public static bool IsValid(string? quality) =>
+        string.Equals(quality, Strong, StringComparison.Ordinal) ||
+        string.Equals(quality, Partial, StringComparison.Ordinal) ||
+        string.Equals(quality, Weak, StringComparison.Ordinal);
+}
 
 public sealed record UnmatchedRequirement(
     string Id,

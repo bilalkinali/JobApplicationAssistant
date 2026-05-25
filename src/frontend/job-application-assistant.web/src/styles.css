@@ -207,6 +207,11 @@ button:disabled {
   background: #fff5f3;
 }
 
+.state-badge.neutral {
+  color: #5f6872;
+  background: #f1f2ef;
+}
+
 .message {
   margin-bottom: 16px;
   padding: 12px 14px;
@@ -986,6 +991,28 @@ button:disabled {
   background: #f7f7f3;
 }
 
+.evidence-card.quality-strong {
+  border-color: #b8ddcd;
+  background: #f8fcfa;
+}
+
+.evidence-card.quality-partial {
+  border-color: #e4c06e;
+  background: #fffaf0;
+}
+
+.evidence-card.quality-weak {
+  border-color: #d6a09a;
+  background: #fff7f5;
+}
+
+.evidence-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .evidence-card span,
 .evidence-card small,
 .approved-item span {
@@ -994,6 +1021,18 @@ button:disabled {
 
 .evidence-card button {
   justify-self: start;
+}
+
+.weak-match-review {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.weak-match-review button.selected {
+  border-color: #7c241f;
+  background: #7c241f;
+  color: #ffffff;
 }
 
 .gap-card-heading {
@@ -1092,7 +1131,21 @@ button:disabled {
   background: #ffffff;
 }
 
+.application-strategy-summary {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #d9d7d0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
 .fit-brief-summary .section-heading {
+  align-items: flex-start;
+}
+
+.application-strategy-summary .section-heading {
   align-items: flex-start;
 }
 
@@ -1102,8 +1155,20 @@ button:disabled {
   line-height: 1.5;
 }
 
+.strategy-tone-guidance {
+  margin: 0;
+  color: #344250;
+  line-height: 1.5;
+}
+
 .fit-brief-skill-groups,
 .fit-brief-section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.strategy-section-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
@@ -1120,12 +1185,33 @@ button:disabled {
   background: #f7f8f5;
 }
 
+.strategy-card {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #d7dde2;
+  border-radius: 8px;
+  background: #f7f8f5;
+}
+
 .fit-brief-card.risk {
   border-color: #e2d2a9;
   background: #fff8e8;
 }
 
+.strategy-card.risk {
+  border-color: #e2d2a9;
+  background: #fff8e8;
+}
+
 .fit-brief-card h5 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.strategy-card h5 {
   margin: 0;
   font-size: 0.95rem;
 }
@@ -1138,10 +1224,25 @@ button:disabled {
   list-style: none;
 }
 
+.strategy-card ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .fit-brief-card li {
   display: grid;
   gap: 3px;
   min-width: 0;
+}
+
+.strategy-card li {
+  min-width: 0;
+  color: #344250;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .fit-brief-card span,
