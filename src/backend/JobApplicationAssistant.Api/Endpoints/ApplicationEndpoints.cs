@@ -1026,7 +1026,10 @@ public static class ApplicationEndpoints
                     new ClaimAuditInput(
                         draft.CoverLetterText,
                         draft.ShortMotivationText,
-                        approvedEvidence),
+                        approvedEvidence,
+                        approvedCustomFacts,
+                        gapDecisions,
+                        ToClaimAuditFitBriefSupportMappings(currentCandidateFitBrief)),
                     ct);
 
                 draft.ClaimAudit = JsonSerializer.Serialize(auditResult, JsonOptions);
@@ -1104,6 +1107,14 @@ public static class ApplicationEndpoints
 
             var draft = application.GeneratedDraft;
             var approvedEvidence = ReadApprovedEvidenceForApplication(application);
+            var approvedCustomFacts = ReadApprovedCustomFactsForDraft(application);
+            var gapDecisions = ReadGapDecisions(application.GapDecisions, new Dictionary<string, string[]>())
+                .Select(decision => new DraftGapDecision(decision.UnmatchedRequirementId, decision.Decision, decision.CustomFactId))
+                .ToList();
+            var candidateFitBrief = ReadCandidateFitBrief(application.CandidateFitBrief);
+            var candidateFitBriefSupportMappings = candidateFitBrief is null
+                ? Array.Empty<ClaimAuditFitBriefSupportMapping>()
+                : ToClaimAuditFitBriefSupportMappings(candidateFitBrief);
             var run = new AiRun
             {
                 Id = Guid.NewGuid(),
@@ -1130,7 +1141,10 @@ public static class ApplicationEndpoints
                     new ClaimAuditInput(
                         draft.CoverLetterText,
                         draft.ShortMotivationText,
-                        approvedEvidence),
+                        approvedEvidence,
+                        approvedCustomFacts,
+                        gapDecisions,
+                        candidateFitBriefSupportMappings),
                     ct);
             }
             catch (AiProviderException exception)
@@ -1768,6 +1782,22 @@ public static class ApplicationEndpoints
 
     private static DraftCandidateFitBriefItem ToDraftCandidateFitBriefItem(CandidateFitBriefItem item) =>
         new(item.Title, item.Summary);
+
+    private static IReadOnlyList<ClaimAuditFitBriefSupportMapping> ToClaimAuditFitBriefSupportMappings(CandidateFitBriefResult brief)
+    {
+        var mappings = new List<ClaimAuditFitBriefSupportMapping>();
+        mappings.AddRange(brief.SkillGroups.SelectMany(group =>
+            group.Items.Select(item => ToClaimAuditFitBriefSupportMapping($"SkillGroup:{group.Name}", item))));
+        mappings.AddRange(brief.Competencies.Select(item => ToClaimAuditFitBriefSupportMapping("Competency", item)));
+        mappings.AddRange(brief.RelevantProjects.Select(item => ToClaimAuditFitBriefSupportMapping("RelevantProject", item)));
+        mappings.AddRange(brief.TransferableStrengths.Select(item => ToClaimAuditFitBriefSupportMapping("TransferableStrength", item)));
+        mappings.AddRange(brief.RiskNotes.Select(item => ToClaimAuditFitBriefSupportMapping("RiskNote", item)));
+
+        return mappings;
+    }
+
+    private static ClaimAuditFitBriefSupportMapping ToClaimAuditFitBriefSupportMapping(string section, CandidateFitBriefItem item) =>
+        new(section, item.Title, item.Summary, item.SupportingProfileFactIds);
 
     private static CandidateFitBriefResult SelectCurrentlyApprovedCandidateFitBriefContext(
         CandidateFitBriefResult brief,

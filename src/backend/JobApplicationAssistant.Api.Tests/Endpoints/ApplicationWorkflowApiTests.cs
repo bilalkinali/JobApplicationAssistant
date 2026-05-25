@@ -3342,7 +3342,7 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
-    public async Task AuditClaims_with_ollama_does_not_send_candidate_fit_brief_profile_fact_ids()
+    public async Task AuditClaims_with_ollama_sends_candidate_fit_brief_profile_fact_ids_as_traceability_context()
     {
         var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
         [
@@ -3359,7 +3359,9 @@ public sealed class ApplicationWorkflowApiTests
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
         var ollamaRequestJson = await Assert.Single(handler.Requests).Content!.ReadAsStringAsync();
         Assert.Contains("match-dotnet-test", ollamaRequestJson);
-        Assert.DoesNotContain(traceOnlyProfileFactId.ToString(), ollamaRequestJson);
+        Assert.Contains("Candidate fit brief support mappings", ollamaRequestJson);
+        Assert.Contains(traceOnlyProfileFactId.ToString(), ollamaRequestJson);
+        Assert.Contains("traceability context only", ollamaRequestJson);
     }
 
     [Fact]

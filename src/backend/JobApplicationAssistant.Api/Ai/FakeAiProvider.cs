@@ -283,7 +283,7 @@ public sealed partial class FakeAiProvider : IAiProvider
                     .ToList();
                 var status = evidenceIds.Count > 0
                     ? "Supported"
-                    : ClaimNeedsReview(claim) ? "NeedsReview" : "Unsupported";
+                    : ClaimNeedsReview(claim) && !ClaimStatesExperience(claim) ? "NeedsReview" : "Unsupported";
 
                 return new ClaimAuditClaim($"claim-{index + 1}", claim, status, evidenceIds);
             })
@@ -746,8 +746,21 @@ public sealed partial class FakeAiProvider : IAiProvider
         ContainsTerm(claim, "may") ||
         ContainsTerm(claim, "might") ||
         ContainsTerm(claim, "interested") ||
+        ContainsTerm(claim, "interest") ||
+        ContainsTerm(claim, "motivated") ||
+        ContainsTerm(claim, "eager") ||
         ContainsTerm(claim, "learn") ||
         ContainsTerm(claim, "fit");
+
+    private static bool ClaimStatesExperience(string claim) =>
+        ContainsTerm(claim, "experience") ||
+        ContainsTerm(claim, "experienced") ||
+        ContainsTerm(claim, "built") ||
+        ContainsTerm(claim, "delivered") ||
+        ContainsTerm(claim, "led") ||
+        ContainsTerm(claim, "owned") ||
+        ContainsTerm(claim, "implemented") ||
+        ContainsTerm(claim, "shipped");
 
     private static bool ContainsTerm(string text, string keyword)
     {

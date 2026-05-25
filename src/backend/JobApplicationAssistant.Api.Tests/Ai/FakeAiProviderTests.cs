@@ -409,7 +409,10 @@ public sealed class FakeAiProviderTests
             I may be a fit for the team.
             """,
             "",
-            approvedEvidence);
+            approvedEvidence,
+            [],
+            [],
+            []);
 
         var first = await provider.AuditClaimsAsync(input, CancellationToken.None);
         var second = await provider.AuditClaimsAsync(input, CancellationToken.None);
@@ -464,7 +467,21 @@ public sealed class FakeAiProviderTests
             Shipped Docker deployment for a client.
             """,
             "",
-            approvedEvidence);
+            approvedEvidence,
+            [
+                new DraftCustomFact(
+                    approvedCustomFactId,
+                    "docker",
+                    "Approved Docker deployment",
+                    "Shipped Docker deployment for a client.",
+                    ["Docker"],
+                    ["Shipped Docker deployment for a client."])
+            ],
+            [
+                new DraftGapDecision("azure", "MentionAsLearningInterest", null),
+                new DraftGapDecision("docker", "CoveredByCustomFact", approvedCustomFactId)
+            ],
+            []);
 
         var result = await provider.AuditClaimsAsync(input, CancellationToken.None);
 
@@ -476,5 +493,52 @@ public sealed class FakeAiProviderTests
             claim => claim.Text == "Shipped Docker deployment for a client." &&
                 claim.Status == "Supported" &&
                 claim.EvidenceIds.Contains($"custom-fact-{approvedCustomFactId:N}"));
+    }
+
+    [Fact]
+    public async Task AuditClaimsAsync_rejects_fit_brief_only_support_for_concrete_claims()
+    {
+        var provider = new FakeAiProvider();
+        var profileFactId = Guid.NewGuid();
+        var input = new ClaimAuditInput(
+            "Built GraphQL services for ecommerce teams.",
+            "",
+            [],
+            [],
+            [],
+            [
+                new ClaimAuditFitBriefSupportMapping(
+                    "RelevantProject",
+                    "GraphQL ecommerce context",
+                    "Built GraphQL services for ecommerce teams.",
+                    [profileFactId])
+            ]);
+
+        var result = await provider.AuditClaimsAsync(input, CancellationToken.None);
+
+        var claim = Assert.Single(result.Claims);
+        Assert.Equal("Unsupported", claim.Status);
+        Assert.Empty(claim.EvidenceIds);
+    }
+
+    [Fact]
+    public async Task AuditClaimsAsync_handles_cautious_motivation_separately_from_broad_competency_claims()
+    {
+        var provider = new FakeAiProvider();
+        var input = new ClaimAuditInput(
+            """
+            I am a strong stakeholder communicator.
+            I am eager to grow stakeholder communication in this role.
+            """,
+            "",
+            [],
+            [],
+            [new DraftGapDecision("stakeholder-communication", "MentionAsLearningInterest", null)],
+            []);
+
+        var result = await provider.AuditClaimsAsync(input, CancellationToken.None);
+
+        Assert.Contains(result.Claims, claim => claim.Text == "I am a strong stakeholder communicator." && claim.Status == "Unsupported");
+        Assert.Contains(result.Claims, claim => claim.Text == "I am eager to grow stakeholder communication in this role." && claim.Status == "NeedsReview");
     }
 }

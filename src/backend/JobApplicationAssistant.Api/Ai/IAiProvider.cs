@@ -123,7 +123,16 @@ public sealed record DraftGenerationResult(
 public sealed record ClaimAuditInput(
     string CoverLetterText,
     string ShortMotivationText,
-    IReadOnlyList<EvidenceMatch> ApprovedEvidence);
+    IReadOnlyList<EvidenceMatch> ApprovedEvidence,
+    IReadOnlyList<DraftCustomFact> ApprovedCustomFacts,
+    IReadOnlyList<DraftGapDecision> GapDecisions,
+    IReadOnlyList<ClaimAuditFitBriefSupportMapping> CandidateFitBriefSupportMappings);
+
+public sealed record ClaimAuditFitBriefSupportMapping(
+    string Section,
+    string Title,
+    string Summary,
+    IReadOnlyList<Guid> SupportingProfileFactIds);
 
 public sealed record ClaimAuditResult(
     IReadOnlyList<ClaimAuditClaim> Claims)
