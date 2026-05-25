@@ -2149,7 +2149,8 @@ public sealed class ApplicationWorkflowApiTests
         await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
         using var client = factory.CreateClient();
         var application = await CreateApplicationAsync(client, "We need .NET.", "English");
-        var traceOnlyProfileFactId = Guid.NewGuid();
+        var traceOnlyFact = await CreateProfileFactAsync(client, "Approved communication strength", "Approved", """[]""");
+        var traceOnlyProfileFactId = traceOnlyFact.Id;
         await SetCandidateFitBriefAsync(factory, application.Id, traceOnlyProfileFactId);
         await MarkApplicationReadyForDraftAsync(factory, application.Id);
 
@@ -2162,13 +2163,43 @@ public sealed class ApplicationWorkflowApiTests
         Assert.Contains("match-dotnet-test", draftRequestJson);
         Assert.Contains("match-dotnet-test", auditRequestJson);
         Assert.Contains("Candidate fit brief writing context", draftRequestJson);
-        Assert.Contains("Traceability-only fit context", draftRequestJson);
+        Assert.Contains("currently approved supporting facts", draftRequestJson);
         Assert.Contains("Traceability-only profile fact", draftRequestJson);
         var draftFitBriefContext = draftRequestJson[
             draftRequestJson.LastIndexOf("Candidate fit brief writing context", StringComparison.Ordinal)..];
         Assert.DoesNotContain(traceOnlyProfileFactId.ToString(), draftRequestJson);
         Assert.DoesNotContain("supportingProfileFactIds", draftFitBriefContext);
         Assert.DoesNotContain(traceOnlyProfileFactId.ToString(), auditRequestJson);
+    }
+
+    [Fact]
+    public async Task GenerateDraft_with_ollama_excludes_unapproved_fit_brief_profile_facts_from_strategy_and_draft_context()
+    {
+        var handler = new QueuedOllamaHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidApplicationStrategyJson()) },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaDraftGenerationJson()) },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OllamaGenerateContent(ValidOllamaClaimAuditJson("match-dotnet-test")) }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOllamaHandler(handler);
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.", "English");
+        var unapprovedFact = await CreateProfileFactAsync(client, "Draft Kubernetes work", "Draft", """["Kubernetes"]""");
+        await SetCandidateFitBriefAsync(factory, application.Id, unapprovedFact.Id);
+        await MarkApplicationReadyForDraftAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        Assert.Equal(3, handler.Requests.Count);
+        var strategyRequestJson = await handler.Requests[0].Content!.ReadAsStringAsync();
+        var draftRequestJson = await handler.Requests[1].Content!.ReadAsStringAsync();
+        Assert.DoesNotContain(unapprovedFact.Id.ToString(), strategyRequestJson);
+        Assert.DoesNotContain(unapprovedFact.Id.ToString(), draftRequestJson);
+        Assert.DoesNotContain("Traceability-only fit context", strategyRequestJson);
+        Assert.DoesNotContain("Traceability-only profile fact", strategyRequestJson);
+        Assert.DoesNotContain("Traceability-only fit context", draftRequestJson);
+        Assert.DoesNotContain("Traceability-only profile fact", draftRequestJson);
     }
 
     [Fact]

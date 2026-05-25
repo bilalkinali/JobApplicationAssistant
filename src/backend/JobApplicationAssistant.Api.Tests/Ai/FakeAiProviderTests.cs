@@ -305,6 +305,88 @@ public sealed class FakeAiProviderTests
     }
 
     [Fact]
+    public async Task GenerateDraftAsync_uses_transferable_fit_context_without_making_it_proof()
+    {
+        var provider = new FakeAiProvider();
+        var approvedEvidence = new[]
+        {
+            new EvidenceMatch(
+                "match-dotnet",
+                "dotnet",
+                ".NET",
+                "RequiredSkill",
+                Guid.NewGuid(),
+                "Approved API work",
+                "Built ASP.NET Core APIs backed by PostgreSQL.",
+                [".NET"])
+        };
+        var input = new DraftGenerationInput(
+            "Northwind",
+            "Technical Business Analyst",
+            "English",
+            "Bilal Kinali",
+            null,
+            approvedEvidence,
+            [],
+            [],
+            [],
+            CandidateFitBriefContext: new DraftCandidateFitBriefContext(
+                "Broad candidate context.",
+                [],
+                [new DraftCandidateFitBriefItem("Stakeholder communication", "Translated technical constraints for business stakeholders.")],
+                [],
+                [new DraftCandidateFitBriefItem("Business process experience", "Mapped operational workflows into delivery priorities.")],
+                []));
+
+        var result = await provider.GenerateDraftAsync(input, CancellationToken.None);
+
+        Assert.Contains("Relevant writing context:", result.CoverLetterText);
+        Assert.Contains("Stakeholder communication", result.CoverLetterText);
+        Assert.Contains("Business process experience", result.CoverLetterText);
+        Assert.Contains("Approved evidence:", result.CoverLetterText);
+        Assert.Contains("Approved API work", result.CoverLetterText);
+    }
+
+    [Fact]
+    public async Task GenerateDraftAsync_mentions_learning_interest_cautiously_and_keeps_ignored_gaps_quiet()
+    {
+        var provider = new FakeAiProvider();
+        var input = new DraftGenerationInput(
+            "Northwind",
+            "Platform Developer",
+            "English",
+            "Bilal Kinali",
+            null,
+            [
+                new EvidenceMatch(
+                    "match-dotnet",
+                    "dotnet",
+                    ".NET",
+                    "RequiredSkill",
+                    Guid.NewGuid(),
+                    "Approved API work",
+                    "Built ASP.NET Core APIs backed by PostgreSQL.",
+                    [".NET"])
+            ],
+            [
+                new UnmatchedRequirement("unmatched-kubernetes", "kubernetes", "Kubernetes", "PreferredSkill", "Ignore if unsupported."),
+                new UnmatchedRequirement("unmatched-azure", "azure", "Azure", "PreferredSkill", "Mention as learning interest.")
+            ],
+            [
+                new DraftGapDecision("unmatched-kubernetes", "Ignore", null),
+                new DraftGapDecision("unmatched-azure", "MentionAsLearningInterest", null)
+            ],
+            []);
+
+        var result = await provider.GenerateDraftAsync(input, CancellationToken.None);
+
+        Assert.DoesNotContain("Kubernetes", result.CoverLetterText);
+        Assert.Contains("Azure", result.CoverLetterText);
+        Assert.Contains("area to learn", result.CoverLetterText);
+        Assert.Contains("not as existing experience", result.CoverLetterText);
+    }
+
+    [Fact]
     public async Task AuditClaimsAsync_classifies_supported_unsupported_and_needs_review_claims_deterministically()
     {
         var provider = new FakeAiProvider();

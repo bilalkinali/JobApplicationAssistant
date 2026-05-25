@@ -852,7 +852,15 @@ public static class ApplicationEndpoints
 
             var candidateFitBrief = ReadCandidateFitBrief(application.CandidateFitBrief) ??
                 new CandidateFitBriefResult("No candidate fit brief is available for this application.", [], [], [], [], []);
-            var draftCandidateFitBriefContext = ToDraftCandidateFitBriefContext(candidateFitBrief);
+            var approvedProfileFactIds = approvedEvidence
+                .Select(evidence => evidence.ProfileFactId)
+                .Concat(await db.ProfileFacts
+                    .Where(fact => fact.Status == ProfileFactStatus.Approved)
+                    .Select(fact => fact.Id)
+                    .ToListAsync(ct))
+                .ToHashSet();
+            var currentCandidateFitBrief = SelectCurrentlyApprovedCandidateFitBriefContext(candidateFitBrief, approvedProfileFactIds);
+            var draftCandidateFitBriefContext = ToDraftCandidateFitBriefContext(currentCandidateFitBrief);
             var previousApplicationStrategy = application.ApplicationStrategy;
 
             var strategyRun = new AiRun
@@ -881,7 +889,7 @@ public static class ApplicationEndpoints
                 strategyResult = await aiProvider.GenerateApplicationStrategyAsync(
                     new ApplicationStrategyInput(
                         jobAnalysis,
-                        candidateFitBrief,
+                        currentCandidateFitBrief,
                         approvedEvidence,
                         strategyUnmatchedRequirements,
                         gapDecisions,
@@ -1760,6 +1768,53 @@ public static class ApplicationEndpoints
 
     private static DraftCandidateFitBriefItem ToDraftCandidateFitBriefItem(CandidateFitBriefItem item) =>
         new(item.Title, item.Summary);
+
+    private static CandidateFitBriefResult SelectCurrentlyApprovedCandidateFitBriefContext(
+        CandidateFitBriefResult brief,
+        ISet<Guid> approvedProfileFactIds)
+    {
+        var skillGroups = brief.SkillGroups
+            .Select(group => new CandidateFitSkillGroup(
+                group.Name,
+                SelectCurrentlyApprovedItems(group.Items, approvedProfileFactIds)))
+            .Where(group => group.Items.Count > 0)
+            .ToList();
+        var competencies = SelectCurrentlyApprovedItems(brief.Competencies, approvedProfileFactIds);
+        var relevantProjects = SelectCurrentlyApprovedItems(brief.RelevantProjects, approvedProfileFactIds);
+        var transferableStrengths = SelectCurrentlyApprovedItems(brief.TransferableStrengths, approvedProfileFactIds);
+        var hasSupportedContext = skillGroups.Count > 0 ||
+            competencies.Count > 0 ||
+            relevantProjects.Count > 0 ||
+            transferableStrengths.Count > 0;
+
+        return new CandidateFitBriefResult(
+            hasSupportedContext
+                ? "Candidate fit brief context is limited to currently approved supporting facts."
+                : "No currently approved candidate fit brief context is available.",
+            skillGroups,
+            competencies,
+            relevantProjects,
+            transferableStrengths,
+            SelectCurrentlyApprovedOrUnsupportedRiskNotes(brief.RiskNotes, approvedProfileFactIds));
+    }
+
+    private static List<CandidateFitBriefItem> SelectCurrentlyApprovedItems(
+        IReadOnlyList<CandidateFitBriefItem> items,
+        ISet<Guid> approvedProfileFactIds) =>
+        items
+            .Where(item =>
+                item.SupportingProfileFactIds.Count > 0 &&
+                item.SupportingProfileFactIds.All(approvedProfileFactIds.Contains))
+            .ToList();
+
+    private static List<CandidateFitBriefItem> SelectCurrentlyApprovedOrUnsupportedRiskNotes(
+        IReadOnlyList<CandidateFitBriefItem> items,
+        ISet<Guid> approvedProfileFactIds) =>
+        items
+            .Where(item =>
+                item.SupportingProfileFactIds.Count == 0 ||
+                item.SupportingProfileFactIds.All(approvedProfileFactIds.Contains))
+            .ToList();
 
     private static IReadOnlyList<EvidenceMatch> ReadApprovedEvidenceForApplication(JobApplication application)
     {

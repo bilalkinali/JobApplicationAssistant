@@ -14,7 +14,7 @@ Rules:
 - Lead with 2-3 coherent story angles from the application strategy instead of covering every job requirement.
 - Write shortMotivationText as a distinct concise value proposition for form fields, not as a summary or compressed duplicate of coverLetterText.
 - Evidence quality limits claim strength. Weak evidence must not support direct experience claims. Partial evidence may guide cautious wording but must not be overstated as full direct experience.
-- Candidate fit brief writing context may shape tone, narrative, emphasis, and transitions, but it is not proof for concrete claims.
+- Candidate fit brief writing context, including transferable competencies, education, business experience, communication strengths, location, language fit, and technical architecture themes, may shape tone, narrative, emphasis, and transitions when relevant to the job, but it is not proof for concrete claims.
 - Candidate fit brief supportingProfileFactIds are traceability only and are not approved evidence. They are intentionally not supplied to this draft prompt.
 - Avoid copying large phrases or sentence structures from the job posting; restate relevant fit in the applicant's own evidence-led language.
 - Avoid generic interest statements unless they are grounded in concrete reasons from approved evidence, approved custom facts, or explicit gap decisions.

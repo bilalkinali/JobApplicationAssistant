@@ -198,6 +198,7 @@ public sealed partial class FakeAiProvider : IAiProvider
         var evidencePitch = input.ApprovedEvidence.Count == 0
             ? "reviewed evidence"
             : string.Join(", ", input.ApprovedEvidence.Select(evidence => evidence.ProfileFactTitle));
+        var writingContext = DraftWritingContext(input.CandidateFitBriefContext);
 
         var coverLetter = $"""
             Language: {language}
@@ -214,6 +215,9 @@ public sealed partial class FakeAiProvider : IAiProvider
             Strategy:
             {strategyText}
 
+            Relevant writing context:
+            {writingContext}
+
             Kind regards,
             {applicant}
             """;
@@ -224,6 +228,26 @@ public sealed partial class FakeAiProvider : IAiProvider
             """;
 
         return Task.FromResult(new DraftGenerationResult(coverLetter, shortMotivation));
+    }
+
+    private static string DraftWritingContext(DraftCandidateFitBriefContext? context)
+    {
+        if (context is null)
+        {
+            return "- No additional fit brief context supplied.";
+        }
+
+        var contextLines = context.Competencies
+            .Concat(context.TransferableStrengths)
+            .Concat(context.RelevantProjects)
+            .Select(item => $"- {item.Title}: {item.Summary}")
+            .Concat(context.SkillGroups.SelectMany(group =>
+                group.Items.Select(item => $"- {group.Name}: {item.Title}: {item.Summary}")))
+            .ToList();
+
+        return contextLines.Count == 0
+            ? "- No currently approved fit brief context supplied."
+            : string.Join(Environment.NewLine, contextLines);
     }
 
     private static string? GapDecisionLine(
