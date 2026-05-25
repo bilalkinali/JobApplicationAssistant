@@ -72,6 +72,19 @@ test("downloads are blocked until visible draft edits are saved", () => {
   assert.equal(state.reason, "Save draft edits before downloading TXT or DOCX.");
 });
 
+test("copy and downloads are blocked when draft quality needs revision", () => {
+  const state = getCoverLetterExportState({
+    generatedDraft: {
+      ...baseApplication.generatedDraft,
+      draftQualityCheck: '{"status":"NeedsRevision","issues":[]}'
+    }
+  }, { clipboardAvailable: true });
+
+  assert.equal(state.canExport, false);
+  assert.equal(state.canCopy, false);
+  assert.equal(state.reason, "Resolve draft quality issues before exporting. Regenerate the draft, or edit and save it so the quality check passes.");
+});
+
 test("claim audit is missing when the audit payload is still empty", () => {
   const state = {
     generatedDraft: {

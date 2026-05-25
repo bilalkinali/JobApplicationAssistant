@@ -3,6 +3,7 @@ export type ExportDraft = {
   claimAudit?: string;
   auditUpdatedAt: string | null;
   isClaimAuditStale: boolean;
+  draftQualityCheck?: string;
 };
 
 export type ExportApplication = {
@@ -44,6 +45,14 @@ export function getCoverLetterExportState(
       canExport: false,
       canCopy: false,
       reason: "Cover letter text is required before export."
+    };
+  }
+
+  if (draftNeedsRevision(application.generatedDraft.draftQualityCheck)) {
+    return {
+      canExport: false,
+      canCopy: false,
+      reason: "Resolve draft quality issues before exporting. Regenerate the draft, or edit and save it so the quality check passes."
     };
   }
 
@@ -94,4 +103,17 @@ export function getCoverLetterText(
   currentCoverLetterText?: string
 ): string {
   return currentCoverLetterText ?? application?.generatedDraft?.coverLetterText ?? "";
+}
+
+function draftNeedsRevision(draftQualityCheck: string | undefined): boolean {
+  if (!draftQualityCheck) {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(draftQualityCheck);
+    return parsed?.status === "NeedsRevision";
+  } catch {
+    return false;
+  }
 }

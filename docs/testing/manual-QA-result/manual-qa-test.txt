@@ -1,0 +1,1582 @@
+<html lang="en"><script src="chrome-extension://dngmlblcodfobpdpecaadgfbcggfjfnm/src/extension/inpage/index.js"></script><head>
+    <script type="module">import { injectIntoGlobalHook } from "/@react-refresh";
+injectIntoGlobalHook(window);
+window.$RefreshReg$ = () => {};
+window.$RefreshSig$ = () => (type) => type;</script>
+
+    <script type="module" src="/@vite/client"></script>
+
+    <meta charset="UTF-8">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Application Assistant</title>
+  <style type="text/css" data-vite-dev-id="C:/Users/Bilal Kinali/source/repos/JobApplicationAssistant/src/frontend/job-application-assistant.web/src/styles.css">:root {
+  color: #1b1f24;
+  background: #f6f4ef;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 1024px;
+  min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  padding: 32px 24px;
+  color: #f8fafc;
+  background: #253446;
+}
+
+.brand {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.brand-mark {
+  display: grid;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 8px;
+  color: #253446;
+  background: #9ad7c2;
+  font-weight: 800;
+}
+
+.brand h1,
+.workspace-header h2,
+.panel h3,
+.list-header h3,
+.section-heading h3,
+.section-heading h4,
+.workflow-step h4,
+.review-column h4,
+.signal-column h4 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.brand h1 {
+  max-width: 170px;
+  font-size: 1.05rem;
+  line-height: 1.25;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  color: #6c7a89;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.sidebar .eyebrow {
+  color: #b8c4d3;
+}
+
+.navigation {
+  display: grid;
+  gap: 8px;
+}
+
+.navigation button {
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 6px;
+  color: #dce5ee;
+  background: transparent;
+  font-weight: 650;
+  text-align: left;
+}
+
+.navigation button.active,
+.navigation button:hover {
+  color: #101820;
+  background: #eaf1ef;
+}
+
+.workspace {
+  padding: 40px;
+}
+
+.workspace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+
+.workspace-header h2 {
+  font-size: 2rem;
+  line-height: 1.15;
+}
+
+.status-pill {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border: 1px solid #cad1d8;
+  border-radius: 999px;
+  color: #3c4a55;
+  background: #ffffff;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.status-pill.unavailable {
+  border-color: #c58f88;
+  color: #7c241f;
+  background: #fff5f3;
+}
+
+.status-pill.fake {
+  border-color: #e4c06e;
+  color: #714d12;
+  background: #fff8e8;
+}
+
+.state-badge {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid #d7dde2;
+  border-radius: 999px;
+  color: #3f4a54;
+  background: #f7f8f5;
+  font-size: 0.72rem;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.state-badge.active-work,
+.state-badge.approved {
+  border-color: #b8ddcd;
+  color: #24533b;
+  background: #e7f5ee;
+}
+
+.state-badge.applied {
+  border-color: #a9c9e5;
+  color: #254d71;
+  background: #eaf4ff;
+}
+
+.state-badge.draft,
+.state-badge.pending {
+  border-color: #e4c06e;
+  color: #714d12;
+  background: #fff2d8;
+}
+
+.state-badge.archived {
+  color: #5f6872;
+  background: #f1f2ef;
+}
+
+.state-badge.rejected {
+  border-color: #c58f88;
+  color: #7c241f;
+  background: #fff5f3;
+}
+
+.state-badge.neutral {
+  color: #5f6872;
+  background: #f1f2ef;
+}
+
+.message {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  line-height: 1.45;
+}
+
+.message.compact {
+  margin-bottom: 0;
+}
+
+.message strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.message p {
+  margin: 0;
+}
+
+.message details {
+  margin-top: 8px;
+}
+
+.message summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.message ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.message.error {
+  color: #7c241f;
+  background: #f8dedb;
+}
+
+.message.success {
+  color: #24533b;
+  background: #dff1e7;
+}
+
+.panel-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 18px;
+}
+
+.panel,
+.list-panel,
+.editor-panel {
+  border: 1px solid #d9d7d0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.panel {
+  min-height: 180px;
+  padding: 22px;
+}
+
+.panel h3 {
+  margin-bottom: 12px;
+  font-size: 1.05rem;
+}
+
+.panel p {
+  max-width: 52ch;
+  margin: 0 0 16px;
+  color: #5a6672;
+  line-height: 1.6;
+}
+
+.recent-next-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.recent-next-actions button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d7dde2;
+  border-radius: 6px;
+  color: #263442;
+  background: #ffffff;
+  text-align: left;
+}
+
+.recent-next-actions span {
+  color: #64717c;
+  font-size: 0.84rem;
+}
+
+.status-details {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.status-details.compact {
+  gap: 8px;
+}
+
+.status-details div {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+}
+
+.status-details dt {
+  color: #64717c;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.status-details dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #263442;
+}
+
+.settings-panel {
+  display: grid;
+  gap: 18px;
+  max-width: 760px;
+}
+
+.diagnostics-list {
+  display: grid;
+  gap: 10px;
+}
+
+.diagnostics-list h4 {
+  margin: 0;
+}
+
+.diagnostics-item {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid #d7dde2;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.diagnostics-item span {
+  color: #64717c;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.diagnostics-item p {
+  margin: 0;
+}
+
+.panel .diagnostics-state {
+  margin: 0;
+  color: #64717c;
+  line-height: 1.45;
+}
+
+.panel .diagnostics-state.success {
+  color: #24533b;
+}
+
+.panel .diagnostics-state.warning {
+  color: #714d12;
+}
+
+.panel .diagnostics-state.error {
+  color: #7c241f;
+}
+
+.form-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  gap: 18px;
+  max-width: 980px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+  color: #344250;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.field.wide,
+.form-actions,
+.final-status-actions {
+  grid-column: 1 / -1;
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  border: 1px solid #cbd3d9;
+  border-radius: 6px;
+  color: #1b1f24;
+  background: #ffffff;
+}
+
+.field input,
+.field select {
+  height: 42px;
+  padding: 0 12px;
+}
+
+.field textarea {
+  min-height: 140px;
+  padding: 12px;
+  resize: vertical;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.final-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e1e1dc;
+  border-radius: 8px;
+  background: #f7f8f5;
+}
+
+.form-actions button,
+.final-status-actions button,
+.list-header button,
+.primary-action {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid #b9c4cd;
+  border-radius: 6px;
+  color: #263442;
+  background: #ffffff;
+  font-weight: 750;
+}
+
+.primary-action {
+  border-color: #253446;
+  color: #ffffff;
+  background: #253446;
+}
+
+.danger-action {
+  border-color: #c58f88;
+  color: #7c241f;
+  background: #fff5f3;
+}
+
+.profile-layout {
+  display: grid;
+  gap: 22px;
+}
+
+.panel-form,
+.profile-facts-panel {
+  max-width: none;
+  padding: 18px;
+  border: 1px solid #d9d7d0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.section-heading {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 6px;
+}
+
+.section-heading p {
+  margin: 0;
+  color: #64717c;
+  line-height: 1.45;
+}
+
+.profile-facts-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.profile-import-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #cdd7e1;
+  border-radius: 8px;
+  background: #f7f9fb;
+}
+
+.profile-import-panel h4 {
+  margin: 0;
+  color: #1b1f24;
+}
+
+.file-field {
+  display: grid;
+  gap: 8px;
+  color: #344250;
+  font-size: 0.88rem;
+  font-weight: 750;
+}
+
+.file-field input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #c8c5bd;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1b1f24;
+}
+
+.import-review-queues {
+  display: grid;
+  gap: 14px;
+}
+
+.import-review-queue {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #cad7d2;
+  border-radius: 8px;
+  background: #f8fbfa;
+}
+
+.import-review-group {
+  display: grid;
+  gap: 8px;
+}
+
+.import-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.import-review-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #344250;
+}
+
+.import-review-group-header span {
+  min-width: 28px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #24533b;
+  background: #dff1e9;
+  font-size: 0.78rem;
+  font-weight: 850;
+  text-align: center;
+}
+
+.import-review-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.import-review-item {
+  display: grid;
+  gap: 8px;
+  min-height: 118px;
+  padding: 12px;
+  border: 1px solid #d7dde2;
+  border-radius: 8px;
+  color: #1b1f24;
+  background: #ffffff;
+  text-align: left;
+}
+
+.import-review-item:hover,
+.import-review-item:focus-within {
+  border-color: #7da996;
+  background: #edf5f2;
+}
+
+.import-review-item.duplicate {
+  border-left: 4px solid #d3a23c;
+}
+
+.import-review-item button {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+
+.import-review-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #344250;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.import-review-title {
+  font-weight: 800;
+}
+
+.import-review-context {
+  color: #52606b;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.duplicate-indicators {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.duplicate-indicators small {
+  padding: 3px 7px;
+  border: 1px solid #e4c06e;
+  border-radius: 999px;
+  color: #714d12;
+  background: #fff8e8;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.fact-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.fact-card {
+  display: grid;
+  gap: 5px;
+  min-height: 82px;
+  padding: 12px;
+  border: 1px solid #d7dde2;
+  border-radius: 8px;
+  color: #1b1f24;
+  background: #ffffff;
+  text-align: left;
+}
+
+.fact-card:hover,
+.fact-card.active {
+  border-color: #7da996;
+  background: #edf5f2;
+}
+
+.fact-card.draft {
+  border-left: 4px solid #d3a23c;
+}
+
+.fact-card.approved {
+  border-left: 4px solid #3c8f63;
+}
+
+.fact-card.archived {
+  border-left: 4px solid #8b97a3;
+  color: #5f6872;
+  background: #f3f3f0;
+}
+
+.fact-card.rejected {
+  border-left: 4px solid #b5534a;
+  color: #6f2824;
+  background: #fff5f3;
+}
+
+.fact-card span {
+  color: #64717c;
+  font-size: 0.88rem;
+}
+
+.fact-editor {
+  max-width: none;
+  padding-top: 8px;
+}
+
+.applications-layout {
+  display: grid;
+  grid-template-columns: 380px minmax(0, 1fr);
+  gap: 18px;
+}
+
+.applications-layout .form-layout {
+  max-width: none;
+}
+
+.list-panel {
+  align-self: start;
+  overflow: hidden;
+}
+
+.list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid #e1e1dc;
+}
+
+.session-list {
+  display: grid;
+}
+
+.filters {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e1e1dc;
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #3f474f;
+  font-size: 0.9rem;
+}
+
+.session {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  border-bottom: 1px solid #e8e6df;
+  color: #1b1f24;
+  background: #ffffff;
+  text-align: left;
+}
+
+.session:hover,
+.session.active {
+  background: #edf5f2;
+}
+
+.session.active-work {
+  border-left: 4px solid #3c8f63;
+}
+
+.session.applied {
+  border-left: 4px solid #4b86b9;
+}
+
+.session.archived {
+  border-left: 4px solid #8b97a3;
+  color: #5f6872;
+  background: #f3f3f0;
+}
+
+.session span {
+  color: #64717c;
+  font-size: 0.9rem;
+}
+
+.session small {
+  color: #77828c;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.session-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.session-badges span {
+  padding: 3px 7px;
+  border: 1px solid #d7dde2;
+  border-radius: 999px;
+  color: #3f4a54;
+  background: #f7f8f5;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.session-badges .ready,
+.session-badges .audit-current,
+.session-badges .next-action {
+  border-color: #b8ddcd;
+  color: #24533b;
+  background: #e7f5ee;
+}
+
+.session-badges .muted,
+.session-badges .audit-notapplicable {
+  color: #64717c;
+  background: #f1f2ef;
+}
+
+.session-badges .audit-stale,
+.session-badges .audit-missing {
+  border-color: #e4c06e;
+  color: #714d12;
+  background: #fff2d8;
+}
+
+.empty-state {
+  margin: 0;
+  padding: 16px;
+  color: #64717c;
+}
+
+.editor-panel {
+  max-width: none;
+  padding: 18px;
+}
+
+.workflow-panel {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 16px;
+  padding-top: 18px;
+  border-top: 1px solid #e1e1dc;
+}
+
+.workflow-step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px;
+  border: 1px solid #d9d7d0;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.workflow-step > div {
+  min-width: 0;
+}
+
+.workflow-step button {
+  flex: 0 0 auto;
+}
+
+.workflow-step p,
+.signal-column p,
+.evidence-card p {
+  margin: 6px 0 0;
+  color: #64717c;
+  line-height: 1.45;
+}
+
+.workflow-step button,
+.evidence-card button,
+.approved-item button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #b9c4cd;
+  border-radius: 6px;
+  color: #263442;
+  background: #ffffff;
+  font-weight: 750;
+}
+
+.workflow-step button.secondary-workflow-action {
+  border-color: #d7dde2;
+  color: #52606b;
+  background: #f7f8f5;
+}
+
+.guided-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px;
+  border: 1px solid #b8ddcd;
+  border-radius: 8px;
+  background: #edf8f2;
+}
+
+.guided-action.warning {
+  border-color: #e4c06e;
+  background: #fff8e8;
+}
+
+.guided-action.error {
+  border-color: #c58f88;
+  background: #fff5f3;
+}
+
+.guided-action.success {
+  border-color: #b8ddcd;
+  background: #e7f5ee;
+}
+
+.guided-action > div {
+  min-width: 0;
+}
+
+.guided-action span {
+  color: #52606b;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.guided-action h4 {
+  margin: 3px 0 0;
+}
+
+.guided-action p {
+  max-width: 68ch;
+  margin: 6px 0 0;
+  color: #3f4a54;
+  line-height: 1.45;
+}
+
+.guided-action button {
+  flex: 0 0 auto;
+}
+
+.signal-grid,
+.review-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.review-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.signal-column,
+.review-column {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #d9d7d0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.signal-column ul {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: #344250;
+  line-height: 1.55;
+}
+
+.evidence-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid #d7dde2;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.evidence-card.muted {
+  background: #f7f7f3;
+}
+
+.evidence-card.quality-strong {
+  border-color: #b8ddcd;
+  background: #f8fcfa;
+}
+
+.evidence-card.quality-partial {
+  border-color: #e4c06e;
+  background: #fffaf0;
+}
+
+.evidence-card.quality-weak {
+  border-color: #d6a09a;
+  background: #fff7f5;
+}
+
+.evidence-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.evidence-card span,
+.evidence-card small,
+.approved-item span {
+  color: #64717c;
+}
+
+.evidence-card button {
+  justify-self: start;
+}
+
+.weak-match-review {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.weak-match-review button.selected {
+  border-color: #7c241f;
+  background: #7c241f;
+  color: #ffffff;
+}
+
+.gap-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.gap-decision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gap-decision-actions button.selected {
+  border-color: #5b6b7a;
+  background: #2f3b46;
+  color: #ffffff;
+}
+
+.approved-list,
+.gap-decision-list {
+  display: grid;
+  gap: 10px;
+}
+
+.approved-item,
+.gap-decision-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #c7ded4;
+  border-radius: 8px;
+  background: #edf5f2;
+}
+
+.gap-decision-item {
+  border-color: #d9d7d0;
+  background: #ffffff;
+}
+
+.gap-decision-item.ignored {
+  background: #f7f7f3;
+}
+
+.gap-decision-item.learning {
+  border-color: #e2d2a9;
+  background: #fff8e8;
+}
+
+.gap-decision-item.covered {
+  border-color: #c7ded4;
+  background: #edf5f2;
+}
+
+.approved-item.custom-proof {
+  border-color: #b9d8cd;
+  background: #f3faf7;
+}
+
+.approved-item div,
+.gap-decision-item div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.approved-item strong,
+.approved-item span,
+.gap-decision-item strong,
+.gap-decision-item span {
+  overflow-wrap: anywhere;
+}
+
+.trust-chain {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #d9d7d0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.fit-brief-summary {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #d9d7d0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.application-strategy-summary {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #d9d7d0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.fit-brief-summary .section-heading {
+  align-items: flex-start;
+}
+
+.application-strategy-summary .section-heading {
+  align-items: flex-start;
+}
+
+.fit-brief-candidate-summary {
+  margin: 0;
+  color: #344250;
+  line-height: 1.5;
+}
+
+.strategy-tone-guidance {
+  margin: 0;
+  color: #344250;
+  line-height: 1.5;
+}
+
+.fit-brief-skill-groups,
+.fit-brief-section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.strategy-section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.fit-brief-card {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #d7dde2;
+  border-radius: 8px;
+  background: #f7f8f5;
+}
+
+.strategy-card {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #d7dde2;
+  border-radius: 8px;
+  background: #f7f8f5;
+}
+
+.fit-brief-card.risk {
+  border-color: #e2d2a9;
+  background: #fff8e8;
+}
+
+.strategy-card.risk {
+  border-color: #e2d2a9;
+  background: #fff8e8;
+}
+
+.fit-brief-card h5 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.strategy-card h5 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.fit-brief-card ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.strategy-card ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fit-brief-card li {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.strategy-card li {
+  min-width: 0;
+  color: #344250;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.fit-brief-card span,
+.fit-brief-card small {
+  overflow-wrap: anywhere;
+}
+
+.fit-brief-card small {
+  color: #64717c;
+  line-height: 1.4;
+}
+
+.custom-facts-panel {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #d9d7d0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.custom-fact-editor {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #d7dde2;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.custom-fact-editor .field {
+  display: grid;
+  gap: 4px;
+}
+
+.custom-fact-editor textarea {
+  min-height: 76px;
+}
+
+.custom-fact-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.custom-fact-list.compact {
+  grid-template-columns: 1fr;
+}
+
+.custom-fact {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #d7dde2;
+  border-left: 4px solid #8b97a3;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.custom-fact.pending {
+  border-left-color: #d3a23c;
+}
+
+.custom-fact.approved {
+  border-left-color: #3c8f63;
+}
+
+.custom-fact.rejected {
+  border-left-color: #b84a4a;
+  background: #fffafa;
+}
+
+.custom-fact p {
+  margin: 0;
+  color: #64717c;
+  line-height: 1.45;
+}
+
+.custom-fact small {
+  color: #64717c;
+}
+
+.custom-fact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.draft-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  gap: 18px;
+  align-items: start;
+  padding: 14px;
+  border: 1px solid #d9d7d0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.draft-editor textarea {
+  min-height: 260px;
+}
+
+.draft-editor .field {
+  align-self: stretch;
+}
+
+.workflow-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  line-height: 1.45;
+}
+
+.workflow-note strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.workflow-note p {
+  margin: 0;
+}
+
+.workflow-note details {
+  margin-top: 8px;
+}
+
+.workflow-note summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.workflow-note ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.provider-readiness {
+  display: grid;
+  gap: 10px;
+}
+
+.provider-readiness .status-details {
+  margin-top: 2px;
+}
+
+.provider-readiness li {
+  margin-bottom: 4px;
+}
+
+.inline-readiness {
+  display: inline-block;
+  margin-top: 8px;
+  color: #24533b;
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
+.inline-readiness.unavailable {
+  color: #7c241f;
+}
+
+.inline-readiness.fake {
+  color: #714d12;
+}
+
+.workflow-note.warning {
+  color: #714d12;
+  background: #fff2d8;
+}
+
+.workflow-note.info {
+  color: #24533b;
+  background: #dff1e7;
+}
+
+.workflow-note.neutral {
+  color: #3c4a55;
+  background: #eef2f5;
+}
+
+.workflow-note.error {
+  color: #7c241f;
+  background: #f8dedb;
+}
+
+.workflow-note.success {
+  color: #24533b;
+  background: #dff1e7;
+}
+
+.export-panel {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 12px;
+  min-height: 190px;
+  padding: 14px;
+  border: 1px solid #d7dde2;
+  border-radius: 8px;
+  background: #f7f8f5;
+}
+
+.export-panel.disabled {
+  background: #ffffff;
+}
+
+.claim-audit {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 12px;
+  min-height: 160px;
+}
+
+.audit-list {
+  display: grid;
+  gap: 10px;
+}
+
+.audit-item {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid #d7dde2;
+  border-left: 4px solid #8b97a3;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.audit-item.supported {
+  border-left-color: #3c8f63;
+}
+
+.audit-item.unsupported {
+  border-left-color: #b84a4a;
+}
+
+.audit-item.needsreview {
+  border-left-color: #b8872f;
+}
+
+.audit-item span {
+  color: #263442;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.audit-item p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.audit-item small {
+  color: #64717c;
+}
+
+.empty-state.compact {
+  padding: 8px 0;
+}
+</style></head>
+  <body>
+    <div id="root"><main class="app-shell"><aside class="sidebar" aria-label="Primary navigation"><div class="brand"><span class="brand-mark">JA</span><div><p class="eyebrow">V1 workspace</p><h1>Job Application Assistant</h1></div></div><nav class="navigation"><button class="" type="button">Home</button><button class="" type="button">Profile</button><button class="active" type="button">Applications</button><button class="" type="button">Settings</button></nav></aside><section class="workspace" aria-labelledby="workspace-title"><header class="workspace-header"><div><p class="eyebrow">Workbench</p><h2 id="workspace-title">Applications</h2></div><span class="status-pill  ">OpenAiCompatible - qwen2.5-coder-14b-instruct - Available</span></header><div class="message success" role="status"><strong>Success</strong><p>Draft generated and claim audit updated.</p></div><div class="applications-layout"><section class="list-panel" aria-label="Application sessions"><div class="list-header"><h3>Applications</h3><button type="button">New</button></div><div class="filters"><label class="field"><span>Search</span><input type="text" value=""></label><label class="field"><span>Status</span><select><option value="All">All</option><option value="Draft">Draft</option><option value="PostingCaptured">PostingCaptured</option><option value="ReadyForReview">ReadyForReview</option><option value="PreparedForEvidenceReview">PreparedForEvidenceReview</option><option value="Applied">Applied</option><option value="Archived">Archived</option></select></label><label class="field"><span>Draft/audit</span><select><option value="All">All</option><option value="Current">Current</option><option value="Stale">Stale</option><option value="Missing">Missing</option><option value="NotApplicable">NotApplicable</option></select></label><label class="checkbox-field"><input type="checkbox"><span>Include archived</span></label></div><div class="session-list"><button class="session active-work" type="button"><span class="state-badge active-work">Active</span><strong>V2.2 QA Backend Platform 2026-05-25T15-57-38-265Z</strong><span>Backend Platform Engineer</span><small>PreparedForEvidenceReview - English - Updated 25 May</small><div class="session-badges"><span class="next-action">Next: Copy or export</span><span class="ready">Draft ready</span><span class="audit-current">Audit current</span></div></button><button class="session active-work" type="button"><span class="state-badge active-work">Active</span><strong>Vejle Kommune</strong><span>AI-builder</span><small>PreparedForEvidenceReview - Danish - Updated 25 May</small><div class="session-badges"><span class="next-action">Next: Copy or export</span><span class="ready">Draft ready</span><span class="audit-current">Audit current</span></div></button><button class="session active-work" type="button"><span class="state-badge active-work">Active</span><strong>Milestone 2 QA 20260525111340</strong><span>Backend Platform Engineer</span><small>PreparedForEvidenceReview - English - Updated 25 May</small><div class="session-badges"><span class="next-action">Next: Copy or export</span><span class="ready">Draft ready</span><span class="audit-current">Audit current</span></div></button><button class="session active-work" type="button"><span class="state-badge active-work">Active</span><strong>Milestone 2 QA 20260525-125229</strong><span>Backend Platform Engineer</span><small>PreparedForEvidenceReview - English - Updated 25 May</small><div class="session-badges"><span class="next-action">Next: Copy or export</span><span class="ready">Draft ready</span><span class="audit-current">Audit current</span></div></button><button class="session active-work" type="button"><span class="state-badge active-work">Active</span><strong>Aabenraa Kommune</strong><span>RPA og AI Udvikler</span><small>PreparedForEvidenceReview - Danish - Updated 17 May</small><div class="session-badges"><span>Deadline 17 May</span><span class="next-action">Next: Retry preparation</span><span class="muted">No draft</span><span class="audit-notapplicable">Audit not applicable</span></div></button><button class="session active-work active" type="button"><span class="state-badge active-work">Active</span><strong>Vejle Kommune</strong><span>AI-builder</span><small>PreparedForEvidenceReview - Danish - Updated 26 May</small><div class="session-badges"><span>Deadline 10 Jun</span><span class="next-action">Next: Copy or export</span><span class="ready">Draft ready</span><span class="audit-current">Audit current</span></div></button></div></section><form class="form-layout editor-panel"><div class="section-heading"><h3>Application detail</h3><p>Capture the posting, language, and manual workflow state for this session.</p></div><label class="field"><span>Company name</span><input required="" type="text" value="Vejle Kommune"></label><label class="field"><span>Role title</span><input required="" type="text" value="AI-builder"></label><label class="field"><span>Application URL</span><input type="url" value="https://www.jobindex.dk/jobannonce/h1662776/ai-builder-til-ny-teknologi-gruppe-ntg-i-digitalisering-it"></label><label class="field"><span>Deadline</span><input type="date" value="2026-06-10"></label><label class="field"><span>Status</span><select required=""><option value="Draft">Draft</option><option value="PostingCaptured">PostingCaptured</option><option value="ReadyForReview">ReadyForReview</option><option value="PreparedForEvidenceReview">PreparedForEvidenceReview</option><option value="Applied">Applied</option><option value="Archived">Archived</option></select></label><label class="field"><span>Detected language</span><input type="text" value="Danish"></label><label class="field"><span>Selected language</span><input type="text" value="Danish"></label><label class="field wide"><span>Job posting text</span><textarea>AI-builder til Ny-Teknologi-Gruppe (NTG) i Digitalisering &amp; IT
+
+Vejle Kommune er på udkig efter en AI-builder med teknisk flair og nysgerrighed, der kan styrke vores Ny-Teknologi-Gruppe. Du vil få ansvaret for at understøtte et voksende forretningsbehov gennem eksperimentering og udvikling af AI-baserede prototyper på tværs af forskellige områder i kommunen.
+
+Er du altid en de første, som tager ny teknologi til dig? Er du begejstret og eksperimenterende hver gang, der udkommer en ny funktion eller dims? Har du erfaring med rapid prototyping via vibe-coding eller måske du allerede har din egen OpenClaw-kørende til orkestrering af dine automatiseringer? Så kunne du godt være vores nye AI-builder!
+
+Om jobbet:
+Din ansættelse bliver i IT-afdelingen, og du vil til dagligt være en del af vores Ny-Teknologi-Gruppe (NTG) som er et fælles team under Digitalisering &amp; IT, hvis formål er at være på forkant med den teknologiske udvikling og sætte retning på både det strategiske og operationelle niveau for hele organisationen. NTG består for nuværende af et mix mellem fem forskellige medarbejderkompetencer fra vores Digitalisering- og IT-afdelingen, herunder projektleder, digitaliseringskonsulenter samt en forretningsvendt IT-arkitekt og en teknisk IT-arkitekt. Teamet har desuden løbende fast en til to studiemedarbejdere tilknyttet samt en række specialestuderende. NTG driver bl.a. projekter, såsom RoboRef, 365 Copilot, MinGPT, OS2ai, AI-tolkning, Voicebots, Ebbot, o. lign.
+
+Du vil blive tilknyttet NTG, som en dedikeret udviklingsressource, der skal hjælpe og understøtte teamet med at drive og afprøve forskellige AI-løsninger. Vi ser i højere grad ind i en fremtid, hvor vi hurtigere og mere effektivt skal kunne omsætte organisationens ønsker til reelle prototyper, der kan testes af i praksis. Og samtidig ser vi også ind i, hvordan AI-agenter fremover kan komme til at varetage en væsentlig del af arbejdet. Dette sætter nye krav til den måde, vi fremadrettet ønsker at drive vores samarbejder på, både med vores organisation og eksterne samarbejdspartnere.
+
+I rollen som AI-builder vil du være personen, der forstår at omsætte forretningsbehov og idéer til prototyper indenfor en kort tidsramme gennem ibrugtagelse af nye kodningsværktøjer og metoder. Du skal kunne agere i spændet mellem forretning, digitalisering og IT, hvor du skal varetage den tekniske opbygning, test og formidling af prototyper og efterfølgende deltage i den tekniske dialog om skalering og drift med vores eksterne leverandører og i samarbejde med resten af NTG.
+
+Til daglig vil du have stor indflydelse på, hvordan rollen udfyldes og hvordan opgaverne i praksis udføres. Det vigtigste er, at du er en god sparringspartner og kollega med sunde menneskelige værdier, der kan sætte dig ind i forretningens behov og forstå de daglige udfordringer.
+
+Vi forventer af dig:
+At du kan omsætte idéer og udfordringer til konkrete prototyper.
+At du arbejder praktisk, iterativt og kan hurtigt sætte proof-of-concepts op, teste med brugere og omsætte feedback til nye løsningsspecifikationer.
+At du har erfaring med at eksperimentere, bygge og teste AI-løsninger/agenter indenfor en eksisterende IT-governance, og forstår at IT-governance er forudsætningen for lovmedhol-delighed – især indenfor AI.
+At du har en generel indsigt og interesse for nye teknologier.
+At du kan navigere i en stor organisation med mange forskellige og varierende behov.
+At du har udviklererfaring eller interesse for udvikling og er fortrolig med f.eks. vibe-coding, hvor du samtidig er i stand til at sætte nye teknologier og muligheder hurtigt i spil.
+At du har en forståelse og er tryg ved API’er, dataflows og integrationer. Du kan orientere dig i nye teknologier og vælge de rette byggesten ved prototyping, fx LM-løsninger, RAG/videnssøgning, prompt-design, agent-opsætning samt low-code/no-code værktøjer, og du bygger altid med respekt for datasikkerhed og governance.
+At du har erfaring og interesse for automatiseringsværktøjer som Copilot Studio, n8n, Flo-wise, OpenClaw/NemoClaw eller andre lignende værktøjer.
+Om dig og din baggrund:
+Du har måske erfaring fra en større kommunal eller politisk styret organisation eller du har en tydelig interesse for at arbejde i og med den offentlige sektor. Uanset om din baggrund primært er offentlig eller privat, kan du lynhurtigt spotte, hvor arbejdsopgaver og processer kan forenkles og automatiseres og du kan omsætte det til konkrete løsninger og prototyper med værktøjer, platforme eller agenter.
+
+Vi forventer yderligere at du:
+
+Har en stærk teknisk forståelse
+Trives med rapid prototyping og kan give slip på dine idéer og prototyper (Er i stand til at “kill your darlings”)
+Har en stor motivation for at lære nye ting og teknologier
+Trives i at løse problemer og finder nye veje, når du møder en blindgyde.
+Er samarbejdsorienteret og en stærk holdspiller
+Kan formidle teknisk opsætning, arkitektur og kode til ikke-tekniske kolleger
+Din uddannelsesmæssige baggrund er ikke afgørende, men mere dig som menneske, dine kompetencer og den energi du bringer til arbejdet. Din uddannelse kan derfor være mangeartet, f.eks. en længere videregående uddannelse som cand.it, datalog, datamatiker, Computer Science, Software Engineering eller lignende.
+
+Det væsentligste er dog, at du trives med at udvikle, eksperimentere og teste prototyper.
+
+Vi tilbyder dig:
+Danmarks 5. største kommune, hvor grundforholdene er i orden.
+En familievenlig arbejdsplads med gode kolleger i et uformelt og afslappet miljø.
+Stor fleksibilitet både fagligt og personligt med mulighed for enkelte hjemmearbejdsdage.
+Gode udviklings- og efteruddannelsesmuligheder både fagligt og personligt.
+Mulighed for at arbejde med en bred palet af teknologier, produkter og platforme.
+Et godt socialt miljø med løbende sociale og faglige arrangementer.</textarea></label><div class="form-actions"><button class="primary-action" type="submit">Save application</button><button type="button">Clear</button><button class="danger-action" type="button">Delete</button></div><div class="final-status-actions" aria-label="Final application status actions"><button type="button">Mark applied</button><button class="danger-action" type="button">Archive</button></div><section class="workflow-panel"><div class="section-heading"><h3>Application text workflow</h3><p>Move from job analysis to approved evidence, generated text, and claim audit before final use.</p></div><section class="provider-readiness workflow-note info"><strong>Real AI provider ready</strong><p>OpenAiCompatible provider is available with model qwen2.5-coder-14b-instruct at http://localhost:1234/v1. OpenAI-compatible provider is available.</p><dl class="status-details "><div><dt>Provider</dt><dd>OpenAiCompatible</dd></div><div><dt>Mode</dt><dd>Configured real provider</dd></div><div><dt>Model</dt><dd>qwen2.5-coder-14b-instruct</dd></div><div><dt>Endpoint</dt><dd>http://localhost:1234/v1</dd></div><div><dt>Availability</dt><dd>Available</dd></div><div><dt>Diagnostics</dt><dd>Not run this session</dd></div></dl></section><section class="guided-action success" aria-label="Guided next action"><div><span>Next action</span><h4>Copy or export</h4><p>The claim audit is current. Use the copy and TXT/DOCX export options when ready.</p></div><button class="primary-action" type="button">Review copy/export</button></section><div class="trust-chain" aria-label="Draft trust chain"><span class="state-badge approved">Prepared for evidence review</span><span class="state-badge approved">6 approved evidence items</span><span class="state-badge approved">Draft saved</span><span class="state-badge approved">Audit current</span><span class="state-badge approved">Export ready</span></div><div class="workflow-step"><div><h4>Preparation</h4><p>Run the full preparation flow again when job analysis, fit brief, or evidence matching needs a fresh pass.</p></div><button class="secondary-workflow-action" type="button">Re-run preparation</button></div><div class="workflow-step"><div><h4>1. Job analysis</h4><p>Extract signals from the saved job posting.</p></div><button class="secondary-workflow-action" type="button">Analyze job</button></div><div class="signal-grid"><section class="signal-column"><h4>Required skills</h4><ul><li>eksperimentering og udvikling af AI-baserede prototyper</li><li>forståelse for nye teknologier</li><li>udviklerfaring eller interesse for udvikling</li><li>erfaring med at eksperimentere, bygge og teste AI-løsninger/agenter indenfor en eksisterende IT-governance</li><li>forståelse og er tryg ved API'er, dataflows og integrationer</li><li>erfaring og interesse for automatiseringsværktøjer som Copilot Studio, n8n, Flo-wise, OpenClaw/NemoClaw eller andre lignende værktøjer</li></ul></section><section class="signal-column"><h4>Preferred skills</h4><ul><li>vibe-coding</li><li>LM-løsninger</li><li>RAG/videnssøgning</li><li>prompt-design</li><li>agent-opsætning</li><li>low-code/no-code værktøjer</li><li>datasikkerhed og governance</li></ul></section><section class="signal-column"><h4>Responsibilities</h4><ul><li>styrke Ny-Teknologi-Gruppe gennem eksperimentering og udvikling af AI-baserede prototyper på tværs af forskellige områder i kommunen</li><li>til dagligt være en del af vores Ny-Teknologi-Gruppe (NTG)</li><li>hjælpe og understøtte teamet med at drive og afprøve forskellige AI-løsninger</li><li>omsætte forretningsbehov og idéer til prototyper indenfor en kort tidsramme gennem ibrugtagelse af nye kodningsværktøjer og metoder</li><li>varetage den tekniske opbygning, test og formidling af prototyper</li><li>deltage i den tekniske dialog om skalering og drift med vores eksterne leverandører og i samarbejde med resten af NTG</li></ul></section></div><section class="fit-brief-summary" aria-label="Candidate fit brief summary"><div class="section-heading"><div><h4>Candidate fit brief</h4><p>Read-only preparation context. Supporting fact references are traceability only, not approved evidence.</p></div><span class="state-badge neutral">Read-only</span></div><p class="fit-brief-candidate-summary">Candidate possesses strong technical skills in AI development and integration, with experience in building event-driven platforms and microservices. Fluent in multiple languages and experienced in DevOps practices.</p><div class="fit-brief-skill-groups"><article class="fit-brief-card"><strong>Technical Skills</strong><ul><li><span>Version Control and DevOps</span><small>Experience with Git, Docker, RabbitMQ, Azure, Oracle Cloud is relevant for managing AI projects within IT governance.</small></li><li><span>Frontend Development</span><small>Experience with React, TypeScript, JavaScript, HTML, and CSS is useful for developing user-friendly AI interfaces.</small></li></ul></article><article class="fit-brief-card"><strong>Projects</strong><ul><li><span>Event-driven Salesforce Integration Platform</span><small>Built an event-driven integration platform between Salesforce and .NET services, demonstrating experience in integrating AI solutions within existing IT governance.</small></li><li><span>Reddit-like Forum Platform</span><small>Developed a microservice-based forum platform, showcasing ability to build scalable AI-driven applications.</small></li></ul></article><article class="fit-brief-card"><strong>Education</strong><ul><li><span>Computer Science</span><small>Graduate studies in Computer Science provide a strong foundation in system development, object-oriented programming, databases, cloud and DevOps.</small></li></ul></article></div><div class="fit-brief-section-grid"><article class="fit-brief-card neutral"><h5>Competencies</h5><ul><li><span>Eksperimentering og udvikling af AI-baserede prototyper</span><small>Candidate has experience in building and testing AI solutions, which is essential for developing prototypes.</small></li><li><span>Forståelse for nye teknologier</span><small>Candidate is fluent in multiple languages and has experience with various technologies, indicating a strong understanding of new technologies.</small></li><li><span>Udviklerfaring eller interesse for udvikling</span><small>Candidate has a background in computer science and experience with development tools, showing interest and capability in software development.</small></li></ul></article><article class="fit-brief-card neutral"><h5>Relevant projects</h5><ul><li><span>Event-driven Salesforce Integration Platform</span><small>Built an event-driven integration platform between Salesforce and .NET services, demonstrating experience in integrating AI solutions within existing IT governance.</small></li><li><span>Reddit-like Forum Platform</span><small>Developed a microservice-based forum platform, showcasing ability to build scalable AI-driven applications.</small></li></ul></article><article class="fit-brief-card neutral"><h5>Transferable strengths</h5><ul><li><span>Fluent Languages</span><small>Fluency in multiple languages is beneficial for communication and collaboration within a diverse team.</small></li><li><span>Scrum Team Experience</span><small>Internship experience in a Scrum team indicates strong collaboration and project management skills.</small></li></ul></article><article class="fit-brief-card risk"><h5>Risk notes</h5><ul><li><span>Lack of direct AI experience</span><small>Candidate does not have direct experience with specific AI tools like Copilot Studio, n8n, Flo-wise, OpenClaw/NemoClaw or preferred skills such as vibe-coding.</small></li></ul></article></div></section><div class="workflow-step"><div><h4>2. Evidence matching</h4><p>Match analyzed signals against approved profile facts.</p></div><button class="secondary-workflow-action" type="button">Match evidence</button></div><div class="review-grid"><section class="review-column"><h4>Matched evidence</h4><article class="evidence-card quality-strong"><div class="evidence-card-heading"><strong>eksperimentering og udvikling af AI-baserede prototyper</strong><span class="state-badge approved">Strong match</span></div><span>Event-driven Salesforce Integration Platform</span><p>Built an event-driven integration platform between Salesforce and .NET services, demonstrating experience in building AI solutions.</p><small>Reason: Direct approved fact support for the job signal.</small><small>Good support for claims tied to this job signal.</small><small>Matched: eksperimentering, udvikling, AI-baserede prototyper</small><button type="button">Approve</button></article><article class="evidence-card quality-strong"><div class="evidence-card-heading"><strong>forståelse for nye teknologier</strong><span class="state-badge approved">Strong match</span></div><span>Fluent Languages</span><p>Fluent in multiple languages and has experience with various technologies, indicating a strong understanding of new technologies.</p><small>Reason: Direct approved fact support for the job signal.</small><small>Good support for claims tied to this job signal.</small><small>Matched: nye teknologier, forståelse</small><button type="button">Approve</button></article><article class="evidence-card quality-strong"><div class="evidence-card-heading"><strong>udviklerfaring eller interesse for udvikling</strong><span class="state-badge approved">Strong match</span></div><span>Computer Science</span><p>Graduate studies in Computer Science provide a strong foundation in system development, object-oriented programming, databases, cloud and DevOps.</p><small>Reason: Direct approved fact support for the job signal.</small><small>Good support for claims tied to this job signal.</small><small>Matched: udviklerfaring, interesse, udvikling</small><button type="button">Approve</button></article><article class="evidence-card quality-strong"><div class="evidence-card-heading"><strong>erfaring med at eksperimentere, bygge og teste AI-løsninger/agenter indenfor en eksisterende IT-governance</strong><span class="state-badge approved">Strong match</span></div><span>Event-driven Salesforce Integration Platform</span><p>Built an event-driven integration platform between Salesforce and .NET services, demonstrating experience in building AI solutions.</p><small>Reason: Direct approved fact support for the job signal.</small><small>Good support for claims tied to this job signal.</small><small>Matched: eksperimentering, bygge, teste, AI-løsninger</small><button type="button">Approve</button></article><article class="evidence-card quality-partial"><div class="evidence-card-heading"><strong>forståelse og er tryg ved API'er, dataflows og integrationer</strong><span class="state-badge pending">Partial match</span></div><span>Version Control and DevOps</span><p>Experience with Git, Docker, RabbitMQ, Azure, Oracle Cloud is relevant for managing AI projects within IT governance.</p><small>Reason: Related approved fact support that requires careful wording.</small><small>Usable with care. Treat this as cautious support, not full-strength proof.</small><small>Matched: API'er, dataflows, integrationer</small><button type="button">Approve</button></article><article class="evidence-card quality-partial"><div class="evidence-card-heading"><strong>erfaring og interesse for automatiseringsværktøjer som Copilot Studio, n8n, Flo-wise, OpenClaw/NemoClaw eller andre lignende værktøjer</strong><span class="state-badge pending">Partial match</span></div><span>Version Control and DevOps</span><p>Experience with Git, Docker, RabbitMQ, Azure, Oracle Cloud is relevant for managing AI projects within IT governance.</p><small>Reason: Related approved fact support that requires careful wording.</small><small>Usable with care. Treat this as cautious support, not full-strength proof.</small><small>Matched: automatiseringsværktøjer</small><button type="button">Approve</button></article></section><section class="review-column"><h4>Unmatched requirements</h4><article class="evidence-card muted"><div class="gap-card-heading"><strong>vibe-coding</strong><span class="state-badge pending">Learning-interest gap</span></div><span>PreferredSkill</span><p>Candidate does not have direct experience with vibe-coding.</p><div class="gap-decision-actions" role="group" aria-label="Gap decision for vibe-coding"><button type="button" class="">Ignore</button><button type="button" class="selected">Mention as learning interest</button></div><div class="custom-fact-editor"><label class="field"><span>Custom fact title</span><input type="text" value=""></label><label class="field wide"><span>Custom fact summary</span><textarea></textarea></label><label class="field wide"><span>Technologies</span><textarea></textarea></label><label class="field wide"><span>Allowed claims</span><textarea></textarea></label><button type="button">Add job-local fact</button></div></article><article class="evidence-card muted"><div class="gap-card-heading"><strong>LM-løsninger</strong><span class="state-badge pending">Learning-interest gap</span></div><span>PreferredSkill</span><p>Candidate does not have direct experience with LM-løsninger.</p><div class="gap-decision-actions" role="group" aria-label="Gap decision for LM-løsninger"><button type="button" class="">Ignore</button><button type="button" class="selected">Mention as learning interest</button></div><div class="custom-fact-editor"><label class="field"><span>Custom fact title</span><input type="text" value=""></label><label class="field wide"><span>Custom fact summary</span><textarea></textarea></label><label class="field wide"><span>Technologies</span><textarea></textarea></label><label class="field wide"><span>Allowed claims</span><textarea></textarea></label><button type="button">Add job-local fact</button></div></article><article class="evidence-card muted"><div class="gap-card-heading"><strong>RAG/videnssøgning</strong><span class="state-badge pending">Learning-interest gap</span></div><span>PreferredSkill</span><p>Candidate does not have direct experience with RAG/videnssøgning.</p><div class="gap-decision-actions" role="group" aria-label="Gap decision for RAG/videnssøgning"><button type="button" class="">Ignore</button><button type="button" class="selected">Mention as learning interest</button></div><div class="custom-fact-editor"><label class="field"><span>Custom fact title</span><input type="text" value=""></label><label class="field wide"><span>Custom fact summary</span><textarea></textarea></label><label class="field wide"><span>Technologies</span><textarea></textarea></label><label class="field wide"><span>Allowed claims</span><textarea></textarea></label><button type="button">Add job-local fact</button></div></article><article class="evidence-card muted"><div class="gap-card-heading"><strong>prompt-design</strong><span class="state-badge pending">Learning-interest gap</span></div><span>PreferredSkill</span><p>Candidate does not have direct experience with prompt-design.</p><div class="gap-decision-actions" role="group" aria-label="Gap decision for prompt-design"><button type="button" class="">Ignore</button><button type="button" class="selected">Mention as learning interest</button></div><div class="custom-fact-editor"><label class="field"><span>Custom fact title</span><input type="text" value=""></label><label class="field wide"><span>Custom fact summary</span><textarea></textarea></label><label class="field wide"><span>Technologies</span><textarea></textarea></label><label class="field wide"><span>Allowed claims</span><textarea></textarea></label><button type="button">Add job-local fact</button></div></article><article class="evidence-card muted"><div class="gap-card-heading"><strong>agent-opsætning</strong><span class="state-badge pending">Learning-interest gap</span></div><span>PreferredSkill</span><p>Candidate does not have direct experience with agent-opsætning.</p><div class="gap-decision-actions" role="group" aria-label="Gap decision for agent-opsætning"><button type="button" class="">Ignore</button><button type="button" class="selected">Mention as learning interest</button></div><div class="custom-fact-editor"><label class="field"><span>Custom fact title</span><input type="text" value=""></label><label class="field wide"><span>Custom fact summary</span><textarea></textarea></label><label class="field wide"><span>Technologies</span><textarea></textarea></label><label class="field wide"><span>Allowed claims</span><textarea></textarea></label><button type="button">Add job-local fact</button></div></article><article class="evidence-card muted"><div class="gap-card-heading"><strong>low-code/no-code værktøjer</strong><span class="state-badge pending">Learning-interest gap</span></div><span>PreferredSkill</span><p>Candidate does not have direct experience with low-code/no-code værktøjer.</p><div class="gap-decision-actions" role="group" aria-label="Gap decision for low-code/no-code værktøjer"><button type="button" class="">Ignore</button><button type="button" class="selected">Mention as learning interest</button></div><div class="custom-fact-editor"><label class="field"><span>Custom fact title</span><input type="text" value=""></label><label class="field wide"><span>Custom fact summary</span><textarea></textarea></label><label class="field wide"><span>Technologies</span><textarea></textarea></label><label class="field wide"><span>Allowed claims</span><textarea></textarea></label><button type="button">Add job-local fact</button></div></article><article class="evidence-card muted"><div class="gap-card-heading"><strong>styrke Ny-Teknologi-Gruppe gennem eksperimentering og udvikling af AI-baserede prototyper på tværs af forskellige områder i kommunen</strong><span class="state-badge pending">Learning-interest gap</span></div><span>Responsibility</span><p>Candidate does not have direct experience in strengthening the Ny-Teknologi-Gruppe through AI-based prototypes.</p><div class="gap-decision-actions" role="group" aria-label="Gap decision for styrke Ny-Teknologi-Gruppe gennem eksperimentering og udvikling af AI-baserede prototyper på tværs af forskellige områder i kommunen"><button type="button" class="">Ignore</button><button type="button" class="selected">Mention as learning interest</button></div><div class="custom-fact-editor"><label class="field"><span>Custom fact title</span><input type="text" value=""></label><label class="field wide"><span>Custom fact summary</span><textarea></textarea></label><label class="field wide"><span>Technologies</span><textarea></textarea></label><label class="field wide"><span>Allowed claims</span><textarea></textarea></label><button type="button">Add job-local fact</button></div></article><article class="evidence-card muted"><div class="gap-card-heading"><strong>til dagligt være en del af vores Ny-Teknologi-Gruppe (NTG)</strong><span class="state-badge pending">Learning-interest gap</span></div><span>Responsibility</span><p>Candidate does not have direct experience being part of the Ny-Teknologi-Gruppe (NTG).</p><div class="gap-decision-actions" role="group" aria-label="Gap decision for til dagligt være en del af vores Ny-Teknologi-Gruppe (NTG)"><button type="button" class="">Ignore</button><button type="button" class="selected">Mention as learning interest</button></div><div class="custom-fact-editor"><label class="field"><span>Custom fact title</span><input type="text" value=""></label><label class="field wide"><span>Custom fact summary</span><textarea></textarea></label><label class="field wide"><span>Technologies</span><textarea></textarea></label><label class="field wide"><span>Allowed claims</span><textarea></textarea></label><button type="button">Add job-local fact</button></div></article><article class="evidence-card muted"><div class="gap-card-heading"><strong>hjælpe og understøtte teamet med at drive og afprøve forskellige AI-løsninger</strong><span class="state-badge pending">Learning-interest gap</span></div><span>Responsibility</span><p>Candidate does not have direct experience helping and supporting team with driving and testing different AI solutions.</p><div class="gap-decision-actions" role="group" aria-label="Gap decision for hjælpe og understøtte teamet med at drive og afprøve forskellige AI-løsninger"><button type="button" class="">Ignore</button><button type="button" class="selected">Mention as learning interest</button></div><div class="custom-fact-editor"><label class="field"><span>Custom fact title</span><input type="text" value=""></label><label class="field wide"><span>Custom fact summary</span><textarea></textarea></label><label class="field wide"><span>Technologies</span><textarea></textarea></label><label class="field wide"><span>Allowed claims</span><textarea></textarea></label><button type="button">Add job-local fact</button></div></article><article class="evidence-card muted"><div class="gap-card-heading"><strong>omsætte forretningsbehov og idéer til prototyper indenfor en kort tidsramme gennem ibrugtagelse af nye kodningsværktøjer og metoder</strong><span class="state-badge pending">Learning-interest gap</span></div><span>Responsibility</span><p>Candidate does not have direct experience translating business needs and ideas to prototypes within a short timeframe.</p><div class="gap-decision-actions" role="group" aria-label="Gap decision for omsætte forretningsbehov og idéer til prototyper indenfor en kort tidsramme gennem ibrugtagelse af nye kodningsværktøjer og metoder"><button type="button" class="">Ignore</button><button type="button" class="selected">Mention as learning interest</button></div><div class="custom-fact-editor"><label class="field"><span>Custom fact title</span><input type="text" value=""></label><label class="field wide"><span>Custom fact summary</span><textarea></textarea></label><label class="field wide"><span>Technologies</span><textarea></textarea></label><label class="field wide"><span>Allowed claims</span><textarea></textarea></label><button type="button">Add job-local fact</button></div></article><article class="evidence-card muted"><div class="gap-card-heading"><strong>varetage den tekniske opbygning, test og formidling af prototyper</strong><span class="state-badge pending">Learning-interest gap</span></div><span>Responsibility</span><p>Candidate does not have direct experience taking care of the technical setup, test, and presentation of prototypes.</p><div class="gap-decision-actions" role="group" aria-label="Gap decision for varetage den tekniske opbygning, test og formidling af prototyper"><button type="button" class="">Ignore</button><button type="button" class="selected">Mention as learning interest</button></div><div class="custom-fact-editor"><label class="field"><span>Custom fact title</span><input type="text" value=""></label><label class="field wide"><span>Custom fact summary</span><textarea></textarea></label><label class="field wide"><span>Technologies</span><textarea></textarea></label><label class="field wide"><span>Allowed claims</span><textarea></textarea></label><button type="button">Add job-local fact</button></div></article><article class="evidence-card muted"><div class="gap-card-heading"><strong>deltage i den tekniske dialog om skalering og drift med vores eksterne leverandører og i samarbejde med resten af NTG</strong><span class="state-badge pending">Learning-interest gap</span></div><span>Responsibility</span><p>Candidate does not have direct experience participating in the technical dialogue on scaling and operation with external suppliers.</p><div class="gap-decision-actions" role="group" aria-label="Gap decision for deltage i den tekniske dialog om skalering og drift med vores eksterne leverandører og i samarbejde med resten af NTG"><button type="button" class="">Ignore</button><button type="button" class="selected">Mention as learning interest</button></div><div class="custom-fact-editor"><label class="field"><span>Custom fact title</span><input type="text" value=""></label><label class="field wide"><span>Custom fact summary</span><textarea></textarea></label><label class="field wide"><span>Technologies</span><textarea></textarea></label><label class="field wide"><span>Allowed claims</span><textarea></textarea></label><button type="button">Add job-local fact</button></div></article></section></div><div class="workflow-step"><div><h4>3. Evidence review decisions</h4><p>Save approved evidence as support for generated claims. Gap decisions are review guidance, not approved evidence.</p></div><button class="secondary-workflow-action" type="button">Save evidence review</button></div><div class="approved-list"><article class="approved-item"><div><span class="state-badge approved">Approved profile evidence</span><strong>forståelse for nye teknologier</strong><span>Fluent Languages</span></div><button type="button">Remove</button></article><article class="approved-item"><div><span class="state-badge approved">Approved profile evidence</span><strong>eksperimentering og udvikling af AI-baserede prototyper</strong><span>Event-driven Salesforce Integration Platform</span></div><button type="button">Remove</button></article><article class="approved-item"><div><span class="state-badge approved">Approved profile evidence</span><strong>udviklerfaring eller interesse for udvikling</strong><span>Computer Science</span></div><button type="button">Remove</button></article><article class="approved-item"><div><span class="state-badge approved">Approved profile evidence</span><strong>erfaring med at eksperimentere, bygge og teste AI-løsninger/agenter indenfor en eksisterende IT-governance</strong><span>Event-driven Salesforce Integration Platform</span></div><button type="button">Remove</button></article><article class="approved-item"><div><span class="state-badge approved">Approved profile evidence</span><strong>forståelse og er tryg ved API'er, dataflows og integrationer</strong><span>Version Control and DevOps</span></div><button type="button">Remove</button></article><article class="approved-item"><div><span class="state-badge approved">Approved profile evidence</span><strong>erfaring og interesse for automatiseringsværktøjer som Copilot Studio, n8n, Flo-wise, OpenClaw/NemoClaw eller andre lignende værktøjer</strong><span>Version Control and DevOps</span></div><button type="button">Remove</button></article></div><div class="gap-decision-list"><article class="gap-decision-item learning"><div><span class="state-badge pending">Learning-interest gap</span><strong>vibe-coding</strong><span>May be framed cautiously as interest, not proof.</span></div></article><article class="gap-decision-item learning"><div><span class="state-badge pending">Learning-interest gap</span><strong>LM-løsninger</strong><span>May be framed cautiously as interest, not proof.</span></div></article><article class="gap-decision-item learning"><div><span class="state-badge pending">Learning-interest gap</span><strong>RAG/videnssøgning</strong><span>May be framed cautiously as interest, not proof.</span></div></article><article class="gap-decision-item learning"><div><span class="state-badge pending">Learning-interest gap</span><strong>prompt-design</strong><span>May be framed cautiously as interest, not proof.</span></div></article><article class="gap-decision-item learning"><div><span class="state-badge pending">Learning-interest gap</span><strong>agent-opsætning</strong><span>May be framed cautiously as interest, not proof.</span></div></article><article class="gap-decision-item learning"><div><span class="state-badge pending">Learning-interest gap</span><strong>low-code/no-code værktøjer</strong><span>May be framed cautiously as interest, not proof.</span></div></article><article class="gap-decision-item learning"><div><span class="state-badge pending">Learning-interest gap</span><strong>styrke Ny-Teknologi-Gruppe gennem eksperimentering og udvikling af AI-baserede prototyper på tværs af forskellige områder i kommunen</strong><span>May be framed cautiously as interest, not proof.</span></div></article><article class="gap-decision-item learning"><div><span class="state-badge pending">Learning-interest gap</span><strong>til dagligt være en del af vores Ny-Teknologi-Gruppe (NTG)</strong><span>May be framed cautiously as interest, not proof.</span></div></article><article class="gap-decision-item learning"><div><span class="state-badge pending">Learning-interest gap</span><strong>hjælpe og understøtte teamet med at drive og afprøve forskellige AI-løsninger</strong><span>May be framed cautiously as interest, not proof.</span></div></article><article class="gap-decision-item learning"><div><span class="state-badge pending">Learning-interest gap</span><strong>omsætte forretningsbehov og idéer til prototyper indenfor en kort tidsramme gennem ibrugtagelse af nye kodningsværktøjer og metoder</strong><span>May be framed cautiously as interest, not proof.</span></div></article><article class="gap-decision-item learning"><div><span class="state-badge pending">Learning-interest gap</span><strong>varetage den tekniske opbygning, test og formidling af prototyper</strong><span>May be framed cautiously as interest, not proof.</span></div></article><article class="gap-decision-item learning"><div><span class="state-badge pending">Learning-interest gap</span><strong>deltage i den tekniske dialog om skalering og drift med vores eksterne leverandører og i samarbejde med resten af NTG</strong><span>May be framed cautiously as interest, not proof.</span></div></article></div><section class="custom-facts-panel"><div class="section-heading"><h4>Job-local custom facts</h4><p>Only approved job-local facts should support generated claims.</p></div><p class="empty-state compact">No job-local custom facts recorded.</p></section><div class="workflow-step"><div><h4>4. Generated draft</h4><p>Generate the current cover letter and short motivation, then audit claims against approved evidence.</p><span class="inline-readiness available ">OpenAiCompatible qwen2.5-coder-14b-instruct is ready for draft generation.</span></div><button class="secondary-workflow-action" type="button">Generate and audit draft</button></div><section class="draft-editor"><div class="section-heading"><h4>Current draft</h4><p>Generated 26 May</p></div><section class="claim-audit"><div class="section-heading"><h4>Draft quality</h4><p>Needs revision - 2 copied seven-word phrases detected, threshold 3</p></div><div class="audit-list"><article class="audit-item needsreview"><span>NeedsRevision</span><p>Draft contains Danish phrasing that is likely generic, translated, or awkward.</p></article><article class="audit-item needsreview"><span>NeedsRevision</span><p>Short motivation is too thin to work as a useful standalone pitch.</p></article></div></section><label class="field wide"><span>Cover letter</span><textarea>Kære Vejle Kommune,
+
+Mit navn er Bilal Kinali, og jeg er meget interesseret i stillingen som AI-builder hos jer. Jeg har en solid baggrund i computer science og erfaring med udvikling af AI-baserede prototyper, hvilket passer godt til de krav, der stilles.
+
+Jeg har bygget et event-driven integration platform mellem Salesforce og .NET services, hvilket demonstrerer min evne til at integrere AI-løsninger inden for eksisterende IT-governance. Udover dette har jeg en grad af studier i computer science, der giver mig en stærk grundlagning i systemudvikling, objektorienteret programmering, databaser, cloud og DevOps.
+
+Jeg er fluent i flere sprog og har erfaring med forskellige teknologier, hvilket indikerer min forståelse for nye teknologier. Jeg er også interesseret i at lære om de ikke-matched preferred skills som vibe-coding, LM-løsninger, RAG/videnssøgning og prompt-design.
+
+Jeg ser frem til muligheden for at bidrage til Ny-Teknologi-Gruppen ved at hjælpe og understøtte teamet med at drive og teste forskellige AI-løsninger. Jeg er entusiastisk over muligheden for at arbejde sammen med jer og bidrage til kommunens fremtidige teknologiske udvikling.
+
+Med venlig hilsen,
+Bilal Kinali</textarea></label><label class="field wide"><span>Short motivation</span><textarea>Fluent i flere sprog, erfaring med AI-prototyper og interesseret i nye teknologier.</textarea></label><div class="form-actions"><button class="secondary-workflow-action" type="button" disabled="" title="Edit the draft before saving changes.">Save draft edits</button><button type="button" disabled="" title="Claim audit is current.">Refresh claim audit</button></div><section class="export-panel"><div class="section-heading"><h4>Export cover letter</h4><p>Copy or download the current saved cover letter exactly as edited.</p></div><p class="workflow-note info">Copy uses the visible edited text. TXT and DOCX downloads use the current saved draft edits and never regenerate or re-run claim audit.</p><div class="form-actions"><button type="button">Copy</button><button type="button">Download TXT</button><button type="button">Download DOCX</button></div></section><section class="claim-audit"><div class="section-heading"><h4>Claim audit</h4><p>Updated 26 May - 4 supported, 0 unsupported, 2 needs review</p></div><div class="audit-list"><article class="audit-item supported"><span>Supported</span><p>Jeg har erfaring med udvikling af AI-baserede prototyper, hvilket passer godt til de krav, der stilles.</p><small>Evidence: match-required-skill-experimenting-and-development-of-ai-based-prototypes-2880763202aa41c181cb9960e285ea25</small></article><article class="audit-item supported"><span>Supported</span><p>Jeg har bygget et event-driven integration platform mellem Salesforce og .NET services, hvilket demonstrerer min evne til at integrere AI-løsninger inden for eksisterende IT-governance.</p><small>Evidence: match-required-skill-experiencing-building-and-testing-ai-solutions-agents-2880763202aa41c181cb9960e285ea25</small></article><article class="audit-item supported"><span>Supported</span><p>Udover dette har jeg en grad af studier i computer science, der giver mig en stærk grundlagning i systemudvikling, objektorienteret programmering, databaser, cloud og DevOps.</p><small>Evidence: match-required-skill-development-experience-or-interest-964bbce2428140ed95b3a829328c7562</small></article><article class="audit-item supported"><span>Supported</span><p>Jeg er fluent i flere sprog og har erfaring med forskellige teknologier, hvilket indikerer min forståelse for nye teknologier.</p><small>Evidence: match-required-skill-understanding-of-new-technologies-183374fd0f654f5295558980129fc636</small></article><article class="audit-item needsreview"><span>NeedsReview</span><p>Jeg er interesseret i at lærer om de ikke-matched preferred skills som vibe-coding, LM-løsninger, RAG/videnssøgning og prompt-design.</p></article><article class="audit-item needsreview"><span>NeedsReview</span><p>Jeg ser frem til muligheden for at bidrage til Ny-Teknologi-Gruppen ved at hjælpe og understøtte teamet med at drive og teste forskellige AI-løsninger.</p></article></div></section></section></section></form></div></section></main></div>
+    <script type="module" src="/src/main.tsx"></script>
+  
+
+</body></html>

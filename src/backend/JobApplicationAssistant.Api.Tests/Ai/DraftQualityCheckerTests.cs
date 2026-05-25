@@ -45,4 +45,32 @@ public sealed class DraftQualityCheckerTests
         Assert.True(result.CopiedSevenWordPhraseCount > result.CopiedPhraseThreshold);
         Assert.Contains(result.Issues, issue => issue.Code == "CopiedJobPostingPhrases");
     }
+
+    [Fact]
+    public void Check_marks_danish_draft_needing_revision_when_it_contains_mixed_language_phrasing()
+    {
+        var coverLetter =
+            "K\u00e6re Vejle Kommune,\n\n" +
+            "Jeg har bygget et event-driven integration platform mellem Salesforce og .NET services.\n" +
+            "Jeg har en grad af studier i computer science, der giver mig en st\u00e6rk grundlagning.\n" +
+            "Jeg er fluent i flere sprog og interesseret i at l\u00e6rer om ikke-matched preferred skills.";
+
+        var result = DraftQualityChecker.Check(
+            coverLetter,
+            "Jeg kan bidrage med integrationserfaring og teknisk nysgerrighed i rollen.",
+            "Vi s\u00f8ger en kandidat, der kan skrive naturligt dansk.",
+            "Danish",
+            []);
+
+        Assert.Equal("NeedsRevision", result.Status);
+        Assert.Contains(result.Issues, issue => issue.Code == "UnnaturalDanishPhrasing");
+    }
+
+    [Fact]
+    public void NeedsRevision_returns_true_only_for_needs_revision_quality_status()
+    {
+        Assert.True(DraftQualityChecker.NeedsRevision("""{"status":"NeedsRevision","issues":[]}"""));
+        Assert.False(DraftQualityChecker.NeedsRevision("""{"status":"Passed","issues":[]}"""));
+        Assert.False(DraftQualityChecker.NeedsRevision("{}"));
+    }
 }

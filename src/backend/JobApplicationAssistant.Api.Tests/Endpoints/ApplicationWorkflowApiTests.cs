@@ -3059,6 +3059,25 @@ public sealed class ApplicationWorkflowApiTests
     }
 
     [Fact]
+    public async Task ExportCoverLetterTxt_rejects_draft_quality_needs_revision()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need Danish communication.");
+        await AddGeneratedDraftAsync(
+            factory,
+            application.Id,
+            draftQualityCheck: """{"status":"NeedsRevision","issues":[]}""");
+
+        var response = await client.GetAsync($"/api/applications/{application.Id}/exports/cover-letter.txt");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains(nameof(GeneratedDraftResponse.DraftQualityCheck), error.Details!.Keys);
+    }
+
+    [Fact]
     public async Task ExportCoverLetterTxt_allows_stale_or_missing_claim_audit()
     {
         await using var factory = new TestApplicationFactory();
@@ -3171,6 +3190,25 @@ public sealed class ApplicationWorkflowApiTests
         var emptyDraftError = await emptyDraftResponse.Content.ReadFromJsonAsync<ApiError>();
         Assert.NotNull(emptyDraftError);
         Assert.Contains(nameof(GeneratedDraftResponse.CoverLetterText), emptyDraftError.Details!.Keys);
+    }
+
+    [Fact]
+    public async Task ExportCoverLetterDocx_rejects_draft_quality_needs_revision()
+    {
+        await using var factory = new TestApplicationFactory();
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need Danish communication.");
+        await AddGeneratedDraftAsync(
+            factory,
+            application.Id,
+            draftQualityCheck: """{"status":"NeedsRevision","issues":[]}""");
+
+        var response = await client.GetAsync($"/api/applications/{application.Id}/exports/cover-letter.docx");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<ApiError>();
+        Assert.NotNull(error);
+        Assert.Contains(nameof(GeneratedDraftResponse.DraftQualityCheck), error.Details!.Keys);
     }
 
     [Fact]
@@ -3877,7 +3915,8 @@ public sealed class ApplicationWorkflowApiTests
         string claimAudit = """{"status":"current"}""",
         DateTimeOffset? auditUpdatedAt = default,
         bool isClaimAuditStale = false,
-        string coverLetterText = "Existing cover letter.")
+        string coverLetterText = "Existing cover letter.",
+        string draftQualityCheck = "{}")
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
@@ -3890,6 +3929,7 @@ public sealed class ApplicationWorkflowApiTests
             CoverLetterText = coverLetterText,
             ShortMotivationText = "Existing motivation.",
             ClaimAudit = claimAudit,
+            DraftQualityCheck = draftQualityCheck,
             GeneratedAt = now,
             AuditUpdatedAt = auditUpdatedAt,
             IsClaimAuditStale = isClaimAuditStale,
@@ -3910,7 +3950,8 @@ public sealed class ApplicationWorkflowApiTests
             draft.AuditUpdatedAt,
             draft.CreatedAt,
             draft.UpdatedAt,
-            draft.IsClaimAuditStale);
+            draft.IsClaimAuditStale,
+            draft.DraftQualityCheck);
     }
 
     private static string? GetFileName(ContentDispositionHeaderValue contentDisposition) =>

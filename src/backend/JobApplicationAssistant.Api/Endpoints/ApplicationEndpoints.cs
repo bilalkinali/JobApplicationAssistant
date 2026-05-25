@@ -219,6 +219,14 @@ public static class ApplicationEndpoints
                 }));
             }
 
+            if (DraftQualityChecker.NeedsRevision(application.GeneratedDraft.DraftQualityCheck))
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(GeneratedDraftResponse.DraftQualityCheck)] = ["Resolve draft quality issues before exporting. Regenerate the draft, or edit and save it so the quality check passes."]
+                }));
+            }
+
             var fileName = BuildCoverLetterFileName(application);
             return Results.File(
                 Encoding.UTF8.GetBytes(coverLetterText),
@@ -250,6 +258,14 @@ public static class ApplicationEndpoints
                 return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
                 {
                     [nameof(GeneratedDraftResponse.CoverLetterText)] = ["Cover letter text is required before export."]
+                }));
+            }
+
+            if (DraftQualityChecker.NeedsRevision(application.GeneratedDraft.DraftQualityCheck))
+            {
+                return Results.BadRequest(ApiError.Validation(new Dictionary<string, string[]>
+                {
+                    [nameof(GeneratedDraftResponse.DraftQualityCheck)] = ["Resolve draft quality issues before exporting. Regenerate the draft, or edit and save it so the quality check passes."]
                 }));
             }
 

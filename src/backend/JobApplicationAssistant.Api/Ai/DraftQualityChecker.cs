@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace JobApplicationAssistant.Api.Ai;
@@ -28,7 +29,13 @@ public static partial class DraftQualityChecker
         "jeg har en stor motivation for at lære",
         "jeg ser frem til muligheden for",
         "jeg vil meget gerne bringe mine kompetencer i spil",
-        "i rollen som den rette kandidat"
+        "i rollen som den rette kandidat",
+        "event-driven integration platform",
+        "en grad af studier i computer science",
+        "st\u00e6rk grundlagning",
+        "jeg er fluent",
+        "interesseret i at l\u00e6rer",
+        "ikke-matched preferred skills"
     ];
 
     public static string RepairCommonMojibake(string value)
@@ -96,6 +103,27 @@ public static partial class DraftQualityChecker
             issues,
             copiedPhraseCount,
             CopiedSevenWordPhraseThreshold);
+    }
+
+    public static bool NeedsRevision(string? draftQualityCheck)
+    {
+        if (string.IsNullOrWhiteSpace(draftQualityCheck))
+        {
+            return false;
+        }
+
+        try
+        {
+            var result = JsonSerializer.Deserialize<DraftQualityCheckResult>(
+                draftQualityCheck,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+            return string.Equals(result?.Status, "NeedsRevision", StringComparison.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private static void AddDanishLanguageIssues(List<DraftQualityIssue> issues, string coverLetterText, string shortMotivationText)
