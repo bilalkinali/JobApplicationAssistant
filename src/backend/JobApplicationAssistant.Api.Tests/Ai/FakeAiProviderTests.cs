@@ -232,8 +232,18 @@ public sealed class FakeAiProviderTests
         Assert.Contains("Built ASP.NET Core APIs backed by PostgreSQL.", first.CoverLetterText);
         Assert.Contains("Kubernetes", first.CoverLetterText);
         Assert.Contains("area to learn", first.CoverLetterText);
+        Assert.False(string.IsNullOrWhiteSpace(first.ShortMotivationText));
+        Assert.NotEqual(first.CoverLetterText, first.ShortMotivationText);
+        Assert.DoesNotContain(NormalizeDraftText(first.ShortMotivationText), NormalizeDraftText(first.CoverLetterText));
+        Assert.DoesNotContain("Approved evidence:", first.ShortMotivationText);
+        Assert.DoesNotContain("Honest gap handling:", first.ShortMotivationText);
+        Assert.DoesNotContain("Dear Northwind hiring team", first.ShortMotivationText);
         Assert.Contains("Approved API work", first.ShortMotivationText);
+        Assert.Contains("Concise pitch", first.ShortMotivationText);
     }
+
+    private static string NormalizeDraftText(string value) =>
+        string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
     [Fact]
     public async Task GenerateDraftAsync_respects_saved_gap_decisions_deterministically()

@@ -195,6 +195,9 @@ public sealed partial class FakeAiProvider : IAiProvider
         var motivationGapText = gapLines.Count == 0
             ? "I will keep unsupported gaps out of concrete claims."
             : "I will describe selected unmatched requirements honestly as learning areas.";
+        var evidencePitch = input.ApprovedEvidence.Count == 0
+            ? "reviewed evidence"
+            : string.Join(", ", input.ApprovedEvidence.Select(evidence => evidence.ProfileFactTitle));
 
         var coverLetter = $"""
             Language: {language}
@@ -217,7 +220,7 @@ public sealed partial class FakeAiProvider : IAiProvider
 
         var shortMotivation = $"""
             Language: {language}
-            I am interested in the {input.RoleTitle} role at {input.CompanyName} because my reviewed evidence includes {string.Join(", ", input.ApprovedEvidence.Select(evidence => evidence.ProfileFactTitle))}. {motivationGapText}
+            Concise pitch for {input.CompanyName}: I bring {evidencePitch} to the {input.RoleTitle} role, with unsupported gaps handled transparently. {motivationGapText}
             """;
 
         return Task.FromResult(new DraftGenerationResult(coverLetter, shortMotivation));

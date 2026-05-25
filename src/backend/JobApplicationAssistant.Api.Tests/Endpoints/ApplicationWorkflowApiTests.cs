@@ -2528,6 +2528,10 @@ public sealed class ApplicationWorkflowApiTests
         Assert.Contains("Strong evidence may support direct experience claims", draftRequestJson);
         Assert.Contains("Partial evidence may guide cautious wording", draftRequestJson);
         Assert.Contains("Weak evidence must not support direct experience claims", draftRequestJson);
+        Assert.Contains("shortMotivationText as a distinct concise value proposition", draftRequestJson);
+        Assert.Contains("Avoid copying large phrases", draftRequestJson);
+        Assert.Contains("Avoid generic interest statements", draftRequestJson);
+        Assert.Contains("Avoid repeating one profile fact", draftRequestJson);
         var auditRequestJson = await handler.Requests[2].Content!.ReadAsStringAsync();
         Assert.Contains("Ollama cover letter from approved API evidence.", auditRequestJson);
         Assert.Contains("match-dotnet-test", auditRequestJson);

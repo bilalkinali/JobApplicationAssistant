@@ -1,6 +1,6 @@
 # Short Motivation And Copying Safeguards
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## Parent
@@ -15,15 +15,14 @@ The slice should make the output more useful for form fields while preserving th
 
 ## Acceptance criteria
 
-- [ ] Draft generation explicitly asks for the short motivation as a distinct concise pitch, not a summary of the cover letter.
-- [ ] Generated short motivation is non-empty when draft generation succeeds.
-- [ ] Tests cover short motivation being meaningfully distinct from cover letter text.
-- [ ] Draft generation prompt tells the provider to avoid copying large phrases from the job posting.
-- [ ] Draft generation prompt tells the provider to avoid generic interest statements unless grounded in concrete reasons.
-- [ ] Draft generation prompt tells the provider to avoid repeating one profile fact across unrelated claims unless it is the central story.
-- [ ] Fake provider output is updated only where needed to keep deterministic coverage of the new expectations.
+- [x] Draft generation explicitly asks for the short motivation as a distinct concise pitch, not a summary of the cover letter.
+- [x] Generated short motivation is non-empty when draft generation succeeds.
+- [x] Tests cover short motivation being meaningfully distinct from cover letter text.
+- [x] Draft generation prompt tells the provider to avoid copying large phrases from the job posting.
+- [x] Draft generation prompt tells the provider to avoid generic interest statements unless grounded in concrete reasons.
+- [x] Draft generation prompt tells the provider to avoid repeating one profile fact across unrelated claims unless it is the central story.
+- [x] Fake provider output is updated only where needed to keep deterministic coverage of the new expectations.
 
 ## Blocked by
 
 None - can start immediately
-
