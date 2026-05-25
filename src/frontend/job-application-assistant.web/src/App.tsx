@@ -351,6 +351,7 @@ function App() {
   const [pendingImportReviewFocusId, setPendingImportReviewFocusId] = useState<string | null>(null);
   const [profileFactForm, setProfileFactForm] = useState<ProfileFactForm>(emptyProfileFact);
   const [selectedProfileFactId, setSelectedProfileFactId] = useState<string | null>(null);
+  const [selectedProfileFactIds, setSelectedProfileFactIds] = useState<string[]>([]);
   const [applications, setApplications] = useState<ApplicationSession[]>([]);
   const [applicationForm, setApplicationForm] = useState<ApplicationForm>(emptyApplication);
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
@@ -394,6 +395,7 @@ function App() {
     () => profileFacts.filter((fact) => fact.status === "Approved"),
     [profileFacts]
   );
+  const allProfileFactsSelected = profileFacts.length > 0 && selectedProfileFactIds.length === profileFacts.length;
   const selectedImportedDraftFact = useMemo(
     () =>
       profileFacts.find(
@@ -690,7 +692,9 @@ function App() {
   async function loadProfileFacts() {
     try {
       const response = await apiGet<ProfileFact[]>("/api/profile/facts");
-      setProfileFacts(response.map(toProfileFact));
+      const facts = response.map(toProfileFact);
+      setProfileFacts(facts);
+      setSelectedProfileFactIds((ids) => ids.filter((id) => facts.some((fact) => fact.id === id)));
     } catch (apiError) {
       setError(formatError(apiError));
     }
@@ -794,8 +798,36 @@ function App() {
     try {
       await apiDelete(`/api/profile/facts/${selectedProfileFactId}`);
       startNewProfileFact();
+      setSelectedProfileFactIds((ids) => ids.filter((id) => id !== selectedProfileFactId));
       await loadProfileFacts();
       setNotice("Profile fact deleted.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    }
+  }
+
+  async function deleteSelectedProfileFacts() {
+    if (selectedProfileFactIds.length === 0) {
+      return;
+    }
+
+    const factCount = selectedProfileFactIds.length;
+    const factLabel = factCount === 1 ? "profile fact" : "profile facts";
+    if (!window.confirm(`Delete ${factCount} selected ${factLabel}? This permanently removes them from your evidence library.`)) {
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+
+    try {
+      await Promise.all(selectedProfileFactIds.map((id) => apiDelete(`/api/profile/facts/${id}`)));
+      if (selectedProfileFactId && selectedProfileFactIds.includes(selectedProfileFactId)) {
+        startNewProfileFact();
+      }
+      setSelectedProfileFactIds([]);
+      await loadProfileFacts();
+      setNotice(`${factCount} ${factLabel} deleted.`);
     } catch (apiError) {
       setError(formatError(apiError));
     }
@@ -997,6 +1029,16 @@ function App() {
     setSelectedImportedDraftFactIds((ids) =>
       ids.includes(factId) ? ids.filter((id) => id !== factId) : [...ids, factId]
     );
+  }
+
+  function toggleProfileFactSelection(factId: string) {
+    setSelectedProfileFactIds((ids) =>
+      ids.includes(factId) ? ids.filter((id) => id !== factId) : [...ids, factId]
+    );
+  }
+
+  function toggleAllProfileFacts() {
+    setSelectedProfileFactIds(allProfileFactsSelected ? [] : profileFacts.map((fact) => fact.id));
   }
 
   function selectedIdsForQueue(queue: ImportedDraftFactReviewQueue) {
@@ -1793,18 +1835,47 @@ function App() {
                 </div>
               )}
               {profileFacts.length === 0 && <p className="empty-state">No profile facts yet.</p>}
+              {profileFacts.length > 0 && (
+                <div className="fact-bulk-actions">
+                  <label className="checkbox-field">
+                    <input
+                      type="checkbox"
+                      checked={allProfileFactsSelected}
+                      onChange={toggleAllProfileFacts}
+                    />
+                    <span>Select all</span>
+                  </label>
+                  <button
+                    className="danger-action"
+                    type="button"
+                    disabled={selectedProfileFactIds.length === 0}
+                    onClick={() => void deleteSelectedProfileFacts()}
+                  >
+                    Delete selected
+                  </button>
+                  {selectedProfileFactIds.length > 0 && <small>{selectedProfileFactIds.length} selected</small>}
+                </div>
+              )}
               <div className="fact-list">
                 {profileFacts.map((fact) => (
-                  <button
+                  <article
                     className={`fact-card ${fact.status.toLowerCase()}${fact.id === selectedProfileFactId ? " active" : ""}`}
                     key={fact.id}
-                    type="button"
-                    onClick={() => openProfileFact(fact)}
                   >
-                    <strong>{fact.title}</strong>
-                    <span>{fact.type}</span>
-                    <StatusBadge tone={statusTone(fact.status)}>{profileFactStatusLabel(fact.status)}</StatusBadge>
-                  </button>
+                    <label className="fact-select">
+                      <input
+                        type="checkbox"
+                        checked={selectedProfileFactIds.includes(fact.id)}
+                        onChange={() => toggleProfileFactSelection(fact.id)}
+                      />
+                      <span>Select fact</span>
+                    </label>
+                    <button type="button" className="fact-open-button" onClick={() => openProfileFact(fact)}>
+                      <strong>{fact.title}</strong>
+                      <span>{fact.type}</span>
+                      <StatusBadge tone={statusTone(fact.status)}>{profileFactStatusLabel(fact.status)}</StatusBadge>
+                    </button>
+                  </article>
                 ))}
               </div>
 

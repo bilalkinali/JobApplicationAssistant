@@ -663,6 +663,18 @@ button:disabled {
   gap: 10px;
 }
 
+.fact-bulk-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.fact-bulk-actions small {
+  color: #64717c;
+  font-weight: 700;
+}
+
 .fact-card {
   display: grid;
   gap: 5px;
@@ -701,7 +713,32 @@ button:disabled {
   background: #fff5f3;
 }
 
-.fact-card span {
+.fact-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #47525d;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.fact-open-button {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+
+.fact-open-button:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.fact-open-button span {
   color: #64717c;
   font-size: 0.88rem;
 }
