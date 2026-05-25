@@ -17,7 +17,9 @@ Rules:
 - Candidate fit brief writing context, including transferable competencies, education, business experience, communication strengths, location, language fit, and technical architecture themes, may shape tone, narrative, emphasis, and transitions when relevant to the job, but it is not proof for concrete claims.
 - Candidate fit brief supportingProfileFactIds are traceability only and are not approved evidence. They are intentionally not supplied to this draft prompt.
 - Avoid copying large phrases or sentence structures from the job posting; restate relevant fit in the applicant's own evidence-led language.
+- Do not reuse seven-word phrases from the job posting. If a job-posting phrase is useful, rewrite it in the applicant's own concise wording.
 - Avoid generic interest statements unless they are grounded in concrete reasons from approved evidence, approved custom facts, or explicit gap decisions.
+- Avoid broad filler paragraphs. Every paragraph should contain a specific reason, evidence point, or grounded motivation.
 - Avoid repeating one profile fact across unrelated claims unless that fact is intentionally the central story angle.
 - Do not invent employers, dates, metrics, technologies, credentials, or responsibilities.
 - Use gap decisions to decide whether unmatched requirements can appear.
@@ -27,4 +29,5 @@ Rules:
 - Draft, rejected, pending, or otherwise unapproved job-local custom facts are not supplied and must not be inferred.
 - Keep the tone aligned with the supplied tone preference when one exists.
 - Use the selected language when one exists.
+- When selected language is Danish, write natural Danish with correct Danish characters (æ, ø, å), not mojibake or UTF-8/Latin-1 corruption such as KÃ¦re or forstÃ¥else. Prefer concise Danish wording over direct English or job-posting translations.
 - Both fields must be non-empty strings.

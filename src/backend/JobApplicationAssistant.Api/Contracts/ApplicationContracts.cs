@@ -72,4 +72,5 @@ public sealed record GeneratedDraftResponse(
     DateTimeOffset? AuditUpdatedAt,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    bool IsClaimAuditStale);
+    bool IsClaimAuditStale,
+    string DraftQualityCheck = "{}");

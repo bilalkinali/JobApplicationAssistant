@@ -983,9 +983,17 @@ public static class ApplicationEndpoints
                 db.GeneratedDrafts.Add(draft);
             }
 
-            draft.CoverLetterText = result.CoverLetterText;
-            draft.ShortMotivationText = result.ShortMotivationText;
+            draft.CoverLetterText = DraftQualityChecker.RepairCommonMojibake(result.CoverLetterText);
+            draft.ShortMotivationText = DraftQualityChecker.RepairCommonMojibake(result.ShortMotivationText);
             draft.ClaimAudit = "{}";
+            draft.DraftQualityCheck = JsonSerializer.Serialize(
+                DraftQualityChecker.Check(
+                    draft.CoverLetterText,
+                    draft.ShortMotivationText,
+                    application.JobPostingText,
+                    application.SelectedLanguage,
+                    approvedEvidence),
+                JsonOptions);
             draft.GeneratedAt = now;
             draft.LastEditedAt = null;
             draft.AuditUpdatedAt = null;
@@ -1029,7 +1037,7 @@ public static class ApplicationEndpoints
                         approvedEvidence,
                         approvedCustomFacts,
                         gapDecisions,
-                        ToClaimAuditFitBriefSupportMappings(currentCandidateFitBrief)),
+                        ToClaimAuditFitBriefSupportMappings(currentCandidateFitBrief, includeProfileFactIds: false)),
                     ct);
 
                 draft.ClaimAudit = JsonSerializer.Serialize(auditResult, JsonOptions);
@@ -1075,8 +1083,17 @@ public static class ApplicationEndpoints
 
             var now = DateTimeOffset.UtcNow;
             var draft = application.GeneratedDraft;
-            draft.CoverLetterText = request.CoverLetterText;
-            draft.ShortMotivationText = request.ShortMotivationText;
+            var approvedEvidence = ReadApprovedEvidenceForApplication(application);
+            draft.CoverLetterText = DraftQualityChecker.RepairCommonMojibake(request.CoverLetterText);
+            draft.ShortMotivationText = DraftQualityChecker.RepairCommonMojibake(request.ShortMotivationText);
+            draft.DraftQualityCheck = JsonSerializer.Serialize(
+                DraftQualityChecker.Check(
+                    draft.CoverLetterText,
+                    draft.ShortMotivationText,
+                    application.JobPostingText,
+                    application.SelectedLanguage,
+                    approvedEvidence),
+                JsonOptions);
             draft.LastEditedAt = now;
             draft.IsClaimAuditStale = draft.AuditUpdatedAt is not null || draft.ClaimAudit != "{}";
             draft.UpdatedAt = now;
@@ -1111,10 +1128,18 @@ public static class ApplicationEndpoints
             var gapDecisions = ReadGapDecisions(application.GapDecisions, new Dictionary<string, string[]>())
                 .Select(decision => new DraftGapDecision(decision.UnmatchedRequirementId, decision.Decision, decision.CustomFactId))
                 .ToList();
+            draft.DraftQualityCheck = JsonSerializer.Serialize(
+                DraftQualityChecker.Check(
+                    draft.CoverLetterText,
+                    draft.ShortMotivationText,
+                    application.JobPostingText,
+                    application.SelectedLanguage,
+                    approvedEvidence),
+                JsonOptions);
             var candidateFitBrief = ReadCandidateFitBrief(application.CandidateFitBrief);
             var candidateFitBriefSupportMappings = candidateFitBrief is null
                 ? Array.Empty<ClaimAuditFitBriefSupportMapping>()
-                : ToClaimAuditFitBriefSupportMappings(candidateFitBrief);
+                : ToClaimAuditFitBriefSupportMappings(candidateFitBrief, includeProfileFactIds: true);
             var run = new AiRun
             {
                 Id = Guid.NewGuid(),
@@ -1278,7 +1303,8 @@ public static class ApplicationEndpoints
             draft.AuditUpdatedAt,
             draft.CreatedAt,
             draft.UpdatedAt,
-            draft.IsClaimAuditStale);
+            draft.IsClaimAuditStale,
+            draft.DraftQualityCheck);
 
     private static Dictionary<string, string[]> Validate(ApplicationRequest request)
     {
@@ -1783,21 +1809,21 @@ public static class ApplicationEndpoints
     private static DraftCandidateFitBriefItem ToDraftCandidateFitBriefItem(CandidateFitBriefItem item) =>
         new(item.Title, item.Summary);
 
-    private static IReadOnlyList<ClaimAuditFitBriefSupportMapping> ToClaimAuditFitBriefSupportMappings(CandidateFitBriefResult brief)
+    private static IReadOnlyList<ClaimAuditFitBriefSupportMapping> ToClaimAuditFitBriefSupportMappings(CandidateFitBriefResult brief, bool includeProfileFactIds)
     {
         var mappings = new List<ClaimAuditFitBriefSupportMapping>();
         mappings.AddRange(brief.SkillGroups.SelectMany(group =>
-            group.Items.Select(item => ToClaimAuditFitBriefSupportMapping($"SkillGroup:{group.Name}", item))));
-        mappings.AddRange(brief.Competencies.Select(item => ToClaimAuditFitBriefSupportMapping("Competency", item)));
-        mappings.AddRange(brief.RelevantProjects.Select(item => ToClaimAuditFitBriefSupportMapping("RelevantProject", item)));
-        mappings.AddRange(brief.TransferableStrengths.Select(item => ToClaimAuditFitBriefSupportMapping("TransferableStrength", item)));
-        mappings.AddRange(brief.RiskNotes.Select(item => ToClaimAuditFitBriefSupportMapping("RiskNote", item)));
+            group.Items.Select(item => ToClaimAuditFitBriefSupportMapping($"SkillGroup:{group.Name}", item, includeProfileFactIds))));
+        mappings.AddRange(brief.Competencies.Select(item => ToClaimAuditFitBriefSupportMapping("Competency", item, includeProfileFactIds)));
+        mappings.AddRange(brief.RelevantProjects.Select(item => ToClaimAuditFitBriefSupportMapping("RelevantProject", item, includeProfileFactIds)));
+        mappings.AddRange(brief.TransferableStrengths.Select(item => ToClaimAuditFitBriefSupportMapping("TransferableStrength", item, includeProfileFactIds)));
+        mappings.AddRange(brief.RiskNotes.Select(item => ToClaimAuditFitBriefSupportMapping("RiskNote", item, includeProfileFactIds)));
 
         return mappings;
     }
 
-    private static ClaimAuditFitBriefSupportMapping ToClaimAuditFitBriefSupportMapping(string section, CandidateFitBriefItem item) =>
-        new(section, item.Title, item.Summary, item.SupportingProfileFactIds);
+    private static ClaimAuditFitBriefSupportMapping ToClaimAuditFitBriefSupportMapping(string section, CandidateFitBriefItem item, bool includeProfileFactIds) =>
+        new(section, item.Title, item.Summary, includeProfileFactIds ? item.SupportingProfileFactIds : []);
 
     private static CandidateFitBriefResult SelectCurrentlyApprovedCandidateFitBriefContext(
         CandidateFitBriefResult brief,

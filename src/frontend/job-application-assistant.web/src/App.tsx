@@ -210,6 +210,7 @@ type GeneratedDraft = {
   coverLetterText: string;
   shortMotivationText: string;
   claimAudit: string;
+  draftQualityCheck: string;
   generatedAt: string;
   lastEditedAt: string | null;
   auditUpdatedAt: string | null;
@@ -298,6 +299,19 @@ type ClaimAuditClaim = {
   text: string;
   status: "Supported" | "Unsupported" | "NeedsReview" | string;
   evidenceIds: string[];
+};
+
+type DraftQualityCheck = {
+  status: "Passed" | "NeedsRevision" | string;
+  issues: DraftQualityIssue[];
+  copiedSevenWordPhraseCount: number;
+  copiedPhraseThreshold: number;
+};
+
+type DraftQualityIssue = {
+  code: string;
+  severity: "NeedsRevision" | string;
+  message: string;
 };
 
 type AiProviderStatus = {
@@ -457,6 +471,10 @@ function App() {
   const claimAudit = useMemo(
     () => parseClaimAudit(selectedApplication?.generatedDraft?.claimAudit),
     [selectedApplication?.generatedDraft?.claimAudit]
+  );
+  const draftQualityCheck = useMemo(
+    () => parseDraftQualityCheck(selectedApplication?.generatedDraft?.draftQualityCheck),
+    [selectedApplication?.generatedDraft?.draftQualityCheck]
   );
   const hasSavedJobPosting = Boolean(selectedApplication?.jobPostingText.trim());
   const hasSavedApprovedEvidence = savedApprovedEvidence.length + savedApprovedCustomFactEvidenceCount > 0;
@@ -2296,6 +2314,25 @@ function App() {
                     {aiStatus && isFakeProvider(aiStatus) && (
                       <p className="workflow-note warning">Fake AI mode: this draft uses deterministic demo/test output.</p>
                     )}
+                    {draftQualityCheck.status === "NeedsRevision" && (
+                      <section className="claim-audit">
+                        <div className="section-heading">
+                          <h4>Draft quality</h4>
+                          <p>
+                            Needs revision - {draftQualityCheck.copiedSevenWordPhraseCount} copied seven-word phrases detected
+                            {draftQualityCheck.copiedPhraseThreshold > 0 ? `, threshold ${draftQualityCheck.copiedPhraseThreshold}` : ""}
+                          </p>
+                        </div>
+                        <div className="audit-list">
+                          {draftQualityCheck.issues.map((issue) => (
+                            <article className="audit-item needsreview" key={issue.code}>
+                              <span>{issue.severity}</span>
+                              <p>{issue.message}</p>
+                            </article>
+                          ))}
+                        </div>
+                      </section>
+                    )}
                     {effectiveAuditExportNotice && <p className={`workflow-note ${effectiveAuditExportNotice.tone}`}>{effectiveAuditExportNotice.message}</p>}
                     <Textarea
                       label="Cover letter"
@@ -3381,6 +3418,16 @@ function parseClaimAudit(value: string | undefined): ClaimAudit {
   return {
     claims: [],
     ...(parseJsonObject<Partial<ClaimAudit>>(value) ?? {})
+  };
+}
+
+function parseDraftQualityCheck(value: string | undefined): DraftQualityCheck {
+  return {
+    status: "Passed",
+    issues: [],
+    copiedSevenWordPhraseCount: 0,
+    copiedPhraseThreshold: 0,
+    ...(parseJsonObject<Partial<DraftQualityCheck>>(value) ?? {})
   };
 }
 

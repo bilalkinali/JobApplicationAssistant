@@ -645,7 +645,7 @@ public sealed class OllamaAiProvider : IAiProvider
             fact.AllowedClaims
         });
 
-        return $"""
+        var prompt = $"""
         {DraftGenerationPrompt}
 
         Application context:
@@ -671,11 +671,12 @@ public sealed class OllamaAiProvider : IAiProvider
         {JsonSerializer.Serialize(approvedCustomFacts, JsonOptions)}
 
         Application strategy:
-        {JsonSerializer.Serialize(input.ApplicationStrategy, JsonOptions)}
+        {JsonSerializer.Serialize(DraftPromptSanitizer.SanitizeApplicationStrategy(input.ApplicationStrategy), JsonOptions)}
 
         Candidate fit brief writing context:
         {JsonSerializer.Serialize(input.CandidateFitBriefContext, JsonOptions)}
         """;
+        return DraftPromptSanitizer.RemoveProfileFactIdProperties(prompt);
     }
 
     private static string BuildClaimAuditPrompt(ClaimAuditInput input)
