@@ -14,6 +14,8 @@ public sealed class GeneratedDraft
 
     public string ClaimAudit { get; set; } = "{}";
 
+    public string DraftQualityCheck { get; set; } = "{}";
+
     public DateTimeOffset GeneratedAt { get; set; }
 
     public DateTimeOffset? LastEditedAt { get; set; }

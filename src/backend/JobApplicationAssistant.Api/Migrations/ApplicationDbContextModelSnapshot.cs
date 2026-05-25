@@ -45,6 +45,7 @@ namespace JobApplicationAssistant.Api.Migrations
                 b.Property<string>("ClaimAudit").IsRequired().HasColumnType("jsonb");
                 b.Property<string>("CoverLetterText").IsRequired().HasColumnType("text");
                 b.Property<DateTimeOffset>("CreatedAt").HasColumnType("timestamp with time zone");
+                b.Property<string>("DraftQualityCheck").IsRequired().HasColumnType("jsonb");
                 b.Property<DateTimeOffset>("GeneratedAt").HasColumnType("timestamp with time zone");
                 b.Property<bool>("IsClaimAuditStale")
                     .ValueGeneratedOnAdd()
