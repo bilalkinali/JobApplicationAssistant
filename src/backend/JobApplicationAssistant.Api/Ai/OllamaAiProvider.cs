@@ -686,6 +686,7 @@ public sealed class OllamaAiProvider : IAiProvider
             evidence.SignalId,
             evidence.Signal,
             evidence.Category,
+            evidence.ProfileFactId,
             evidence.ProfileFactTitle,
             evidence.Summary,
             evidence.MatchedTerms

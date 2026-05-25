@@ -3359,6 +3359,7 @@ public sealed class ApplicationWorkflowApiTests
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
         var ollamaRequestJson = await Assert.Single(handler.Requests).Content!.ReadAsStringAsync();
         Assert.Contains("match-dotnet-test", ollamaRequestJson);
+        Assert.Contains(DraftProfileFactId.ToString(), ollamaRequestJson);
         Assert.Contains("Candidate fit brief support mappings", ollamaRequestJson);
         Assert.Contains(traceOnlyProfileFactId.ToString(), ollamaRequestJson);
         Assert.Contains("traceability context only", ollamaRequestJson);
@@ -3835,7 +3836,7 @@ public sealed class ApplicationWorkflowApiTests
                     "dotnet",
                     ".NET",
                     "RequiredSkill",
-                    Guid.NewGuid(),
+                    DraftProfileFactId,
                     "Approved API work",
                     "Approved API work demonstrates .NET delivery.",
                     [".NET"])
