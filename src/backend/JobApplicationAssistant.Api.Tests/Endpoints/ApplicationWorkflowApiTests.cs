@@ -2560,6 +2560,12 @@ public sealed class ApplicationWorkflowApiTests
         Assert.Contains("Partial evidence may guide cautious wording", draftRequestJson);
         Assert.Contains("Weak evidence must not support direct experience claims", draftRequestJson);
         Assert.Contains("shortMotivationText as a distinct concise value proposition", draftRequestJson);
+        Assert.Contains("Treat the draft outline as the main structure", draftRequestJson);
+        Assert.Contains("350-550 words", draftRequestJson);
+        Assert.Contains("40-80 words", draftRequestJson);
+        Assert.Contains("complete application that could be sent", draftRequestJson);
+        Assert.Contains("Do not write apologetic gap disclaimers", draftRequestJson);
+        Assert.Contains("translate or recast English evidence naturally", draftRequestJson);
         Assert.Contains("Avoid copying large phrases", draftRequestJson);
         Assert.Contains("Avoid generic interest statements", draftRequestJson);
         Assert.Contains("Avoid repeating one profile fact", draftRequestJson);
@@ -2580,6 +2586,35 @@ public sealed class ApplicationWorkflowApiTests
         var auditRun = Assert.Single(runs, run => run.Step == "ClaimAudit");
         Assert.Equal("Succeeded", auditRun.Status);
         Assert.Equal(1, auditRun.AttemptCount);
+    }
+
+    [Fact]
+    public async Task GenerateDraft_with_openai_compatible_accepts_json_wrapped_in_markdown_fence()
+    {
+        var handler = new AiStatusApiTests.QueuedOpenAiCompatibleHandler(new Queue<HttpResponseMessage>(
+        [
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent(ValidApplicationStrategyJson()) },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent($"```json\n{ValidOllamaDraftGenerationJson()}\n```") },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = OpenAiChatCompletionContent(ValidOllamaClaimAuditJson("match-dotnet-test")) }
+        ]));
+        await using var factory = new TestApplicationFactory().WithOpenAiCompatibleHandler(handler, model: "local-model");
+        using var client = factory.CreateClient();
+        var application = await CreateApplicationAsync(client, "We need .NET.", "English");
+        await MarkApplicationReadyForDraftAsync(factory, application.Id);
+
+        var response = await client.PostAsync($"/api/applications/{application.Id}/generate-draft", null);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var draft = await response.Content.ReadFromJsonAsync<GeneratedDraftResponse>();
+        Assert.NotNull(draft);
+        Assert.Equal("Ollama cover letter from approved API evidence.", draft.CoverLetterText);
+        Assert.Equal(3, handler.Requests.Count);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var run = Assert.Single(db.AiRuns.Where(run => run.Step == "DraftGeneration"));
+        Assert.Equal("Succeeded", run.Status);
+        Assert.Equal(1, run.AttemptCount);
     }
 
     [Fact]

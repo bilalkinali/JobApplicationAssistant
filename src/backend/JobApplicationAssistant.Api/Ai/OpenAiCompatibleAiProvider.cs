@@ -559,6 +559,7 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
 
     private DraftGenerationResult ParseDraftGeneration(string responseText, int attemptCount)
     {
+        responseText = StripJsonCodeFence(responseText);
         OpenAiDraftGenerationResponse? payload;
         try
         {
@@ -587,6 +588,29 @@ public sealed class OpenAiCompatibleAiProvider : IAiProvider
         {
             AttemptCount = attemptCount
         };
+    }
+
+    private static string StripJsonCodeFence(string responseText)
+    {
+        var trimmed = responseText.Trim();
+        if (!trimmed.StartsWith("```", StringComparison.Ordinal))
+        {
+            return responseText;
+        }
+
+        var firstLineEnd = trimmed.IndexOf('\n');
+        if (firstLineEnd < 0)
+        {
+            return responseText;
+        }
+
+        var lastFenceStart = trimmed.LastIndexOf("```", StringComparison.Ordinal);
+        if (lastFenceStart <= firstLineEnd)
+        {
+            return responseText;
+        }
+
+        return trimmed[(firstLineEnd + 1)..lastFenceStart].Trim();
     }
 
     private ClaimAuditResult ParseClaimAudit(string responseText, ClaimAuditInput input, int attemptCount)
