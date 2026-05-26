@@ -40,6 +40,7 @@ import {
 import {
   canApproveEvidenceMatch,
   evidenceQualityPresentation,
+  isRecommendedEvidence,
   isWeakEvidence,
   weakEvidenceReviewLabel
 } from "./evidenceReview";
@@ -492,6 +493,13 @@ function App() {
   const hasSavedJobPosting = Boolean(selectedApplication?.jobPostingText.trim());
   const hasSavedApprovedEvidence = savedApprovedEvidence.length + savedApprovedCustomFactEvidenceCount > 0;
   const hasGeneratedDraft = Boolean(selectedApplication?.generatedDraft);
+  const recommendedEvidenceMatches = useMemo(
+    () => evidenceMatches.filter(isRecommendedEvidence),
+    [evidenceMatches]
+  );
+  const approvedRecommendedEvidenceCount = recommendedEvidenceMatches.filter((match) =>
+    approvedEvidenceDraft.some((item) => item.id === match.id)
+  ).length;
   const approvedEvidenceDraftSummaryCount = approvedEvidenceDraft.length + currentApprovedCustomFactEvidenceCount;
   const showCompactGapDecisionReview = !isEvidenceReviewEditing && savedGapDecisions.length > 0;
   const preparationDetailsOpen = Boolean(selectedApplication && !hasGeneratedDraft);
@@ -1199,6 +1207,47 @@ function App() {
     }
   }
 
+  async function resetEvidenceReview() {
+    if (!selectedApplicationId) {
+      setError(plainError("Validation blocker", "Save the application before resetting evidence review."));
+      return;
+    }
+
+    if (
+      hasSavedApprovedEvidence &&
+      !window.confirm("Reset saved evidence review? This clears approved evidence and gap decisions for this application.")
+    ) {
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setWorkflowBusy("review");
+    setApprovedEvidenceDraft([]);
+    setGapDecisionsDraft([]);
+    setReviewedWeakMatchIds([]);
+    setIsEvidenceReviewEditing(true);
+
+    try {
+      await apiSend<ApplicationSession>(
+        `/api/applications/${selectedApplicationId}/approved-evidence`,
+        "PUT",
+        { approvedEvidence: "[]" }
+      );
+      const reviewed = await apiSend<ApplicationSession>(
+        `/api/applications/${selectedApplicationId}/gap-decisions`,
+        "PUT",
+        { gapDecisions: "[]" }
+      );
+      replaceApplication(reviewed);
+      setNotice("Evidence review reset.");
+    } catch (apiError) {
+      setError(formatError(apiError));
+    } finally {
+      setWorkflowBusy(null);
+    }
+  }
+
   async function createCustomFact(unmatchedRequirementId: string) {
     if (!selectedApplicationId) {
       setError(plainError("Validation blocker", "Save the application before adding job-local facts."));
@@ -1547,6 +1596,14 @@ function App() {
     setApprovedEvidenceDraft((current) =>
       current.some((item) => item.id === match.id) ? current : [...current, match]
     );
+  }
+
+  function approveRecommendedEvidence() {
+    setApprovedEvidenceDraft((current) => {
+      const approvedIds = new Set(current.map((item) => item.id));
+      const additions = recommendedEvidenceMatches.filter((match) => !approvedIds.has(match.id));
+      return additions.length === 0 ? current : [...current, ...additions];
+    });
   }
 
   function reviewWeakMatch(matchId: string) {
@@ -2031,8 +2088,8 @@ function App() {
 
               <section className={`workflow-panel${hasGeneratedDraft ? " final-review-first" : ""}`}>
                 <div className="section-heading">
-                  <h3>Application text workflow</h3>
-                  <p>Move from job analysis to approved evidence, generated text, and claim audit before final use.</p>
+                  <h3>Cover letter workflow</h3>
+                  <p>Step 1 prepares the posting automatically. Step 2 only needs review when evidence or gaps require a decision. Step 3 generates and audits the draft.</p>
                 </div>
                 {aiStatus && (
                   <ProviderReadinessSummary
@@ -2043,7 +2100,7 @@ function App() {
                 )}
                 <section className={`guided-action ${guidedNextAction.tone}`} aria-label="Guided next action">
                   <div>
-                    <span>Next action</span>
+                    <span>{guidedStepLabel(guidedNextAction.kind)}</span>
                     <h4>{guidedNextAction.title}</h4>
                     <p>{guidedNextAction.message}</p>
                   </div>
@@ -2079,14 +2136,14 @@ function App() {
                 {selectedApplication && (
                   <details className="context-disclosure preparation-context" open={preparationDetailsOpen}>
                     <summary>
-                      <span>Preparation details</span>
+                      <span>Step 1. Prepare automatically</span>
                       <small>{preparationDetailsSummary}</small>
                     </summary>
                     {selectedApplication.preparationStatus !== "NotStarted" && (
                       <div className="workflow-step">
                         <div>
                           <h4>Preparation</h4>
-                          <p>Run the full preparation flow again when job analysis, fit brief, or evidence matching needs a fresh pass.</p>
+                          <p>Runs job analysis, candidate fit, evidence matching, and strategy in one pass.</p>
                         </div>
                         <button
                           className="secondary-workflow-action"
@@ -2105,7 +2162,7 @@ function App() {
 
                     <div className="workflow-step">
                       <div>
-                        <h4>1. Job analysis</h4>
+                        <h4>Manual: job analysis only</h4>
                         <p>{jobAnalysisState.message}</p>
                       </div>
                       <button
@@ -2138,12 +2195,12 @@ function App() {
                 {selectedApplication && (
                   <details className="context-disclosure preparation-context" open={evidenceDetailsOpen}>
                     <summary>
-                      <span>Evidence details</span>
+                      <span>Step 2. Review evidence</span>
                       <small>{evidenceDetailsSummary}</small>
                     </summary>
                     <div className="workflow-step">
                       <div>
-                        <h4>2. Evidence matching</h4>
+                        <h4>Manual: evidence matching only</h4>
                         <p>{evidenceMatchingState.message}</p>
                       </div>
                       <button
@@ -2164,6 +2221,24 @@ function App() {
                       <StatusBadge tone={approvedEvidenceDraftSummaryCount > 0 ? "approved" : "neutral"}>
                         {approvedEvidenceCountLabel(approvedEvidenceDraftSummaryCount)}
                       </StatusBadge>
+                    </div>
+                    <div className="evidence-toolbar">
+                      <button
+                        type="button"
+                        onClick={approveRecommendedEvidence}
+                        disabled={recommendedEvidenceMatches.length === 0 || approvedRecommendedEvidenceCount === recommendedEvidenceMatches.length}
+                        title={disabledTitle(
+                          recommendedEvidenceMatches.length === 0 || approvedRecommendedEvidenceCount === recommendedEvidenceMatches.length,
+                          recommendedEvidenceMatches.length === 0
+                            ? "No strong or partial evidence matches are available yet."
+                            : "All recommended evidence is already selected."
+                        )}
+                      >
+                        Approve suggested evidence
+                      </button>
+                      <small>
+                        {approvedRecommendedEvidenceCount}/{recommendedEvidenceMatches.length} strong or partial matches selected
+                      </small>
                     </div>
                     {evidenceMatches.length === 0 && <p className="empty-state compact">No matches yet.</p>}
                     {evidenceMatches.map((match) => {
@@ -2386,21 +2461,35 @@ function App() {
 
                 <div className="workflow-step">
                   <div>
-                    <h4>3. Evidence review decisions</h4>
-                    <p>Save approved evidence as support for generated claims. Gap decisions are review guidance, not approved evidence.</p>
+                    <h4>Save evidence decisions</h4>
+                    <p>Save the selected evidence and any required gap decisions before draft generation.</p>
                   </div>
-                  <button
-                    className="secondary-workflow-action"
-                    type="button"
-                    onClick={saveApprovedEvidence}
-                    disabled={!selectedApplicationId || workflowBusy !== null}
-                    title={disabledTitle(
-                      !selectedApplicationId || workflowBusy !== null,
-                      workflowBusyReason ?? "Save the application before reviewing evidence."
-                    )}
-                  >
-                    {workflowBusy === "review" ? "Saving..." : "Save evidence review"}
-                  </button>
+                  <div className="workflow-action-group">
+                    <button
+                      className="secondary-workflow-action"
+                      type="button"
+                      onClick={resetEvidenceReview}
+                      disabled={!selectedApplicationId || workflowBusy !== null}
+                      title={disabledTitle(
+                        !selectedApplicationId || workflowBusy !== null,
+                        workflowBusyReason ?? "Save the application before resetting evidence review."
+                      )}
+                    >
+                      {workflowBusy === "review" ? "Resetting..." : "Reset evidence"}
+                    </button>
+                    <button
+                      className="secondary-workflow-action"
+                      type="button"
+                      onClick={saveApprovedEvidence}
+                      disabled={!selectedApplicationId || workflowBusy !== null}
+                      title={disabledTitle(
+                        !selectedApplicationId || workflowBusy !== null,
+                        workflowBusyReason ?? "Save the application before reviewing evidence."
+                      )}
+                    >
+                      {workflowBusy === "review" ? "Saving..." : "Save evidence review"}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="approved-list">
@@ -2472,7 +2561,7 @@ function App() {
 
                 <div className="workflow-step generated-draft-action">
                   <div>
-                    <h4>4. Generated draft</h4>
+                    <h4>Step 3. Generate and audit</h4>
                     <p>{draftGenerationState.message}</p>
                     {aiStatus && (
                       <span className={`inline-readiness ${aiStatus.isAvailable ? "available" : "unavailable"} ${isFakeProvider(aiStatus) ? "fake" : ""}`}>
@@ -3524,6 +3613,27 @@ function guidedActionButtonLabel(label: string, kind: string, workflowBusy: stri
   }
 
   return label;
+}
+
+function guidedStepLabel(kind: string): string {
+  switch (kind) {
+    case "save-posting":
+      return "Setup";
+    case "prepare-application":
+    case "ai-readiness":
+      return "Step 1";
+    case "review-evidence":
+      return "Step 2";
+    case "generate-draft":
+    case "revise-draft":
+    case "refresh-audit":
+      return "Step 3";
+    case "copy-export":
+    case "complete":
+      return "Final";
+    default:
+      return "Next action";
+  }
 }
 
 function preparationStatusLabel(status: string): string {

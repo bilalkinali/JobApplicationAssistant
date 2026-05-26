@@ -54,6 +54,11 @@ export function isWeakEvidence(match: EvidenceReviewMatch): boolean {
   return normalizeEvidenceQuality(match.quality) === "weak";
 }
 
+export function isRecommendedEvidence(match: EvidenceReviewMatch): boolean {
+  const quality = normalizeEvidenceQuality(match.quality);
+  return quality === "strong" || quality === "partial";
+}
+
 export function canApproveEvidenceMatch(match: EvidenceReviewMatch, weakMatchReviewed = false): boolean {
   return !isWeakEvidence(match) || weakMatchReviewed;
 }

@@ -14,7 +14,7 @@
 
 body {
   margin: 0;
-  min-width: 1024px;
+  min-width: 900px;
   min-height: 100vh;
 }
 
@@ -36,15 +36,15 @@ button:disabled {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 236px minmax(0, 1fr);
   min-height: 100vh;
 }
 
 .sidebar {
   display: flex;
   flex-direction: column;
-  gap: 40px;
-  padding: 32px 24px;
+  gap: 28px;
+  padding: 24px 18px;
   color: #f8fafc;
   background: #253446;
 }
@@ -58,8 +58,8 @@ button:disabled {
 .brand-mark {
   display: grid;
   flex: 0 0 auto;
-  width: 44px;
-  height: 44px;
+  width: 38px;
+  height: 38px;
   place-items: center;
   border-radius: 8px;
   color: #253446;
@@ -122,7 +122,7 @@ button:disabled {
 }
 
 .workspace {
-  padding: 40px;
+  padding: 24px;
 }
 
 .workspace-header {
@@ -134,7 +134,7 @@ button:disabled {
 }
 
 .workspace-header h2 {
-  font-size: 2rem;
+  font-size: 1.65rem;
   line-height: 1.15;
 }
 
@@ -396,13 +396,13 @@ button:disabled {
 .form-layout {
   display: grid;
   grid-template-columns: repeat(2, minmax(240px, 1fr));
-  gap: 18px;
+  gap: 12px;
   max-width: 980px;
 }
 
 .field {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   color: #344250;
   font-size: 0.92rem;
   font-weight: 700;
@@ -426,13 +426,13 @@ button:disabled {
 
 .field input,
 .field select {
-  height: 42px;
+  height: 36px;
   padding: 0 12px;
 }
 
 .field textarea {
-  min-height: 140px;
-  padding: 12px;
+  min-height: 104px;
+  padding: 10px;
   resize: vertical;
 }
 
@@ -457,8 +457,8 @@ button:disabled {
 .final-status-actions button,
 .list-header button,
 .primary-action {
-  min-height: 40px;
-  padding: 0 14px;
+  min-height: 36px;
+  padding: 0 12px;
   border: 1px solid #b9c4cd;
   border-radius: 6px;
   color: #263442;
@@ -750,8 +750,8 @@ button:disabled {
 
 .applications-layout {
   display: grid;
-  grid-template-columns: 380px minmax(0, 1fr);
-  gap: 18px;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 14px;
 }
 
 .applications-layout .form-layout {
@@ -879,14 +879,14 @@ button:disabled {
 
 .editor-panel {
   max-width: none;
-  padding: 18px;
+  padding: 14px;
 }
 
 .workflow-panel {
   display: grid;
   grid-column: 1 / -1;
-  gap: 16px;
-  padding-top: 18px;
+  gap: 10px;
+  padding-top: 12px;
   border-top: 1px solid #e1e1dc;
 }
 
@@ -894,8 +894,8 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  padding: 14px;
+  gap: 12px;
+  padding: 10px;
   border: 1px solid #d9d7d0;
   border-radius: 8px;
   background: #fafafa;
@@ -912,16 +912,16 @@ button:disabled {
 .workflow-step p,
 .signal-column p,
 .evidence-card p {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   color: #64717c;
-  line-height: 1.45;
+  line-height: 1.38;
 }
 
 .workflow-step button,
 .evidence-card button,
 .approved-item button {
-  min-height: 36px;
-  padding: 0 12px;
+  min-height: 32px;
+  padding: 0 10px;
   border: 1px solid #b9c4cd;
   border-radius: 6px;
   color: #263442;
@@ -959,7 +959,7 @@ button:disabled {
 
 .context-disclosure {
   grid-column: 1 / -1;
-  padding: 12px 14px;
+  padding: 10px 12px;
   border: 1px solid #d9d7d0;
   border-radius: 8px;
   background: #ffffff;
@@ -967,7 +967,7 @@ button:disabled {
 
 .context-disclosure[open] {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .context-disclosure > summary {
@@ -992,8 +992,8 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  padding: 16px;
+  gap: 14px;
+  padding: 12px;
   border: 1px solid #b8ddcd;
   border-radius: 8px;
   background: #edf8f2;
@@ -1054,7 +1054,7 @@ button:disabled {
 .signal-column,
 .review-column {
   min-width: 0;
-  padding: 14px;
+  padding: 10px;
   border: 1px solid #d9d7d0;
   border-radius: 8px;
   background: #ffffff;
@@ -1080,9 +1080,9 @@ button:disabled {
 
 .evidence-card {
   display: grid;
-  gap: 8px;
-  margin-top: 10px;
-  padding: 12px;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 10px;
   border: 1px solid #d7dde2;
   border-radius: 8px;
   background: #ffffff;
@@ -1133,6 +1133,37 @@ button:disabled {
   display: grid;
   gap: 6px;
   justify-items: start;
+}
+
+.evidence-toolbar,
+.workflow-action-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.evidence-toolbar {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid #e1e1dc;
+  border-radius: 6px;
+  background: #f7f8f5;
+}
+
+.evidence-toolbar button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #b9c4cd;
+  border-radius: 6px;
+  color: #263442;
+  background: #ffffff;
+  font-weight: 750;
+}
+
+.evidence-toolbar small {
+  color: #64717c;
+  font-weight: 700;
 }
 
 .weak-match-review button.selected {
@@ -1451,16 +1482,16 @@ button:disabled {
 .draft-editor {
   display: grid;
   grid-template-columns: repeat(2, minmax(240px, 1fr));
-  gap: 18px;
+  gap: 12px;
   align-items: start;
-  padding: 14px;
+  padding: 12px;
   border: 1px solid #d9d7d0;
   border-radius: 8px;
   background: #ffffff;
 }
 
 .draft-editor textarea {
-  min-height: 260px;
+  min-height: 220px;
 }
 
 .draft-editor .field {
