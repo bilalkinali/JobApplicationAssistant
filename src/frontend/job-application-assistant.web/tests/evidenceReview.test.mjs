@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   canApproveEvidenceMatch,
   evidenceQualityPresentation,
+  isRecommendedEvidence,
   isWeakEvidence,
   weakEvidenceReviewLabel
 } from "../dist-test/evidenceReview.js";
@@ -28,6 +29,13 @@ test("partial matches are usable but cautious evidence", () => {
   assert.equal(presentation.tone, "pending");
   assert.match(presentation.guidance, /Usable with care/);
   assert.equal(canApproveEvidenceMatch({ id: "partial-match", quality: "Partial" }), true);
+});
+
+test("recommended evidence includes strong and partial matches only", () => {
+  assert.equal(isRecommendedEvidence({ id: "strong-match", quality: "Strong" }), true);
+  assert.equal(isRecommendedEvidence({ id: "partial-match", quality: "Partial" }), true);
+  assert.equal(isRecommendedEvidence({ id: "weak-match", quality: "Weak" }), false);
+  assert.equal(isRecommendedEvidence({ id: "unknown-match" }), false);
 });
 
 test("weak matches require deliberate review before approval", () => {
