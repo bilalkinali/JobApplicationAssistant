@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { apiBaseUrl, apiDelete, apiGet, apiSend, apiSendForm } from "./api/client";
+import { AppShell } from "./components/AppShell";
 import {
   getAuditExportNotice,
   getCoverLetterExportState,
@@ -11,42 +13,67 @@ import {
   technicalDetails
 } from "./errorPresentation";
 import {
-  candidateFitBriefSections,
   hasCandidateFitBriefContent,
   parseCandidateFitBrief
 } from "./candidateFitBrief";
 import type { CandidateFitBrief } from "./candidateFitBrief";
 import {
-  applicationStrategySections,
   hasApplicationStrategyContent,
   parseApplicationStrategy
 } from "./applicationStrategy";
 import type { ApplicationStrategy } from "./applicationStrategy";
 import {
-  getAvailabilityLabel,
-  getDraftReadinessLabel,
   getDraftGenerationState,
   getEvidenceMatchingState,
   getGuidedNextAction,
   getJobAnalysisState,
   getPrepareApplicationPath,
   getProfileReadiness,
-  getProviderReadinessTitle,
-  getProviderRecoveryGuidance,
-  getProviderSummary,
-  getReadinessTone,
   isFakeProvider
 } from "./readiness";
-import {
-  canApproveEvidenceMatch,
-  evidenceQualityPresentation,
-  isRecommendedEvidence,
-  isWeakEvidence,
-  weakEvidenceReviewLabel
-} from "./evidenceReview";
+import { canApproveEvidenceMatch, isRecommendedEvidence } from "./evidenceReview";
+import type {
+  AiDiagnostics,
+  AiProviderStatus,
+  ApplicationForm,
+  ApplicationSession,
+  AssistedProfileImportResponse,
+  ClaimAudit,
+  CustomFact,
+  CustomFactDraft,
+  DraftQualityCheck,
+  EvidenceMatch,
+  GapDecision,
+  GapDecisionValue,
+  GeneratedDraft,
+  GeneratedDraftForm,
+  ImportedDraftFactBulkDecisionResponse,
+  ImportedDraftFactDecisionResponse,
+  ImportedDraftFactMergeResponse,
+  ImportedDraftFactReviewQueue,
+  ImportedDraftFactSplitResponse,
+  InlineFeedback,
+  JobSignalsDocument,
+  PrepareApplicationResult,
+  ProfileFact,
+  ProfileFactForm,
+  ProfileForm,
+  UnmatchedRequirement,
+  View
+} from "./features/shared/types";
+import { HomeView } from "./features/home/HomeView";
+import { SettingsView } from "./features/applications/SettingsView";
+import { ProfileFormPanel } from "./features/profile/ProfileFormPanel";
+import { ProfileImportPanel } from "./features/profile/ProfileImportPanel";
+import { ImportReviewQueues } from "./features/profile/ImportReviewQueues";
+import { ProfileFactsPanel } from "./features/profile/ProfileFactsPanel";
+import { ProfileFactEditor } from "./features/profile/ProfileFactEditor";
+import { ApplicationListPanel } from "./features/applications/ApplicationListPanel";
+import { ApplicationEditor } from "./features/applications/ApplicationEditor";
+import { ApplicationWorkflowPanel } from "./features/applications/ApplicationWorkflowPanel";
+import { ProviderReadinessSummary } from "./features/shared/summaries";
 import "./styles.css";
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:5108";
 const emptyProfile: ProfileForm = {
   fullName: "",
   email: "",
@@ -82,263 +109,6 @@ const emptyProfileFact: ProfileFactForm = {
 const applicationStatuses = ["Draft", "PostingCaptured", "ReadyForReview", "PreparedForEvidenceReview", "Applied", "Archived"];
 const auditReadinessOptions = ["All", "Current", "Stale", "Missing", "NotApplicable"];
 const profileFactStatuses = ["Draft", "Approved", "Archived", "Rejected"];
-
-type ProfileForm = {
-  fullName: string;
-  email: string;
-  phone: string;
-  location: string;
-  linkedInUrl: string;
-  gitHubUrl: string;
-  portfolioUrl: string;
-  defaultLanguage: string;
-  danishTone: string;
-  englishTone: string;
-};
-
-type ProfileFactForm = {
-  type: string;
-  title: string;
-  summary: string;
-  status: string;
-  factItems: string;
-  technologies: string;
-  allowedClaims: string;
-  forbiddenClaims: string;
-};
-
-type ProfileFact = ProfileFactForm & {
-  id: string;
-  createdAt: string;
-  updatedAt: string;
-  sourceDocumentIds: string;
-  originalImportedSnapshot: string | null;
-  manuallyEdited: boolean;
-};
-
-type ImportedDraftFactReviewQueue = {
-  importSessionId: string;
-  fileName: string;
-  draftFactCount: number;
-  groups: ImportedDraftFactReviewGroup[];
-};
-
-type ImportedDraftFactReviewGroup = {
-  key: string;
-  label: string;
-  draftFactCount: number;
-  facts: ImportedDraftFactReviewItem[];
-};
-
-type ImportedDraftFactReviewItem = {
-  profileFact: ProfileFact;
-  sourceContext: string;
-  hasDuplicateIndicators: boolean;
-  duplicateIndicators: ImportedDraftFactDuplicateIndicator[];
-};
-
-type ImportedDraftFactDuplicateIndicator = {
-  scope: "ImportBatch" | "ExistingProfileFact" | string;
-  profileFactId: string;
-  profileFactTitle: string;
-  reason: string;
-};
-
-type AssistedProfileImportResponse = {
-  importSessionId: string;
-  fileName: string;
-  importedFactCount: number;
-  profileFacts: ProfileFact[];
-  reviewQueue: ImportedDraftFactReviewQueue;
-  reviewUrl: string;
-};
-
-type ImportedDraftFactDecisionResponse = {
-  profileFact: ProfileFact;
-  reviewQueue: ImportedDraftFactReviewQueue;
-};
-
-type ImportedDraftFactBulkDecisionResponse = {
-  profileFacts: ProfileFact[];
-  reviewQueue: ImportedDraftFactReviewQueue;
-};
-
-type ImportedDraftFactMergeResponse = ImportedDraftFactDecisionResponse;
-
-type ImportedDraftFactSplitResponse = {
-  profileFacts: ProfileFact[];
-  reviewQueue: ImportedDraftFactReviewQueue;
-};
-
-type ApplicationForm = {
-  companyName: string;
-  roleTitle: string;
-  applicationUrl: string;
-  deadline: string;
-  status: string;
-  jobPostingText: string;
-  detectedLanguage: string;
-  selectedLanguage: string;
-};
-
-type ApplicationSession = ApplicationForm & {
-  id: string;
-  jobSignals: string;
-  evidenceMatches: string;
-  unmatchedRequirements: string;
-  candidateFitBrief: string;
-  approvedEvidence: string;
-  gapDecisions: string;
-  customFacts: string;
-  applicationStrategy: string;
-  lastPreparedAt: string | null;
-  preparationStatus: string;
-  generatedDraft: GeneratedDraft | null;
-  hasGeneratedDraft: boolean;
-  auditReadiness: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type PrepareApplicationResult = {
-  application: ApplicationSession;
-  message: string;
-};
-
-type GeneratedDraft = {
-  id: string;
-  jobApplicationId: string;
-  coverLetterText: string;
-  shortMotivationText: string;
-  claimAudit: string;
-  draftQualityCheck: string;
-  generatedAt: string;
-  lastEditedAt: string | null;
-  auditUpdatedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  isClaimAuditStale: boolean;
-};
-
-type GeneratedDraftForm = {
-  coverLetterText: string;
-  shortMotivationText: string;
-};
-
-type View = "home" | "profile" | "applications" | "settings";
-
-type JobSignalsDocument = {
-  provider: string;
-  extractedAt: string;
-  requiredSkills: string[];
-  preferredSkills: string[];
-  responsibilities: string[];
-  signals: JobSignal[];
-};
-
-type JobSignal = {
-  id: string;
-  label: string;
-  category: string;
-  keywords: string[];
-};
-
-type EvidenceMatch = {
-  id: string;
-  signalId: string;
-  signal: string;
-  category: string;
-  profileFactId: string;
-  profileFactTitle: string;
-  summary: string;
-  matchedTerms: string[];
-  quality?: string | null;
-  reason?: string | null;
-};
-
-type CustomFact = {
-  id: string;
-  unmatchedRequirementId: string;
-  title: string;
-  summary: string;
-  technologies?: string[];
-  allowedClaims?: string[];
-  status: "PendingConfirmation" | "Approved" | "Rejected" | string;
-  createdAt: string;
-  reviewedAt: string | null;
-};
-
-type CustomFactDraft = {
-  title: string;
-  summary: string;
-  technologies: string;
-  allowedClaims: string;
-};
-
-type UnmatchedRequirement = {
-  id: string;
-  signalId: string;
-  requirement: string;
-  category: string;
-  recommendation: string;
-};
-
-type GapDecisionValue = "Ignore" | "MentionAsLearningInterest" | "CoveredByCustomFact";
-
-type GapDecision = {
-  unmatchedRequirementId: string;
-  decision: GapDecisionValue;
-  customFactId?: string;
-};
-
-type ClaimAudit = {
-  claims: ClaimAuditClaim[];
-};
-
-type ClaimAuditClaim = {
-  id: string;
-  text: string;
-  status: "Supported" | "Unsupported" | "NeedsReview" | string;
-  evidenceIds: string[];
-};
-
-type DraftQualityCheck = {
-  status: "Passed" | "NeedsRevision" | string;
-  issues: DraftQualityIssue[];
-  copiedSevenWordPhraseCount: number;
-  copiedPhraseThreshold: number;
-};
-
-type DraftQualityIssue = {
-  code: string;
-  severity: "NeedsRevision" | string;
-  message: string;
-};
-
-type AiProviderStatus = {
-  provider: string;
-  model: string;
-  endpoint: string | null;
-  isAvailable: boolean;
-  message: string;
-};
-
-type AiDiagnostics = AiProviderStatus & {
-  checks: AiDiagnosticCheck[];
-};
-
-type AiDiagnosticCheck = {
-  name: string;
-  status: string;
-  message: string;
-};
-
-type InlineFeedback = {
-  tone: "success" | "error";
-  title: string;
-  message: string;
-  details?: string[];
-};
 
 function App() {
   const [view, setView] = useState<View>("home");
@@ -1660,89 +1430,21 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
-      <aside className="sidebar" aria-label="Primary navigation">
-        <div className="brand">
-          <span className="brand-mark">JA</span>
-          <div>
-            <p className="eyebrow">V1 workspace</p>
-            <h1>Job Application Assistant</h1>
-          </div>
-        </div>
-
-        <nav className="navigation">
-          {(["home", "profile", "applications", "settings"] satisfies View[]).map((item) => (
-            <button
-              className={view === item ? "active" : ""}
-              key={item}
-              type="button"
-              onClick={() => setView(item)}
-            >
-              {titleCase(item)}
-            </button>
-          ))}
-        </nav>
-      </aside>
-
-      <section className="workspace" aria-labelledby="workspace-title">
-        <header className="workspace-header">
-          <div>
-            <p className="eyebrow">Workbench</p>
-            <h2 id="workspace-title">{pageTitle(view)}</h2>
-          </div>
-          <span
-            className={`status-pill ${aiStatus?.isAvailable === false ? "unavailable" : ""} ${
-              aiStatus && isFakeProvider(aiStatus) ? "fake" : ""
-            }`}
-          >
-            {aiStatus ? `${aiStatus.provider} - ${aiStatus.model} - ${getAvailabilityLabel(aiStatus)}` : "AI status loading"}
-          </span>
-        </header>
-
-        {error && <ErrorMessage error={error} />}
-        {notice && (
-          <div className="message success" role="status">
-            <strong>Success</strong>
-            <p>{notice}</p>
-          </div>
-        )}
-
+    <AppShell
+      view={view}
+      onViewChange={setView}
+      title={pageTitle(view)}
+      aiStatus={aiStatus}
+      error={error}
+      notice={notice}
+    >
         {view === "home" && (
-          <div className="panel-grid">
-            <article className="panel">
-              <h3>Profile readiness</h3>
-              <p>{profileReadiness.contactMessage}</p>
-              <p>{profileReadiness.evidenceMessage}</p>
-              {profileReadiness.warnings.length > 0 && (
-                <button type="button" onClick={() => setView("profile")}>
-                  Review profile setup
-                </button>
-              )}
-            </article>
-            <article className="panel">
-              <h3>New application</h3>
-              <p>Create a saved application workspace for the posting, language, and manual workflow state.</p>
-              <button className="primary-action" type="button" onClick={startNewApplication}>
-                New application
-              </button>
-            </article>
-            <article className="panel">
-              <h3>Recent applications</h3>
-              <p>{applications.length} application session{applications.length === 1 ? "" : "s"} saved.</p>
-              {applications.length > 0 && (
-                <div className="recent-next-actions">
-                  {applications.slice(0, 3).map((application) => (
-                    <button key={application.id} type="button" onClick={() => void openApplication(application)}>
-                      <strong>{application.companyName}</strong>
-                      <span>Next: {applicationNextActionLabel(application, approvedProfileFacts.length)}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </article>
-            <article className="panel">
-              <h3>AI status</h3>
-              {aiStatus ? (
+          <HomeView
+            profileReadiness={profileReadiness}
+            applications={applications}
+            approvedProfileFactCount={approvedProfileFacts.length}
+            aiStatusContent={
+              aiStatus ? (
                 <ProviderReadinessSummary
                   status={aiStatus}
                   diagnostics={aiDiagnostics}
@@ -1751,1326 +1453,267 @@ function App() {
                 />
               ) : (
                 <p>Loading AI provider status.</p>
-              )}
-            </article>
-          </div>
+              )
+            }
+            onReviewProfile={() => setView("profile")}
+            onNewApplication={startNewApplication}
+            onOpenApplication={(application) => void openApplication(application)}
+            getApplicationNextActionLabel={applicationNextActionLabel}
+          />
         )}
 
         {view === "profile" && (
           <div className="profile-layout">
-            <form className="form-layout panel-form" onSubmit={saveProfile}>
-              <div className="section-heading">
-                <h3>Contact and tone</h3>
-                <p>{profileReadiness.contactMessage}</p>
-              </div>
-              {!profileReadiness.hasContactDetails && (
-                <p className="workflow-note warning">Contact setup is incomplete. You can keep editing applications, but later drafts and exports may miss useful applicant context.</p>
-              )}
-              <Field label="Full name" required value={profile.fullName} onChange={(fullName) => setProfile({ ...profile, fullName })} />
-              <Field label="Email" required type="email" value={profile.email} onChange={(email) => setProfile({ ...profile, email })} />
-              <Field label="Phone" value={profile.phone} onChange={(phone) => setProfile({ ...profile, phone })} />
-              <Field label="Location" value={profile.location} onChange={(location) => setProfile({ ...profile, location })} />
-              <Field label="LinkedIn URL" type="url" value={profile.linkedInUrl} onChange={(linkedInUrl) => setProfile({ ...profile, linkedInUrl })} />
-              <Field label="GitHub URL" type="url" value={profile.gitHubUrl} onChange={(gitHubUrl) => setProfile({ ...profile, gitHubUrl })} />
-              <Field label="Portfolio URL" type="url" value={profile.portfolioUrl} onChange={(portfolioUrl) => setProfile({ ...profile, portfolioUrl })} />
-              <Field label="Default language" required value={profile.defaultLanguage} onChange={(defaultLanguage) => setProfile({ ...profile, defaultLanguage })} />
-              <Textarea label="Danish tone" value={profile.danishTone} onChange={(danishTone) => setProfile({ ...profile, danishTone })} />
-              <Textarea label="English tone" value={profile.englishTone} onChange={(englishTone) => setProfile({ ...profile, englishTone })} />
-              <div className="form-actions">
-                <button className="primary-action" type="submit">Save profile</button>
-              </div>
-            </form>
+            <ProfileFormPanel
+              profile={profile}
+              profileReadiness={profileReadiness}
+              onChange={setProfile}
+              onSubmit={saveProfile}
+            />
 
             <section className="profile-facts-panel">
               <div className="section-heading">
                 <h3>Profile facts</h3>
                 <p>{profileReadiness.evidenceMessage}</p>
               </div>
-              <form className="profile-import-panel" onSubmit={importProfilePdfCv}>
-                <div className="section-heading">
-                  <h4>Assisted CV import</h4>
-                  <p>Upload a PDF CV to draft profile facts, review the grouped queue, and approve evidence for saved applications.</p>
-                </div>
-                {aiStatus && isFakeProvider(aiStatus) && (
-                  <p className="workflow-note warning">Fake AI mode is active. Import will use deterministic demo/test extraction behavior.</p>
-                )}
-                <label className="file-field">
-                  <span>PDF CV</span>
-                  <input
-                    accept="application/pdf,.pdf"
-                    ref={profileImportFileRef}
-                    type="file"
-                    onChange={(event) => setProfileImportFile(event.target.files?.[0] ?? null)}
-                  />
-                </label>
-                <div className="form-actions">
-                  <button className="primary-action" type="submit" disabled={profileImportBusy}>
-                    {profileImportBusy ? "Importing..." : "Import PDF CV"}
-                  </button>
-                </div>
-                {profileImportFeedback && (
-                  <div className={`message compact ${profileImportFeedback.tone}`} role="status">
-                    <strong>{profileImportFeedback.title}</strong>
-                    <p>{profileImportFeedback.message}</p>
-                  </div>
-                )}
-              </form>
+              <ProfileImportPanel
+                isFakeAiProvider={Boolean(aiStatus && isFakeProvider(aiStatus))}
+                busy={profileImportBusy}
+                feedback={profileImportFeedback}
+                fileInputRef={profileImportFileRef}
+                onFileChange={setProfileImportFile}
+                onSubmit={importProfilePdfCv}
+              />
               {!profileReadiness.hasApprovedEvidence && (
                 <p className="workflow-note warning">Approved evidence is required before evidence matching and draft generation. Draft or archived facts will not be used as proof.</p>
               )}
-              {importReviewQueues.length > 0 && (
-                <div className="import-review-queues" ref={importReviewRef}>
-                  {importReviewQueues.map((queue) => (
-                    <section className="import-review-queue" key={queue.importSessionId}>
-                      <div className="section-heading">
-                        <h4>{queue.fileName}</h4>
-                        <p>{queue.draftFactCount} imported draft facts grouped for review.</p>
-                      </div>
-                      <div className="import-review-actions">
-                        <button
-                          type="button"
-                          disabled={selectedIdsForQueue(queue).length < 2}
-                          onClick={() => void mergeImportedDraftFacts(queue)}
-                        >
-                          Merge selected
-                        </button>
-                        <button
-                          type="button"
-                          disabled={selectedIdsForQueue(queue).length === 0}
-                          onClick={() => void bulkReviewImportedDraftFacts(queue, "approve")}
-                        >
-                          Approve selected
-                        </button>
-                        <button
-                          type="button"
-                          disabled={selectedIdsForQueue(queue).length === 0}
-                          onClick={() => void bulkReviewImportedDraftFacts(queue, "archive")}
-                        >
-                          Archive selected
-                        </button>
-                      </div>
-                      {queue.groups.map((group) => (
-                        <div className="import-review-group" key={group.key}>
-                          <div className="import-review-group-header">
-                            <strong>{group.label}</strong>
-                            <span>{group.draftFactCount}</span>
-                          </div>
-                          <div className="import-review-items">
-                            {group.facts.map((item) => (
-                              <article
-                                className={`import-review-item${item.hasDuplicateIndicators ? " duplicate" : ""}`}
-                                key={item.profileFact.id}
-                              >
-                                <label className="import-review-select">
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedImportedDraftFactIds.includes(item.profileFact.id)}
-                                    onChange={() => toggleImportedDraftFactSelection(item.profileFact.id)}
-                                  />
-                                  <span>Select</span>
-                                </label>
-                                <button type="button" onClick={() => openProfileFact(item.profileFact)}>
-                                  <span className="import-review-title">{item.profileFact.title}</span>
-                                  <span className="import-review-context">{item.sourceContext}</span>
-                                  {item.hasDuplicateIndicators && (
-                                    <span className="duplicate-indicators">
-                                      {item.duplicateIndicators.map((indicator) => (
-                                        <small key={`${indicator.scope}-${indicator.profileFactId}`}>
-                                          {duplicateScopeLabel(indicator.scope)}: {indicator.profileFactTitle} - {indicator.reason}
-                                        </small>
-                                      ))}
-                                    </span>
-                                  )}
-                                </button>
-                              </article>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </section>
-                  ))}
-                </div>
-              )}
-              {profileFacts.length === 0 && <p className="empty-state">No profile facts yet.</p>}
-              {profileFacts.length > 0 && (
-                <div className="fact-bulk-actions">
-                  <label className="checkbox-field">
-                    <input
-                      type="checkbox"
-                      checked={allProfileFactsSelected}
-                      onChange={toggleAllProfileFacts}
-                    />
-                    <span>Select all</span>
-                  </label>
-                  <button
-                    className="danger-action"
-                    type="button"
-                    disabled={selectedProfileFactIds.length === 0}
-                    onClick={() => void deleteSelectedProfileFacts()}
-                  >
-                    Delete selected
-                  </button>
-                  {selectedProfileFactIds.length > 0 && <small>{selectedProfileFactIds.length} selected</small>}
-                </div>
-              )}
-              <div className="fact-list">
-                {profileFacts.map((fact) => (
-                  <article
-                    className={`fact-card ${fact.status.toLowerCase()}${fact.id === selectedProfileFactId ? " active" : ""}`}
-                    key={fact.id}
-                  >
-                    <label className="fact-select">
-                      <input
-                        type="checkbox"
-                        checked={selectedProfileFactIds.includes(fact.id)}
-                        onChange={() => toggleProfileFactSelection(fact.id)}
-                      />
-                      <span>Select fact</span>
-                    </label>
-                    <button type="button" className="fact-open-button" onClick={() => openProfileFact(fact)}>
-                      <strong>{fact.title}</strong>
-                      <span>{fact.type}</span>
-                      <StatusBadge tone={statusTone(fact.status)}>{profileFactStatusLabel(fact.status)}</StatusBadge>
-                    </button>
-                  </article>
-                ))}
-              </div>
-
-              <form className="form-layout fact-editor" onSubmit={saveProfileFact}>
-                <Field label="Type" required value={profileFactForm.type} onChange={(type) => setProfileFactForm({ ...profileFactForm, type })} />
-                <Select label="Status" required value={profileFactForm.status} options={profileFactStatuses} onChange={(status) => setProfileFactForm({ ...profileFactForm, status })} />
-                <Field label="Title" required value={profileFactForm.title} onChange={(title) => setProfileFactForm({ ...profileFactForm, title })} />
-                <Textarea label="Summary" required value={profileFactForm.summary} onChange={(summary) => setProfileFactForm({ ...profileFactForm, summary })} />
-                <Textarea label="Fact items JSON" value={profileFactForm.factItems} onChange={(factItems) => setProfileFactForm({ ...profileFactForm, factItems })} />
-                <Textarea label="Technologies JSON" value={profileFactForm.technologies} onChange={(technologies) => setProfileFactForm({ ...profileFactForm, technologies })} />
-                <Textarea label="Allowed claims JSON" value={profileFactForm.allowedClaims} onChange={(allowedClaims) => setProfileFactForm({ ...profileFactForm, allowedClaims })} />
-                <Textarea label="Forbidden claims JSON" value={profileFactForm.forbiddenClaims} onChange={(forbiddenClaims) => setProfileFactForm({ ...profileFactForm, forbiddenClaims })} />
-                {selectedImportedDraftFact && selectedImportReviewQueue && (
-                  <Textarea
-                    label="Split into imported draft facts JSON"
-                    value={splitImportedDraftFacts}
-                    onChange={setSplitImportedDraftFacts}
-                  />
-                )}
-                <div className="form-actions">
-                  {selectedImportedDraftFact && (
-                    <>
-                      <button
-                        className="primary-action"
-                        type="button"
-                        onClick={() =>
-                          void reviewImportedDraftFact(
-                            selectedImportedDraftFact,
-                            "approve",
-                            undefined,
-                            profileFactFormChanged(selectedImportedDraftFact, profileFactForm) ? profileFactForm : undefined
-                          )
-                        }
-                      >
-                        Approve import
-                      </button>
-                      <button type="button" onClick={() => void reviewImportedDraftFact(selectedImportedDraftFact, "archive")}>
-                        Archive import
-                      </button>
-                      <button type="button" disabled={!splitImportedDraftFacts.trim()} onClick={() => void splitImportedDraftFact()}>
-                        Split import
-                      </button>
-                      <button className="danger-action" type="button" onClick={() => void reviewImportedDraftFact(selectedImportedDraftFact, "reject")}>
-                        Reject import
-                      </button>
-                    </>
-                  )}
-                  <button className="primary-action" type="submit">{selectedProfileFactId ? "Save fact" : "Create fact"}</button>
-                  <button type="button" onClick={startNewProfileFact}>Clear</button>
-                  {selectedProfileFactId && (
-                    <button className="danger-action" type="button" onClick={deleteProfileFact}>Delete</button>
-                  )}
-                </div>
-              </form>
+              <ImportReviewQueues
+                queues={importReviewQueues}
+                selectedImportedDraftFactIds={selectedImportedDraftFactIds}
+                containerRef={importReviewRef}
+                selectedIdsForQueue={selectedIdsForQueue}
+                duplicateScopeLabel={duplicateScopeLabel}
+                onToggleSelection={toggleImportedDraftFactSelection}
+                onOpenFact={openProfileFact}
+                onMerge={(queue) => void mergeImportedDraftFacts(queue)}
+                onBulkApprove={(queue) => void bulkReviewImportedDraftFacts(queue, "approve")}
+                onBulkArchive={(queue) => void bulkReviewImportedDraftFacts(queue, "archive")}
+              />
+              <ProfileFactsPanel
+                profileFacts={profileFacts}
+                selectedProfileFactId={selectedProfileFactId}
+                selectedProfileFactIds={selectedProfileFactIds}
+                allProfileFactsSelected={allProfileFactsSelected}
+                statusTone={statusTone}
+                profileFactStatusLabel={profileFactStatusLabel}
+                onToggleAll={toggleAllProfileFacts}
+                onToggleFact={toggleProfileFactSelection}
+                onOpenFact={openProfileFact}
+                onDeleteSelected={() => void deleteSelectedProfileFacts()}
+              />
+              <ProfileFactEditor
+                profileFactForm={profileFactForm}
+                profileFactStatuses={profileFactStatuses}
+                selectedProfileFactId={selectedProfileFactId}
+                selectedImportedDraftFact={selectedImportedDraftFact}
+                selectedImportReviewQueueExists={Boolean(selectedImportReviewQueue)}
+                splitImportedDraftFacts={splitImportedDraftFacts}
+                onFormChange={setProfileFactForm}
+                onSplitChange={setSplitImportedDraftFacts}
+                onSave={saveProfileFact}
+                onApproveImport={() => {
+                  if (selectedImportedDraftFact) {
+                    void reviewImportedDraftFact(
+                      selectedImportedDraftFact,
+                      "approve",
+                      undefined,
+                      profileFactFormChanged(selectedImportedDraftFact, profileFactForm) ? profileFactForm : undefined
+                    );
+                  }
+                }}
+                onArchiveImport={() => {
+                  if (selectedImportedDraftFact) {
+                    void reviewImportedDraftFact(selectedImportedDraftFact, "archive");
+                  }
+                }}
+                onSplitImport={() => void splitImportedDraftFact()}
+                onRejectImport={() => {
+                  if (selectedImportedDraftFact) {
+                    void reviewImportedDraftFact(selectedImportedDraftFact, "reject");
+                  }
+                }}
+                onClear={startNewProfileFact}
+                onDelete={() => void deleteProfileFact()}
+              />
             </section>
           </div>
         )}
 
         {view === "applications" && (
           <div className="applications-layout">
-            <section className="list-panel" aria-label="Application sessions">
-              <div className="list-header">
-                <h3>Applications</h3>
-                <button type="button" onClick={startNewApplication}>New</button>
-              </div>
-              <div className="filters">
-                <Field label="Search" value={applicationSearch} onChange={setApplicationSearch} />
-                <Select label="Status" value={applicationStatusFilter} options={["All", ...applicationStatuses]} onChange={setApplicationStatusFilter} />
-                <Select label="Draft/audit" value={applicationReadinessFilter} options={auditReadinessOptions} onChange={setApplicationReadinessFilter} />
-                <label className="checkbox-field">
-                  <input
-                    type="checkbox"
-                    checked={includeArchivedApplications}
-                    onChange={(event) => setIncludeArchivedApplications(event.target.checked)}
-                  />
-                  <span>Include archived</span>
-                </label>
-              </div>
-              <div className="session-list">
-                {filteredApplications.map((application) => (
-                  <button
-                    className={`session ${applicationStatusClass(application.status)}${application.id === selectedApplicationId ? " active" : ""}`}
-                    key={application.id}
-                    type="button"
-                    onClick={() => void openApplication(application)}
-                  >
-                    <StatusBadge tone={applicationHistoryTone(application.status)}>{applicationHistoryLabel(application.status)}</StatusBadge>
-                    <strong>{application.companyName}</strong>
-                    <span>{application.roleTitle}</span>
-                    <small>
-                      {applicationStatusLabel(application.status)} - {application.selectedLanguage || application.detectedLanguage || "Language unset"} - Updated {formatDate(application.updatedAt)}
-                    </small>
-                    <div className="session-badges">
-                      {application.deadline && <span>Deadline {formatDate(application.deadline)}</span>}
-                      <span className="next-action">Next: {applicationNextActionLabel(application, approvedProfileFacts.length)}</span>
-                      <span className={application.hasGeneratedDraft ? "ready" : "muted"}>{application.hasGeneratedDraft ? "Draft ready" : "No draft"}</span>
-                      <span className={`audit-${application.auditReadiness.toLowerCase()}`}>Audit {readinessLabel(application.auditReadiness)}</span>
-                    </div>
-                  </button>
-                ))}
-                {applications.length === 0 && <p className="empty-state">{applicationHistoryEmptyMessage(includeArchivedApplications)}</p>}
-                {applications.length > 0 && filteredApplications.length === 0 && <p className="empty-state">No applications match the current search, status, and draft/audit filters.</p>}
-              </div>
-            </section>
-
-            <form className="form-layout editor-panel" onSubmit={saveApplication}>
-              <div className="section-heading">
-                <h3>{selectedApplication ? "Application detail" : "New application"}</h3>
-                <p>Capture the posting, language, and manual workflow state for this session.</p>
-              </div>
-              <Field label="Company name" required value={applicationForm.companyName} onChange={(companyName) => setApplicationForm({ ...applicationForm, companyName })} />
-              <Field label="Role title" required value={applicationForm.roleTitle} onChange={(roleTitle) => setApplicationForm({ ...applicationForm, roleTitle })} />
-              <Field label="Application URL" type="url" value={applicationForm.applicationUrl} onChange={(applicationUrl) => setApplicationForm({ ...applicationForm, applicationUrl })} />
-              <Field label="Deadline" type="date" value={applicationForm.deadline} onChange={(deadline) => setApplicationForm({ ...applicationForm, deadline })} />
-              <Select label="Status" required value={applicationForm.status} options={applicationStatuses} onChange={(status) => setApplicationForm({ ...applicationForm, status })} />
-              <Field label="Detected language" value={applicationForm.detectedLanguage} onChange={(detectedLanguage) => setApplicationForm({ ...applicationForm, detectedLanguage })} />
-              <Field label="Selected language" value={applicationForm.selectedLanguage} onChange={(selectedLanguage) => setApplicationForm({ ...applicationForm, selectedLanguage })} />
-              <Textarea label="Job posting text" value={applicationForm.jobPostingText} onChange={(jobPostingText) => setApplicationForm({ ...applicationForm, jobPostingText })} />
-              <div className="form-actions">
-                <button className="primary-action" type="submit">{selectedApplication ? "Save application" : "Create application"}</button>
-                <button type="button" onClick={startNewApplication}>Clear</button>
-                {selectedApplicationId && (
-                  <button className="danger-action" type="button" onClick={deleteApplication}>Delete</button>
-                )}
-              </div>
-              {selectedApplicationId && (
-                <div className="final-status-actions" aria-label="Final application status actions">
-                  <button
-                    type="button"
-                    onClick={() => void markApplicationStatus("Applied")}
-                    disabled={selectedApplication?.status === "Applied" || workflowBusy !== null}
-                    title={disabledTitle(
-                      selectedApplication?.status === "Applied" || workflowBusy !== null,
-                      selectedApplication?.status === "Applied" ? "This application is already marked applied." : workflowBusyReason
-                    )}
-                  >
-                    Mark applied
-                  </button>
-                  <button
-                    className="danger-action"
-                    type="button"
-                    onClick={() => void markApplicationStatus("Archived")}
-                    disabled={selectedApplication?.status === "Archived" || workflowBusy !== null}
-                    title={disabledTitle(
-                      selectedApplication?.status === "Archived" || workflowBusy !== null,
-                      selectedApplication?.status === "Archived" ? "This application is already archived." : workflowBusyReason
-                    )}
-                  >
-                    Archive
-                  </button>
-                </div>
-              )}
-
-              <section className={`workflow-panel${hasGeneratedDraft ? " final-review-first" : ""}`}>
-                <div className="section-heading">
-                  <h3>Cover letter workflow</h3>
-                  <p>Step 1 prepares the posting automatically. Step 2 only needs review when evidence or gaps require a decision. Step 3 generates and audits the draft.</p>
-                </div>
-                {aiStatus && (
-                  <ProviderReadinessSummary
-                    status={aiStatus}
-                    diagnostics={aiDiagnostics}
-                    diagnosticsLastRanAt={aiDiagnosticsLastRanAt}
-                  />
-                )}
-                <section className={`guided-action ${guidedNextAction.tone}`} aria-label="Guided next action">
-                  <div>
-                    <span>{guidedStepLabel(guidedNextAction.kind)}</span>
-                    <h4>{guidedNextAction.title}</h4>
-                    <p>{guidedNextAction.message}</p>
-                  </div>
-                  <button
-                    className="primary-action"
-                    type={guidedNextAction.kind === "save-posting" ? "submit" : "button"}
-                    onClick={guidedNextAction.kind === "save-posting" ? undefined : runGuidedNextAction}
-                    disabled={!guidedNextAction.canRun || workflowBusy !== null}
-                    title={disabledTitle(!guidedNextAction.canRun || workflowBusy !== null, workflowBusyReason ?? guidedNextAction.message)}
-                  >
-                    {guidedActionButtonLabel(guidedNextAction.buttonLabel, guidedNextAction.kind, workflowBusy)}
-                  </button>
-                </section>
-                {selectedApplication && (
-                  <div className="trust-chain" aria-label="Draft trust chain">
-                    <StatusBadge tone={preparationStatusTone(selectedApplication.preparationStatus)}>
-                      {preparationStatusLabel(selectedApplication.preparationStatus)}
-                    </StatusBadge>
-                    <StatusBadge tone={hasSavedApprovedEvidence ? "approved" : "pending"}>
-                      {approvedEvidenceCountLabel(savedApprovedEvidence.length + savedApprovedCustomFactEvidenceCount)}
-                    </StatusBadge>
-                    <StatusBadge tone={hasGeneratedDraft ? "approved" : "draft"}>
-                      {hasGeneratedDraft ? "Draft saved" : "No draft"}
-                    </StatusBadge>
-                    <StatusBadge tone={auditReadinessTone(effectiveAuditReadiness)}>
-                      {auditReadinessLabel(effectiveAuditReadiness)}
-                    </StatusBadge>
-                    <StatusBadge tone={coverLetterExportState.canExport ? "approved" : "pending"}>
-                      {coverLetterExportState.canExport ? "Export ready" : "Export blocked"}
-                    </StatusBadge>
-                  </div>
-                )}
-                {selectedApplication && (
-                  <details className="context-disclosure preparation-context" open={preparationDetailsOpen}>
-                    <summary>
-                      <span>Step 1. Prepare automatically</span>
-                      <small>{preparationDetailsSummary}</small>
-                    </summary>
-                    {selectedApplication.preparationStatus !== "NotStarted" && (
-                      <div className="workflow-step">
-                        <div>
-                          <h4>Preparation</h4>
-                          <p>Runs job analysis, candidate fit, evidence matching, and strategy in one pass.</p>
-                        </div>
-                        <button
-                          className="secondary-workflow-action"
-                          type="button"
-                          onClick={prepareApplication}
-                          disabled={!canRunPreparation || workflowBusy !== null}
-                          title={disabledTitle(
-                            !canRunPreparation || workflowBusy !== null,
-                            workflowBusyReason ?? "Save a posting and approve at least one profile fact before preparing."
-                          )}
-                        >
-                          {workflowBusy === "prepare" ? "Preparing..." : "Re-run preparation"}
-                        </button>
-                      </div>
-                    )}
-
-                    <div className="workflow-step">
-                      <div>
-                        <h4>Manual: job analysis only</h4>
-                        <p>{jobAnalysisState.message}</p>
-                      </div>
-                      <button
-                        className="secondary-workflow-action"
-                        type="button"
-                        onClick={analyzeJob}
-                        disabled={!jobAnalysisState.canRun || workflowBusy !== null}
-                        title={disabledTitle(!jobAnalysisState.canRun || workflowBusy !== null, workflowBusyReason ?? jobAnalysisState.message)}
-                      >
-                        {workflowBusy === "analysis" ? "Analyzing..." : "Analyze job"}
-                      </button>
-                    </div>
-
-                    {jobSignals.signals.length > 0 ? (
-                      <div className="signal-grid">
-                        <SignalColumn title="Required skills" values={jobSignals.requiredSkills} />
-                        <SignalColumn title="Preferred skills" values={jobSignals.preferredSkills} />
-                        <SignalColumn title="Responsibilities" values={jobSignals.responsibilities} />
-                      </div>
-                    ) : (
-                      <p className="empty-state compact">No analysis results yet.</p>
-                    )}
-
-                    {hasCandidateFitBriefContent(candidateFitBrief) && (
-                      <CandidateFitBriefSummary brief={candidateFitBrief} />
-                    )}
-                  </details>
-                )}
-
-                {selectedApplication && (
-                  <details className="context-disclosure preparation-context" open={evidenceDetailsOpen}>
-                    <summary>
-                      <span>Step 2. Review evidence</span>
-                      <small>{evidenceDetailsSummary}</small>
-                    </summary>
-                    <div className="workflow-step">
-                      <div>
-                        <h4>Manual: evidence matching only</h4>
-                        <p>{evidenceMatchingState.message}</p>
-                      </div>
-                      <button
-                        className="secondary-workflow-action"
-                        type="button"
-                        onClick={matchEvidence}
-                        disabled={!evidenceMatchingState.canRun || workflowBusy !== null}
-                        title={disabledTitle(!evidenceMatchingState.canRun || workflowBusy !== null, workflowBusyReason ?? evidenceMatchingState.message)}
-                      >
-                        {workflowBusy === "matching" ? "Matching..." : "Match evidence"}
-                      </button>
-                    </div>
-
-                <div className="review-grid" ref={evidenceReviewRef}>
-                  <section className="review-column">
-                    <div className="review-column-heading">
-                      <h4>Matched evidence</h4>
-                      <StatusBadge tone={approvedEvidenceDraftSummaryCount > 0 ? "approved" : "neutral"}>
-                        {approvedEvidenceCountLabel(approvedEvidenceDraftSummaryCount)}
-                      </StatusBadge>
-                    </div>
-                    <div className="evidence-toolbar">
-                      <button
-                        type="button"
-                        onClick={approveRecommendedEvidence}
-                        disabled={recommendedEvidenceMatches.length === 0 || approvedRecommendedEvidenceCount === recommendedEvidenceMatches.length}
-                        title={disabledTitle(
-                          recommendedEvidenceMatches.length === 0 || approvedRecommendedEvidenceCount === recommendedEvidenceMatches.length,
-                          recommendedEvidenceMatches.length === 0
-                            ? "No strong or partial evidence matches are available yet."
-                            : "All recommended evidence is already selected."
-                        )}
-                      >
-                        Approve suggested evidence
-                      </button>
-                      <small>
-                        {approvedRecommendedEvidenceCount}/{recommendedEvidenceMatches.length} strong or partial matches selected
-                      </small>
-                    </div>
-                    {evidenceMatches.length === 0 && <p className="empty-state compact">No matches yet.</p>}
-                    {evidenceMatches.map((match) => {
-                      const quality = evidenceQualityPresentation(match.quality);
-                      const isWeakMatch = isWeakEvidence(match);
-                      const hasReviewedWeakMatch = reviewedWeakMatchIds.includes(match.id);
-                      const isApproved = approvedEvidenceDraft.some((item) => item.id === match.id);
-
-                      return (
-                        <article className={`evidence-card ${quality.cardClass} ${isApproved ? "approved" : ""}`} key={match.id}>
-                          <div className="evidence-card-heading">
-                            <strong>{match.signal}</strong>
-                            <StatusBadge tone={isApproved ? "approved" : quality.tone}>
-                              {isApproved ? "Approved evidence" : quality.label}
-                            </StatusBadge>
-                          </div>
-                          <span>{match.profileFactTitle}</span>
-                          <p>{match.summary}</p>
-                          {match.reason && <small>Reason: {match.reason}</small>}
-                          <small>{quality.guidance}</small>
-                          {match.matchedTerms.length > 0 && <small>Matched: {match.matchedTerms.join(", ")}</small>}
-                          {isWeakMatch ? (
-                            <div className="weak-match-review">
-                              <button
-                                type="button"
-                                className={hasReviewedWeakMatch || isApproved ? "selected" : ""}
-                                onClick={() => reviewWeakMatch(match.id)}
-                                aria-pressed={hasReviewedWeakMatch || isApproved}
-                              >
-                                {weakEvidenceReviewLabel(hasReviewedWeakMatch || isApproved)}
-                              </button>
-                              {(hasReviewedWeakMatch || isApproved) && (
-                                <button type="button" onClick={() => (isApproved ? removeApprovedEvidence(match.id) : approveMatch(match))}>
-                                  {isApproved ? "Remove from approved" : "Approve weak match"}
-                                </button>
-                              )}
-                              <small>Weak matches should only guide cautious wording or prompt stronger evidence.</small>
-                            </div>
-                          ) : (
-                            <button type="button" onClick={() => (isApproved ? removeApprovedEvidence(match.id) : approveMatch(match))}>
-                              {isApproved ? "Remove from approved" : "Approve"}
-                            </button>
-                          )}
-                        </article>
-                      );
-                    })}
-                  </section>
-
-                  <section className="review-column">
-                    <div className="review-column-heading">
-                      <h4>Unmatched requirements</h4>
-                      {showCompactGapDecisionReview && (
-                        <button type="button" onClick={() => setIsEvidenceReviewEditing(true)}>
-                          Edit evidence review
-                        </button>
-                      )}
-                    </div>
-                    {unmatchedRequirements.length === 0 && <p className="empty-state compact">No unmatched requirements recorded.</p>}
-                    {showCompactGapDecisionReview ? (
-                      <div className="gap-decision-list compact-review">
-                        {savedGapDecisions.map((decision) => {
-                          const requirement = unmatchedRequirements.find((item) => item.id === decision.unmatchedRequirementId);
-
-                          return (
-                            <article className={`gap-decision-item ${gapDecisionClass(decision)}`} key={decision.unmatchedRequirementId}>
-                              <div>
-                                <StatusBadge tone={gapDecisionTone(decision)}>
-                                  {gapDecisionLabel(decision.decision)}
-                                </StatusBadge>
-                                <strong>{requirement?.requirement ?? decision.unmatchedRequirementId}</strong>
-                                <span>{gapDecisionSummary(decision, customFacts)}</span>
-                              </div>
-                            </article>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                    unmatchedRequirements.map((requirement) => {
-                      const gapDecision = gapDecisionForRequirement(gapDecisionsDraft, requirement.id);
-                      const requirementCustomFacts = customFactsForRequirement(customFacts, requirement.id);
-                      const approvedCustomFacts = requirementCustomFacts.filter((fact) => fact.status === "Approved");
-                      const customFactDraft = customFactDrafts[requirement.id] ?? emptyCustomFactDraft();
-                      const isCustomFactEditorExpanded = expandedCustomFactRequirementId === requirement.id;
-
-                      return (
-                        <article className="evidence-card muted" key={requirement.id}>
-                          <div className="gap-card-heading">
-                            <strong>{requirement.requirement}</strong>
-                            {gapDecision ? (
-                              <StatusBadge tone={gapDecision.decision === "Ignore" ? "neutral" : "pending"}>
-                                {gapDecisionLabel(gapDecision.decision)}
-                              </StatusBadge>
-                            ) : (
-                              <StatusBadge tone="pending">Needs decision</StatusBadge>
-                            )}
-                          </div>
-                          <span>{requirement.category}</span>
-                          <p>{requirement.recommendation}</p>
-                          <div className="gap-decision-actions" role="group" aria-label={`Gap decision for ${requirement.requirement}`}>
-                            <button
-                              type="button"
-                              className={gapDecision?.decision === "Ignore" ? "selected" : ""}
-                              onClick={() => decideGap(requirement.id, "Ignore")}
-                            >
-                              Ignore
-                            </button>
-                            <button
-                              type="button"
-                              className={gapDecision?.decision === "MentionAsLearningInterest" ? "selected" : ""}
-                              onClick={() => decideGap(requirement.id, "MentionAsLearningInterest")}
-                            >
-                              Mention as learning interest
-                            </button>
-                            {approvedCustomFacts.map((fact) => (
-                              <button
-                                type="button"
-                                className={gapDecision?.decision === "CoveredByCustomFact" && gapDecision.customFactId === fact.id ? "selected" : ""}
-                                key={fact.id}
-                                onClick={() => decideGap(requirement.id, "CoveredByCustomFact", fact.id)}
-                              >
-                                Cover with {fact.title}
-                              </button>
-                            ))}
-                            <button
-                              type="button"
-                              className={isCustomFactEditorExpanded ? "selected" : ""}
-                              onClick={() =>
-                                setExpandedCustomFactRequirementId((current) =>
-                                  current === requirement.id ? null : requirement.id
-                                )
-                              }
-                              aria-expanded={isCustomFactEditorExpanded}
-                            >
-                              Add custom fact
-                            </button>
-                          </div>
-
-                          {gapDecision && gapDecision.decision !== "CoveredByCustomFact" && (
-                            <article className={`gap-decision-item compact-inline ${gapDecisionClass(gapDecision)}`}>
-                              <div>
-                                <StatusBadge tone={gapDecisionTone(gapDecision)}>
-                                  {gapDecisionLabel(gapDecision.decision)}
-                                </StatusBadge>
-                                <span>{gapDecisionSummary(gapDecision, customFacts)}</span>
-                              </div>
-                            </article>
-                          )}
-
-                          {isCustomFactEditorExpanded && (
-                            <div className="custom-fact-editor">
-                              <Field
-                                label="Custom fact title"
-                                value={customFactDraft.title}
-                                onChange={(title) => updateCustomFactDraft(requirement.id, { title })}
-                              />
-                              <Textarea
-                                label="Custom fact summary"
-                                value={customFactDraft.summary}
-                                onChange={(summary) => updateCustomFactDraft(requirement.id, { summary })}
-                              />
-                              <Textarea
-                                label="Technologies"
-                                value={customFactDraft.technologies}
-                                onChange={(technologies) => updateCustomFactDraft(requirement.id, { technologies })}
-                              />
-                              <Textarea
-                                label="Allowed claims"
-                                value={customFactDraft.allowedClaims}
-                                onChange={(allowedClaims) => updateCustomFactDraft(requirement.id, { allowedClaims })}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => createCustomFact(requirement.id)}
-                                disabled={workflowBusy !== null}
-                                title={disabledTitle(workflowBusy !== null, workflowBusyReason)}
-                              >
-                                {workflowBusy === `custom-fact-${requirement.id}` ? "Adding..." : "Add job-local fact"}
-                              </button>
-                            </div>
-                          )}
-
-                          {requirementCustomFacts.length > 0 && (
-                            <div className="custom-fact-list compact">
-                              {requirementCustomFacts.map((fact) => (
-                                <article className={`custom-fact ${customFactStatusClass(fact.status)}`} key={fact.id}>
-                                  <StatusBadge tone={customFactStatusTone(fact.status)}>{customFactStatusLabel(fact.status)}</StatusBadge>
-                                  <strong>{fact.title}</strong>
-                                  <p>{fact.summary}</p>
-                                  {fact.technologies && fact.technologies.length > 0 && <small>{fact.technologies.join(", ")}</small>}
-                                  {fact.status === "PendingConfirmation" && (
-                                    <div className="custom-fact-actions">
-                                      <button
-                                        type="button"
-                                        onClick={() => updateCustomFactStatus(fact.id, "Approved")}
-                                        disabled={workflowBusy !== null}
-                                        title={disabledTitle(workflowBusy !== null, workflowBusyReason)}
-                                      >
-                                        Approve
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => updateCustomFactStatus(fact.id, "Rejected")}
-                                        disabled={workflowBusy !== null}
-                                        title={disabledTitle(workflowBusy !== null, workflowBusyReason)}
-                                      >
-                                        Reject
-                                      </button>
-                                    </div>
-                                  )}
-                                </article>
-                              ))}
-                            </div>
-                          )}
-                        </article>
-                      );
-                    })
-                    )}
-                  </section>
-                </div>
-
-                <div className="workflow-step">
-                  <div>
-                    <h4>Save evidence decisions</h4>
-                    <p>Save the selected evidence and any required gap decisions before draft generation.</p>
-                  </div>
-                  <div className="workflow-action-group">
-                    <button
-                      className="secondary-workflow-action"
-                      type="button"
-                      onClick={resetEvidenceReview}
-                      disabled={!selectedApplicationId || workflowBusy !== null}
-                      title={disabledTitle(
-                        !selectedApplicationId || workflowBusy !== null,
-                        workflowBusyReason ?? "Save the application before resetting evidence review."
-                      )}
-                    >
-                      {workflowBusy === "review" ? "Resetting..." : "Reset evidence"}
-                    </button>
-                    <button
-                      className="secondary-workflow-action"
-                      type="button"
-                      onClick={saveApprovedEvidence}
-                      disabled={!selectedApplicationId || workflowBusy !== null}
-                      title={disabledTitle(
-                        !selectedApplicationId || workflowBusy !== null,
-                        workflowBusyReason ?? "Save the application before reviewing evidence."
-                      )}
-                    >
-                      {workflowBusy === "review" ? "Saving..." : "Save evidence review"}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="approved-list">
-                  {approvedEvidenceDraft.length === 0 && currentApprovedCustomFactEvidence.length === 0 && (
-                    <p className="empty-state compact">No approved evidence selected.</p>
-                  )}
-                  {approvedEvidenceDraft.map((match) => (
-                    <article className="approved-item" key={match.id}>
-                      <div>
-                        <StatusBadge tone="approved">Approved profile evidence</StatusBadge>
-                        <strong>{match.signal}</strong>
-                        <span>{match.profileFactTitle}</span>
-                      </div>
-                      <button type="button" onClick={() => removeApprovedEvidence(match.id)}>Remove</button>
-                    </article>
-                  ))}
-                  {currentApprovedCustomFactEvidence.map((item) => (
-                    <article className="approved-item custom-proof" key={item.fact.id}>
-                      <div>
-                        <StatusBadge tone="approved">Approved job-local fact</StatusBadge>
-                        <strong>{item.requirement.requirement}</strong>
-                        <span>{item.fact.title}</span>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-
-                <div className="gap-decision-list">
-                  {gapDecisionsDraft.length === 0 && <p className="empty-state compact">No gap decisions selected.</p>}
-                  {gapDecisionsDraft.map((decision) => {
-                    const requirement = unmatchedRequirements.find((item) => item.id === decision.unmatchedRequirementId);
-
-                    return (
-                      <article className={`gap-decision-item ${gapDecisionClass(decision)}`} key={decision.unmatchedRequirementId}>
-                        <div>
-                          <StatusBadge tone={gapDecisionTone(decision)}>
-                            {gapDecisionLabel(decision.decision)}
-                          </StatusBadge>
-                          <strong>{requirement?.requirement ?? decision.unmatchedRequirementId}</strong>
-                          <span>{gapDecisionSummary(decision, customFacts)}</span>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-
-                <section className="custom-facts-panel">
-                  <div className="section-heading">
-                    <h4>Job-local custom facts</h4>
-                    <p>Only approved job-local facts should support generated claims.</p>
-                  </div>
-                  {customFacts.length === 0 ? (
-                    <p className="empty-state compact">No job-local custom facts recorded.</p>
-                  ) : (
-                    <div className="custom-fact-list">
-                      {customFacts.map((fact) => (
-                        <article className={`custom-fact ${customFactStatusClass(fact.status)}`} key={fact.id}>
-                          <StatusBadge tone={customFactStatusTone(fact.status)}>{customFactStatusLabel(fact.status)}</StatusBadge>
-                          <strong>{fact.title}</strong>
-                          <p>{fact.summary}</p>
-                          {fact.technologies && fact.technologies.length > 0 && <small>{fact.technologies.join(", ")}</small>}
-                        </article>
-                      ))}
-                    </div>
-                  )}
-                </section>
-                  </details>
-                )}
-
-                <div className="workflow-step generated-draft-action">
-                  <div>
-                    <h4>Step 3. Generate and audit</h4>
-                    <p>{draftGenerationState.message}</p>
-                    {aiStatus && (
-                      <span className={`inline-readiness ${aiStatus.isAvailable ? "available" : "unavailable"} ${isFakeProvider(aiStatus) ? "fake" : ""}`}>
-                        {getDraftReadinessLabel(aiStatus)}
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    className="secondary-workflow-action"
-                    type="button"
-                    onClick={generateDraft}
-                    disabled={!draftGenerationState.canRun || workflowBusy !== null}
-                    title={disabledTitle(!draftGenerationState.canRun || workflowBusy !== null, workflowBusyReason ?? draftGenerationState.message)}
-                  >
-                    {workflowBusy === "draft" ? "Generating..." : hasGeneratedDraft ? "Regenerate and audit draft" : "Generate and audit draft"}
-                  </button>
-                </div>
-
-                {selectedApplication && hasApplicationStrategyContent(applicationStrategy) && (
-                  <details className="context-disclosure preparation-context" open={strategyDetailsOpen}>
-                    <summary>
-                      <span>Strategy details</span>
-                      <small>{strategyDetailsSummary}</small>
-                    </summary>
-                    <ApplicationStrategySummary strategy={applicationStrategy} />
-                  </details>
-                )}
-
-                {selectedApplication?.generatedDraft ? (
-                  <section className="draft-editor" ref={draftReviewRef}>
-                    <div className="section-heading">
-                      <h4>Current draft</h4>
-                      <p>
-                        Generated {formatDate(selectedApplication.generatedDraft.generatedAt)}
-                        {selectedApplication.generatedDraft.lastEditedAt ? ` - Edited ${formatDate(selectedApplication.generatedDraft.lastEditedAt)}` : ""}
-                        {effectiveAuditReadiness === "Stale" ? " - Audit stale" : ""}
-                      </p>
-                    </div>
-                    {aiStatus && isFakeProvider(aiStatus) && (
-                      <p className="workflow-note warning">Fake AI mode: this draft uses deterministic demo/test output.</p>
-                    )}
-                    {isDraftQualityBlocked && (
-                      <section className="claim-audit">
-                        <div className="section-heading">
-                          <h4>Draft quality</h4>
-                          <p>
-                            Needs revision - {draftQualityCheck.copiedSevenWordPhraseCount} copied seven-word phrases detected
-                            {draftQualityCheck.copiedPhraseThreshold > 0 ? `, threshold ${draftQualityCheck.copiedPhraseThreshold}` : ""}
-                          </p>
-                        </div>
-                        <p className="workflow-note warning">{coverLetterExportState.reason ?? "Resolve draft quality issues before exporting."}</p>
-                        <div className="audit-list">
-                          {draftQualityCheck.issues.map((issue) => (
-                            <article className="audit-item needsreview" key={issue.code}>
-                              <span>{issue.severity}</span>
-                              <p>{issue.message}</p>
-                            </article>
-                          ))}
-                        </div>
-                      </section>
-                    )}
-                    {effectiveAuditExportNotice && <p className={`workflow-note ${effectiveAuditExportNotice.tone}`}>{effectiveAuditExportNotice.message}</p>}
-                    <Textarea
-                      label="Cover letter"
-                      value={generatedDraftForm.coverLetterText}
-                      onChange={(coverLetterText) => {
-                        setGeneratedDraftForm({ ...generatedDraftForm, coverLetterText });
-                        setExportFeedback(null);
-                      }}
-                    />
-                    <Textarea
-                      label="Short motivation"
-                      value={generatedDraftForm.shortMotivationText}
-                      onChange={(shortMotivationText) => {
-                        setGeneratedDraftForm({ ...generatedDraftForm, shortMotivationText });
-                        setExportFeedback(null);
-                      }}
-                    />
-                    <div className="form-actions">
-                      <button
-                        className="secondary-workflow-action"
-                        type="button"
-                        onClick={saveGeneratedDraft}
-                        disabled={!hasUnsavedDraftEdits || workflowBusy !== null}
-                        title={disabledTitle(
-                          !hasUnsavedDraftEdits || workflowBusy !== null,
-                          workflowBusyReason ?? "Edit the draft before saving changes."
-                        )}
-                      >
-                        {workflowBusy === "draft-edit" ? "Saving..." : "Save draft edits"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void refreshClaimAudit()}
-                        disabled={!canRefreshClaimAudit || workflowBusy !== null}
-                        title={disabledTitle(
-                          !canRefreshClaimAudit || workflowBusy !== null,
-                          workflowBusyReason ??
-                            (isRealProviderUnavailable
-                              ? "Open AI settings before refreshing claim audit."
-                              : "Claim audit is current.")
-                        )}
-                      >
-                        {workflowBusy === "audit" ? "Auditing..." : "Refresh claim audit"}
-                      </button>
-                    </div>
-                    <section className="export-panel" ref={exportPanelRef}>
-                      <div className="section-heading">
-                        <h4>Export cover letter</h4>
-                        <p>{coverLetterExportState.reason ?? "Copy or download the current saved cover letter exactly as edited."}</p>
-                      </div>
-                      <p className="workflow-note info">Copy uses the visible edited text. TXT and DOCX downloads use the current saved draft edits and never regenerate or re-run claim audit.</p>
-                      {effectiveAuditExportNotice && <p className={`workflow-note ${effectiveAuditExportNotice.tone}`}>{effectiveAuditExportNotice.message}</p>}
-                      {!coverLetterExportState.canCopy && coverLetterExportState.canExport && (
-                        <p className="workflow-note neutral">Clipboard copy is not available in this browser. TXT and DOCX export are still available.</p>
-                      )}
-                      {exportFeedback && <InlineFeedbackMessage feedback={exportFeedback} />}
-                      <div className="form-actions">
-                        <button
-                          type="button"
-                          onClick={() => void copyCoverLetter()}
-                          disabled={!coverLetterExportState.canCopy || exportBusy !== null}
-                          title={disabledTitle(
-                            !coverLetterExportState.canCopy || exportBusy !== null,
-                            exportBusyReason ?? coverLetterExportState.reason ?? "Clipboard copy is not available in this browser."
-                          )}
-                        >
-                          Copy
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void downloadCoverLetter("txt")}
-                          disabled={!coverLetterExportState.canExport || exportBusy !== null}
-                          title={disabledTitle(!coverLetterExportState.canExport || exportBusy !== null, exportBusyReason ?? coverLetterExportState.reason)}
-                        >
-                          {exportBusy === "txt" ? "Downloading..." : "Download TXT"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void downloadCoverLetter("docx")}
-                          disabled={!coverLetterExportState.canExport || exportBusy !== null}
-                          title={disabledTitle(!coverLetterExportState.canExport || exportBusy !== null, exportBusyReason ?? coverLetterExportState.reason)}
-                        >
-                          {exportBusy === "docx" ? "Downloading..." : "Download DOCX"}
-                        </button>
-                      </div>
-                    </section>
-                    <section className={`claim-audit ${isDraftQualityBlocked ? "subordinate-to-quality" : ""}`}>
-                      <div className="section-heading">
-                        <h4>Claim audit</h4>
-                        <p>
-                          {isDraftQualityBlocked
-                            ? selectedApplication.generatedDraft.auditUpdatedAt
-                              ? `Draft quality still blocks export - audit updated ${formatDate(selectedApplication.generatedDraft.auditUpdatedAt)}`
-                              : "Draft quality still blocks export - run claim audit after the generated text is ready."
-                            : selectedApplication.generatedDraft.auditUpdatedAt
-                              ? `Updated ${formatDate(selectedApplication.generatedDraft.auditUpdatedAt)} - ${auditSummary.supported} supported, ${auditSummary.unsupported} unsupported, ${auditSummary.needsReview} needs review`
-                            : "Run claim audit after the generated text is ready."}
-                        </p>
-                      </div>
-                      {effectiveAuditExportNotice && <p className={`workflow-note ${effectiveAuditExportNotice.tone}`}>{effectiveAuditExportNotice.message}</p>}
-                      {isDraftQualityBlocked && selectedApplication.generatedDraft.auditUpdatedAt && (
-                        <p className="audit-counts-subordinate">
-                          {auditSummary.supported} supported, {auditSummary.unsupported} unsupported, {auditSummary.needsReview} needs review
-                        </p>
-                      )}
-                      {claimAudit.claims.length === 0 ? (
-                        <p className="empty-state compact">No claim audit results yet.</p>
-                      ) : (
-                        <div className="audit-list">
-                          {claimAudit.claims.map((claim) => (
-                            <article className={`audit-item ${claim.status.toLowerCase()}`} key={claim.id}>
-                              <span>{claim.status}</span>
-                              <p>{claim.text}</p>
-                              {claim.evidenceIds.length > 0 && <small>Evidence: {claim.evidenceIds.join(", ")}</small>}
-                            </article>
-                          ))}
-                        </div>
-                      )}
-                    </section>
-                  </section>
-                ) : (
-                  <section className="export-panel disabled">
-                    <div className="section-heading">
-                      <h4>Export cover letter</h4>
-                      <p>{coverLetterExportState.reason ?? claimAuditMessage(hasGeneratedDraft)}</p>
-                    </div>
-                    <p className="workflow-note neutral">TXT and DOCX downloads become available after a non-empty generated draft is saved.</p>
-                    <div className="form-actions">
-                      <button type="button" disabled title={coverLetterExportState.reason ?? "Generate a draft before copying."}>Copy</button>
-                      <button type="button" disabled title={coverLetterExportState.reason ?? "Generate a draft before downloading TXT."}>Download TXT</button>
-                      <button type="button" disabled title={coverLetterExportState.reason ?? "Generate a draft before downloading DOCX."}>Download DOCX</button>
-                    </div>
-                  </section>
-                )}
-              </section>
-            </form>
+            <ApplicationListPanel
+              applications={applications}
+              filteredApplications={filteredApplications}
+              selectedApplicationId={selectedApplicationId}
+              approvedProfileFactCount={approvedProfileFacts.length}
+              includeArchivedApplications={includeArchivedApplications}
+              applicationSearch={applicationSearch}
+              applicationStatusFilter={applicationStatusFilter}
+              applicationReadinessFilter={applicationReadinessFilter}
+              applicationStatuses={applicationStatuses}
+              auditReadinessOptions={auditReadinessOptions}
+              onSearchChange={setApplicationSearch}
+              onStatusFilterChange={setApplicationStatusFilter}
+              onReadinessFilterChange={setApplicationReadinessFilter}
+              onIncludeArchivedChange={setIncludeArchivedApplications}
+              onNewApplication={startNewApplication}
+              onOpenApplication={(application) => void openApplication(application)}
+              applicationStatusClass={applicationStatusClass}
+              applicationHistoryTone={applicationHistoryTone}
+              applicationHistoryLabel={applicationHistoryLabel}
+              applicationStatusLabel={applicationStatusLabel}
+              applicationNextActionLabel={applicationNextActionLabel}
+              readinessLabel={readinessLabel}
+              applicationHistoryEmptyMessage={applicationHistoryEmptyMessage}
+              formatDate={formatDate}
+            />
+            <ApplicationEditor
+              selectedApplication={selectedApplication}
+              selectedApplicationId={selectedApplicationId}
+              applicationForm={applicationForm}
+              applicationStatuses={applicationStatuses}
+              workflowBusy={workflowBusy}
+              workflowBusyReason={workflowBusyReason}
+              onApplicationFormChange={setApplicationForm}
+              onSaveApplication={saveApplication}
+              onStartNewApplication={startNewApplication}
+              onDeleteApplication={() => void deleteApplication()}
+              onMarkApplied={() => void markApplicationStatus("Applied")}
+              onArchive={() => void markApplicationStatus("Archived")}
+              disabledTitle={disabledTitle}
+            >
+              <ApplicationWorkflowPanel
+                selectedApplication={selectedApplication}
+                selectedApplicationId={selectedApplicationId}
+                hasGeneratedDraft={hasGeneratedDraft}
+                hasSavedApprovedEvidence={hasSavedApprovedEvidence}
+                savedApprovedEvidence={savedApprovedEvidence}
+                savedApprovedCustomFactEvidenceCount={savedApprovedCustomFactEvidenceCount}
+                guidedNextAction={guidedNextAction}
+                jobAnalysisState={jobAnalysisState}
+                evidenceMatchingState={evidenceMatchingState}
+                draftGenerationState={draftGenerationState}
+                coverLetterExportState={coverLetterExportState}
+                jobSignals={jobSignals}
+                evidenceMatches={evidenceMatches}
+                unmatchedRequirements={unmatchedRequirements}
+                savedGapDecisions={savedGapDecisions}
+                gapDecisionsDraft={gapDecisionsDraft}
+                customFacts={customFacts}
+                customFactDrafts={customFactDrafts}
+                expandedCustomFactRequirementId={expandedCustomFactRequirementId}
+                savedApprovedCustomFactEvidence={savedApprovedCustomFactEvidence}
+                currentApprovedCustomFactEvidence={currentApprovedCustomFactEvidence}
+                candidateFitBrief={candidateFitBrief}
+                applicationStrategy={applicationStrategy}
+                claimAudit={claimAudit}
+                draftQualityCheck={draftQualityCheck}
+                approvedEvidenceDraft={approvedEvidenceDraft}
+                approvedEvidenceDraftSummaryCount={approvedEvidenceDraftSummaryCount}
+                approvedRecommendedEvidenceCount={approvedRecommendedEvidenceCount}
+                recommendedEvidenceMatches={recommendedEvidenceMatches}
+                reviewedWeakMatchIds={reviewedWeakMatchIds}
+                currentGapDecisionCount={currentGapDecisionCount}
+                auditSummary={auditSummary}
+                effectiveAuditReadiness={effectiveAuditReadiness}
+                effectiveAuditExportNotice={effectiveAuditExportNotice}
+                isDraftQualityBlocked={isDraftQualityBlocked}
+                hasUnsavedDraftEdits={hasUnsavedDraftEdits}
+                isRealProviderUnavailable={isRealProviderUnavailable}
+                canRefreshClaimAudit={canRefreshClaimAudit}
+                generatedDraftForm={generatedDraftForm}
+                preparationDetailsOpen={preparationDetailsOpen}
+                evidenceDetailsOpen={evidenceDetailsOpen}
+                strategyDetailsOpen={strategyDetailsOpen}
+                preparationDetailsSummary={preparationDetailsSummary}
+                evidenceDetailsSummary={evidenceDetailsSummary}
+                strategyDetailsSummary={strategyDetailsSummary}
+                showCompactGapDecisionReview={showCompactGapDecisionReview}
+                canRunPreparation={canRunPreparation}
+                workflowBusy={workflowBusy}
+                workflowBusyReason={workflowBusyReason}
+                exportBusy={exportBusy}
+                exportBusyReason={exportBusyReason}
+                exportFeedback={exportFeedback}
+                aiStatus={aiStatus}
+                aiDiagnostics={aiDiagnostics}
+                aiDiagnosticsLastRanAt={aiDiagnosticsLastRanAt}
+                evidenceReviewRef={evidenceReviewRef}
+                draftReviewRef={draftReviewRef}
+                exportPanelRef={exportPanelRef}
+                onRunGuidedNextAction={runGuidedNextAction}
+                onPrepareApplication={prepareApplication}
+                onAnalyzeJob={analyzeJob}
+                onMatchEvidence={matchEvidence}
+                onGenerateDraft={generateDraft}
+                onApproveMatch={approveMatch}
+                onApproveRecommendedEvidence={approveRecommendedEvidence}
+                onReviewWeakMatch={reviewWeakMatch}
+                onRemoveApprovedEvidence={removeApprovedEvidence}
+                onSetEvidenceReviewEditing={setIsEvidenceReviewEditing}
+                onDecideGap={decideGap}
+                onToggleCustomFactEditor={(requirementId) =>
+                  setExpandedCustomFactRequirementId((current) => (current === requirementId ? null : requirementId))
+                }
+                onUpdateCustomFactDraft={updateCustomFactDraft}
+                onCreateCustomFact={createCustomFact}
+                onUpdateCustomFactStatus={updateCustomFactStatus}
+                onResetEvidenceReview={resetEvidenceReview}
+                onSaveApprovedEvidence={saveApprovedEvidence}
+                onDraftFormChange={setGeneratedDraftForm}
+                onSaveGeneratedDraft={() => void saveGeneratedDraft()}
+                onRefreshClaimAudit={() => void refreshClaimAudit()}
+                onCopyCoverLetter={() => void copyCoverLetter()}
+                onDownloadCoverLetter={(format) => void downloadCoverLetter(format)}
+                onClearExportFeedback={() => setExportFeedback(null)}
+                approvedEvidenceCountLabel={approvedEvidenceCountLabel}
+                auditReadinessLabel={auditReadinessLabel}
+                auditReadinessTone={auditReadinessTone}
+                claimAuditMessage={claimAuditMessage}
+                customFactStatusClass={customFactStatusClass}
+                customFactStatusLabel={customFactStatusLabel}
+                customFactStatusTone={customFactStatusTone}
+                disabledTitle={disabledTitle}
+                emptyCustomFactDraft={emptyCustomFactDraft}
+                formatDate={formatDate}
+                gapDecisionClass={gapDecisionClass}
+                gapDecisionForRequirement={gapDecisionForRequirement}
+                gapDecisionLabel={gapDecisionLabel}
+                gapDecisionSummary={gapDecisionSummary}
+                gapDecisionTone={gapDecisionTone}
+                guidedActionButtonLabel={guidedActionButtonLabel}
+                guidedStepLabel={guidedStepLabel}
+                preparationStatusLabel={preparationStatusLabel}
+                preparationStatusTone={preparationStatusTone}
+                customFactsForRequirement={customFactsForRequirement}
+              />
+            </ApplicationEditor>
           </div>
         )}
 
         {view === "settings" && (
-          <article className="panel settings-panel">
-            <h3>AI settings</h3>
-            {aiStatus ? (
-              <>
-                <p>{getProviderSummary(aiStatus)}</p>
-                <dl className="status-details">
-                  <div>
-                    <dt>Provider</dt>
-                    <dd>{aiStatus.provider}</dd>
-                  </div>
-                  <div>
-                    <dt>Model</dt>
-                    <dd>{aiStatus.model}</dd>
-                  </div>
-                  <div>
-                    <dt>Endpoint</dt>
-                    <dd>{aiStatus.endpoint ?? "Not applicable"}</dd>
-                  </div>
-                  <div>
-                    <dt>Availability</dt>
-                    <dd>{aiStatus.isAvailable ? "Available" : "Unavailable"}</dd>
-                  </div>
-                  <div>
-                    <dt>Diagnostics</dt>
-                    <dd>{aiDiagnosticsLastRanAt ? `Last ran ${formatDateTime(aiDiagnosticsLastRanAt)}` : "Not run this session"}</dd>
-                  </div>
-                </dl>
-              </>
-            ) : (
-              <p>Loading AI provider status.</p>
-            )}
-            <button className="primary-action" type="button" onClick={runAiDiagnostics} disabled={aiDiagnosticsBusy}>
-              {aiDiagnosticsBusy ? "Running diagnostics..." : "Run diagnostics"}
-            </button>
-            {aiDiagnosticsBusy && <p className="diagnostics-state">Checking provider connectivity and model readiness.</p>}
-            {!aiDiagnosticsBusy && !aiDiagnostics && !aiDiagnosticsError && (
-              <p className="diagnostics-state">Diagnostics have not been run this session.</p>
-            )}
-            {aiDiagnosticsError && <ErrorMessage error={aiDiagnosticsError} compact />}
-            {aiDiagnostics && (
-              <section className="diagnostics-list">
-                <h4>Diagnostics result</h4>
-                <p className={aiDiagnostics.isAvailable ? "diagnostics-state success" : "diagnostics-state warning"}>
-                  {aiDiagnostics.message}
-                </p>
-                {aiDiagnostics.checks.map((check) => (
-                  <article className="diagnostics-item" key={check.name}>
-                    <strong>{check.name}</strong>
-                    <span>{check.status}</span>
-                    <p>{check.message}</p>
-                  </article>
-                ))}
-              </section>
-            )}
-          </article>
+          <SettingsView
+            aiStatus={aiStatus}
+            aiDiagnostics={aiDiagnostics}
+            aiDiagnosticsError={aiDiagnosticsError}
+            aiDiagnosticsBusy={aiDiagnosticsBusy}
+            aiDiagnosticsLastRanAt={aiDiagnosticsLastRanAt}
+            onRunAiDiagnostics={runAiDiagnostics}
+            formatDateTime={formatDateTime}
+          />
         )}
-      </section>
-    </main>
+    </AppShell>
   );
-}
-
-function Field(props: {
-  label: string;
-  type?: string;
-  required?: boolean;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="field">
-      <span>{props.label}</span>
-      <input
-        type={props.type ?? "text"}
-        required={props.required}
-        value={props.value}
-        onChange={(event) => props.onChange(event.target.value)}
-      />
-    </label>
-  );
-}
-
-function Select(props: {
-  label: string;
-  required?: boolean;
-  value: string;
-  options: string[];
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="field">
-      <span>{props.label}</span>
-      <select
-        required={props.required}
-        value={props.value}
-        onChange={(event) => props.onChange(event.target.value)}
-      >
-        {props.options.map((option) => (
-          <option key={option} value={option}>{option}</option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function Textarea(props: {
-  label: string;
-  required?: boolean;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="field wide">
-      <span>{props.label}</span>
-      <textarea required={props.required} value={props.value} onChange={(event) => props.onChange(event.target.value)} />
-    </label>
-  );
-}
-
-function ErrorMessage(props: { error: ErrorPresentation; compact?: boolean }) {
-  return (
-    <div className={props.compact ? "message error compact" : "message error"} role="alert">
-      <strong>{props.error.title}</strong>
-      <p>{props.error.message}</p>
-      {props.error.details && props.error.details.length > 0 && (
-        <details>
-          <summary>Technical details</summary>
-          <ul>
-            {props.error.details.map((detail, index) => (
-              <li key={`${detail}-${index}`}>{detail}</li>
-            ))}
-          </ul>
-        </details>
-      )}
-    </div>
-  );
-}
-
-function InlineFeedbackMessage(props: { feedback: InlineFeedback }) {
-  return (
-    <div className={`workflow-note ${props.feedback.tone}`} role={props.feedback.tone === "error" ? "alert" : "status"}>
-      <strong>{props.feedback.title}</strong>
-      <p>{props.feedback.message}</p>
-      {props.feedback.details && props.feedback.details.length > 0 && (
-        <details>
-          <summary>Technical details</summary>
-          <ul>
-            {props.feedback.details.map((detail, index) => (
-              <li key={`${detail}-${index}`}>{detail}</li>
-            ))}
-          </ul>
-        </details>
-      )}
-    </div>
-  );
-}
-
-function StatusBadge(props: { tone: string; children: string }) {
-  return <span className={`state-badge ${props.tone}`}>{props.children}</span>;
-}
-
-function SignalColumn(props: { title: string; values: string[] }) {
-  return (
-    <section className="signal-column">
-      <h4>{props.title}</h4>
-      {props.values.length === 0 ? (
-        <p>None found.</p>
-      ) : (
-        <ul>
-          {props.values.map((value) => (
-            <li key={value}>{value}</li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function CandidateFitBriefSummary(props: { brief: CandidateFitBrief }) {
-  const sections = candidateFitBriefSections(props.brief);
-
-  return (
-    <section className="fit-brief-summary" aria-label="Candidate fit brief summary">
-      <div className="section-heading">
-        <div>
-          <h4>Candidate fit brief</h4>
-          <p>Read-only preparation context. Supporting fact references are traceability only, not approved evidence.</p>
-        </div>
-        <StatusBadge tone="neutral">Read-only</StatusBadge>
-      </div>
-      {props.brief.candidateSummary.trim() && (
-        <p className="fit-brief-candidate-summary">{props.brief.candidateSummary}</p>
-      )}
-      {props.brief.skillGroups.length > 0 && (
-        <div className="fit-brief-skill-groups">
-          {props.brief.skillGroups.map((group, groupIndex) => (
-            <article className="fit-brief-card" key={`${group.name}-${groupIndex}`}>
-              <strong>{group.name}</strong>
-              {group.items.length === 0 ? (
-                <p className="empty-state compact">No skills listed.</p>
-              ) : (
-                <ul>
-                  {group.items.map((item, itemIndex) => (
-                    <li key={`${group.name}-${item.title}-${itemIndex}`}>
-                      <span>{item.title}</span>
-                      {item.summary && <small>{item.summary}</small>}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </article>
-          ))}
-        </div>
-      )}
-      <div className="fit-brief-section-grid">
-        {sections.map((section) => (
-          <article className={`fit-brief-card ${section.tone}`} key={section.key}>
-            <h5>{section.title}</h5>
-            {section.items.length === 0 ? (
-              <p className="empty-state compact">None recorded.</p>
-            ) : (
-              <ul>
-                {section.items.map((item, itemIndex) => (
-                  <li key={`${section.key}-${item.title}-${itemIndex}`}>
-                    <span>{item.title}</span>
-                    {item.summary && <small>{item.summary}</small>}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function ApplicationStrategySummary(props: { strategy: ApplicationStrategy }) {
-  const sections = applicationStrategySections(props.strategy);
-
-  return (
-    <section className="application-strategy-summary" aria-label="Application strategy summary">
-      <div className="section-heading">
-        <div>
-          <h4>Application strategy</h4>
-          <p>Read-only writing plan for the next generated draft.</p>
-        </div>
-        <StatusBadge tone="neutral">Read-only</StatusBadge>
-      </div>
-      {props.strategy.toneGuidance.trim() && (
-        <p className="strategy-tone-guidance">{props.strategy.toneGuidance}</p>
-      )}
-      <div className="strategy-section-grid">
-        {sections.map((section) => (
-          <article className={`strategy-card ${section.tone}`} key={section.key}>
-            <h5>{section.title}</h5>
-            {section.items.length === 0 ? (
-              <p className="empty-state compact">None recorded.</p>
-            ) : (
-              <ul>
-                {section.items.map((item, itemIndex) => (
-                  <li key={`${section.key}-${itemIndex}`}>{item}</li>
-                ))}
-              </ul>
-            )}
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-async function apiGet<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`);
-  return readResponse<T>(response);
-}
-
-async function apiSend<T>(path: string, method: "POST" | "PUT", body: unknown): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    method,
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(body)
-  });
-  return readResponse<T>(response);
-}
-
-async function apiSendForm<T>(path: string, body: FormData): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    method: "POST",
-    body
-  });
-  return readResponse<T>(response);
-}
-
-async function apiDelete(path: string): Promise<void> {
-  const response = await fetch(`${apiBaseUrl}${path}`, { method: "DELETE" });
-  if (!response.ok) {
-    throw await response.json();
-  }
-}
-
-async function readResponse<T>(response: Response): Promise<T> {
-  const body = await response.json();
-  if (!response.ok) {
-    throw body;
-  }
-  return body;
 }
 
 function toProfileForm(profile: ProfileForm): ProfileForm {
@@ -3225,69 +1868,6 @@ function fileNameFromContentDisposition(header: string | null, fallback: string)
 
   const fileNameMatch = /filename="?([^";]+)"?/i.exec(header);
   return fileNameMatch?.[1] ?? fallback;
-}
-
-function ProviderReadinessSummary({
-  status,
-  diagnostics,
-  diagnosticsLastRanAt,
-  compact = false
-}: {
-  status: AiProviderStatus;
-  diagnostics: AiDiagnostics | null;
-  diagnosticsLastRanAt: string | null;
-  compact?: boolean;
-}) {
-  const tone = getReadinessTone(status);
-  const details = diagnostics?.checks ?? [];
-
-  return (
-    <section className={`provider-readiness workflow-note ${tone}`}>
-      <strong>{getProviderReadinessTitle(status)}</strong>
-      <p>{getProviderSummary(status)}</p>
-      {!status.isAvailable && !isFakeProvider(status) && (
-        <p>{getProviderRecoveryGuidance(status)}</p>
-      )}
-      <dl className={`status-details ${compact ? "compact" : ""}`}>
-        <div>
-          <dt>Provider</dt>
-          <dd>{status.provider}</dd>
-        </div>
-        <div>
-          <dt>Mode</dt>
-          <dd>{isFakeProvider(status) ? "Deterministic demo/test behavior" : "Configured real provider"}</dd>
-        </div>
-        <div>
-          <dt>Model</dt>
-          <dd>{status.model}</dd>
-        </div>
-        <div>
-          <dt>Endpoint</dt>
-          <dd>{status.endpoint ?? "Not applicable"}</dd>
-        </div>
-        <div>
-          <dt>Availability</dt>
-          <dd>{status.isAvailable ? "Available" : "Unavailable"}</dd>
-        </div>
-        <div>
-          <dt>Diagnostics</dt>
-          <dd>{diagnosticsLastRanAt ? `Last ran ${formatDateTime(diagnosticsLastRanAt)}` : "Not run this session"}</dd>
-        </div>
-      </dl>
-      {details.length > 0 && (
-        <details>
-          <summary>Readiness checks</summary>
-          <ul>
-            {details.map((check) => (
-              <li key={`${check.name}-${check.status}`}>
-                <strong>{check.name}</strong>: {check.status} - {check.message}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-    </section>
-  );
 }
 
 function claimAuditMessage(hasGeneratedDraft: boolean): string {
@@ -3830,10 +2410,6 @@ function pageTitle(view: View): string {
     default:
       return "Application writing workspace";
   }
-}
-
-function titleCase(value: string): string {
-  return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`;
 }
 
 function disabledTitle(isDisabled: boolean, reason: string | null | undefined): string | undefined {
